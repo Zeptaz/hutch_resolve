@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hutch_resolve}
+      POSTGRES_USER: ${POSTGRES_USER:-hutch_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
+      SANDBOX_DB_USER: ${SANDBOX_DB_USER:-hutch_sandbox}
+      SANDBOX_DB_PASSWORD: ${SANDBOX_DB_PASSWORD:-sandbox-local-change-me}
+      RESOLVE_DB_USER: ${RESOLVE_DB_USER:-hutch_resolve_app}
+      RESOLVE_DB_PASSWORD: ${RESOLVE_DB_PASSWORD:-resolve-local-change-me}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} && test -f \"$${PGDATA}/.hutch_initialized\""]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+    networks: [hutch-local]
+
+volumes:
+  postgres-data:
+
+networks:
+  hutch-local:
+    name: ${COMPOSE_PROJECT_NAME:-hutch-resolve}-local
