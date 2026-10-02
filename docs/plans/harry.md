@@ -79,7 +79,7 @@ Verification: 17 pytest tests pass. Fresh isolated PostgreSQL bootstrap/Alembic 
 - [x] Recover UNKNOWN at 2/10-second intervals up to three attempts, then require review. The CRM outage path keeps ticket ID null until a real synthetic ticket row exists.
 - [x] Add customer-session/agent-run scoped operation polling and receipt reads. Append terminal Trust Receipts with findings, calculations, evidence references, action outcome, handoff state and canonical SHA-256 integrity digest.
 
-Verification: 17 pytest tests pass; `compileall` and `git diff --check` pass. Fresh isolated PostgreSQL tests using separate runtime/provider credentials verified CRM unavailability -> UNKNOWN -> one ticket -> SUCCEEDED; VAS evidence -> proposal -> committed-response-lost -> same-key recovery -> exactly one subscription mutation/event; receipt retrieval and digest recomputation. These results are synthetic only. Restart, simultaneous workers, terminal CRM failure and broader fault profiles remain open.
+Verification: 17 pytest tests pass; `compileall` and `git diff --check` pass. Fresh isolated PostgreSQL tests using separate runtime/provider credentials verified CRM unavailability -> UNKNOWN -> one ticket -> SUCCEEDED; VAS evidence -> proposal -> committed-response-lost -> same-key recovery -> exactly one subscription mutation/event; receipt retrieval and digest recomputation. H-04d/H-05c add coverage for rejected writes, failed operation lookup, fresh-runner recovery and concurrent review-sync lease exclusion. These results are synthetic only; broader soak and schema-upgrade qualification remain open.
 
 ## H-04: actions, receipts and handoff
 
@@ -88,7 +88,8 @@ Verification: 17 pytest tests pass; `compileall` and `git diff --check` pass. Fr
 - [ ] Create confirmation and pending operation atomically. Unique proposal operation prevents two different confirmation keys from executing twice. Return 202 with persisted operation ID; no background-only acknowledgement.
 - [ ] Use a single lifespan-managed poller in the hackathon app, PostgreSQL leases and short transactions. Never hold locks across model or provider calls. Provider mutation commits in its own transaction; simulate lost response after commit.
 - [ ] Read back provider outcome. Recover UNKNOWN immediately, then at 2 and 10 seconds; unresolved becomes REVIEW_REQUIRED. Restart reclaims expired leases; never mint a new provider key for the same action.
-- [x] H-04c Disposable PostgreSQL verifies committed-response-loss plus expired-lease recovery in a fresh runner; one VAS mutation/event and one receipt result. Two concurrent runners claim one CRM action once and produce one ticket/provider operation/receipt. Broader multi-process and review-sync concurrency stress remains.
+- [x] H-04c Disposable PostgreSQL verifies committed-response-loss plus expired-lease recovery in a fresh runner; one VAS mutation/event and one receipt result. Two concurrent runners claim one CRM action once and produce one ticket/provider operation/receipt.
+- [x] H-04d Disposable PostgreSQL action-fault qualification: CRM unavailable -> UNKNOWN -> recovered single ticket; rejected VAS write -> FAILED with unchanged subscription; committed VAS write/lost response -> one-shot lookup failure -> same-key recovery, one mutation/event/receipt. The operations/lookup profile is consumed only when a prior provider operation exists.
 - [ ] Persist append-only receipt revisions and deterministic SHA-256 digest of canonical JSON excluding digest itself. Digest is integrity metadata, not a signature or proof of source truth.
 - [ ] Build context-rich review packet, durable pending delivery and mock provider ticket reference. Request-for-human creates a CREATE_REVIEW_TICKET proposal; exact details are confirmed through the same confirmation endpoint. Review actions remain eligible when evidence conflicts.
 
@@ -104,6 +105,7 @@ Acceptance: decline/expiry/stale target/stale investigation write nothing; concu
 - [x] H-05a Keep customer case status, investigation state, operation state, provider ticket delivery state and agent review disposition distinct. Closing a review does not alter evidence or account state.
 - [x] H-05a Persist local review history and audit atomically. Agent updates cannot trigger charging/product mutations.
 - [x] H-05b If a delivered mock ticket exists, queue its review-status/note synchronization using a stable provider key derived from review event ID; display pending/unknown until confirmed. Do not alter provider ticket status. Isolated PostgreSQL test simulates committed-response-loss, retries same provider key, verifies a single ticket mutation/note, and confirms idempotent review replay reads SYNCED.
+- [x] H-05c Disposable PostgreSQL verifies review-sync restart recovery after committed-response-loss and concurrent exclusion of a live lease; one provider operation and one ticket version/note update, with idempotent saved-result replay.
 
 Acceptance: customer/guest denied; wrong run denied; stale PATCH returns 409; simultaneous agents do not overwrite notes; review history survives restart; dashboard shows a pending handoff without needing CRM availability. No analytics/admin portal beyond this scope.
 
@@ -122,7 +124,7 @@ Verification for H-05: `python -m pytest -q` (32 passed; opt-in DB tests skipped
 - [x] E: captured/pending fulfilment is not credited money; never suggest another recharge as recovery.
 - [x] F: activation evidence missing; future deactivation and past dispute have separate outcomes.
 - [x] Usage fault profiles: incomplete page/stale source stay PARTIAL; wrong unit is retained with explicit unit evidence and CONFLICTING, never converted. One-shot consumption is verified.
-- [ ] Execute remaining action-profile configuration: CRM outage, rejected mutation, lost response and failed operation lookup. Fault selection is private to fixtures/operator tooling and is not exposed to customers.
+- [x] Execute and qualify action profiles: CRM outage, rejected mutation, lost response and failed operation lookup. Fault selection is private to fixtures/operator tooling and is not exposed to customers.
 
 ## H-07/H-08: Voice integration and qualification
 
@@ -158,6 +160,7 @@ Existing Voice read timeout is eight seconds; conversation processing must retur
 | 2026-10-02 | H-04b execution/recovery/receipt | Separate sandbox writer and Resolve roles; isolated CRM outage and VAS committed-response-lost integrations recover to one ticket / one VAS mutation; receipt hash verifies. | Worker restart/concurrency, unresolved CRM outage, Voice confirmation, and broader provider faults |
 | 2026-10-02 | H-04c worker recovery/concurrent claim | Fresh disposable PostgreSQL migrated through `0005`; VAS provider commit followed by lost response was recovered after a fresh runner reclaimed an expired lease, yielding one mutation/event/receipt. Two concurrent runners claimed a CRM ticket action once; exactly one ticket, provider operation and receipt. Both integration tests passed; test volume removed. | Broader multi-process/restart stress, review-sync contention, remaining provider faults |
 | 2026-10-02 | H-09a HTTP request observability | Four middleware tests and four Resolve app tests pass; logs correlate validated request IDs and use route templates, while excluding body/header/query data and exception messages. | Provider/action correlation IDs and protected diagnostics |
+| 2026-10-02 | H-04d action-fault + H-05c review-sync qualification | Isolated PostgreSQL through `0005`; 3 action fault tests, 2 review-sync restart/concurrency tests and 6 quota/provider tests passed across separate synthetic fixture runs. Full default suite: 37 passed, 11 opt-in skipped; compileall and diff checks pass. | Broader soak/schema-upgrade qualification; conversation controller/Tevin integration; Voice bridge and frontend integration |
 
 
 Work order and time boxes are in context.md. Harry owns the critical path; publish interfaces early and integrate one vertical text slice before secondary features.

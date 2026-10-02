@@ -51,6 +51,23 @@ def test_action_worker_restart_recovers_committed_lost_response_once():
             proposal_hash=proposal["proposal_hash"], decision="ACCEPT", client_turn_id=uuid4())
         operation_id = confirmation["operation_id"]
 
+        # Keep this test focused on a single crash/restart recovery. The
+        # dedicated action-fault integration test covers lookup unavailability.
+        with sandbox_engine.begin() as connection:
+            connection.execute(text("""
+                UPDATE sandbox.fault_profiles SET remaining_uses=0
+                WHERE sandbox_id=:run AND provider='operations' AND operation='lookup'
+            """), {"run": run_id})
+            connection.execute(text("""
+                UPDATE sandbox.fault_profiles SET remaining_uses=0
+                WHERE sandbox_id=:run AND provider='vas' AND operation='deactivate'
+            """), {"run": run_id})
+            connection.execute(text("""
+                UPDATE sandbox.fault_profiles SET remaining_uses=1
+                WHERE sandbox_id=:run AND provider='vas' AND operation='deactivate'
+                  AND fault_type='COMMITTED_RESPONSE_LOST'
+            """), {"run": run_id})
+
         # The seeded VAS profile commits the stable provider operation, then loses
         # its response. The worker records UNKNOWN; simulate process death before
         # that local state is safely persisted by leaving an expired RUNNING lease.

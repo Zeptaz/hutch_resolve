@@ -54,6 +54,12 @@ class MockSandboxWriter:
             existing = connection.execute(text("SELECT request_hash,status,result FROM sandbox.provider_operations WHERE sandbox_id=:sandbox AND provider=:provider AND idempotency_key=:key"),
                 {"sandbox": sandbox_id, "provider": provider, "key": str(operation_id)}).mappings().one_or_none()
         if existing:
+            # A provider-side operation lookup only matters during recovery,
+            # after the stable idempotency key has already committed. Simulate
+            # that read failing without allowing the retry to issue a new write.
+            lookup_fault = self._fault(sandbox_id, "operations", "lookup", account_id)
+            if lookup_fault in {"PROVIDER_UNAVAILABLE", "LOOKUP_UNAVAILABLE"}:
+                raise ProviderUnavailable(lookup_fault)
             if existing["request_hash"] != request_hash:
                 return "FAILED", {"code": "IDEMPOTENCY_CONFLICT", "message": "Provider key was reused with different input", "actual_target_status": None, "provider_ticket_id": None}
             result = existing["result"] or {}
