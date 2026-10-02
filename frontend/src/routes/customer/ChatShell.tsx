@@ -3,17 +3,19 @@ import { Bot, SendHorizontal } from 'lucide-react'
 import { newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
-import type { ConversationView, Language, SessionView } from '@/api/types'
+import type { ConversationView, Decision, Language, ProposalView, SessionView, TurnInput } from '@/api/types'
 import { BrandMark } from '@/components/BrandMark'
 import { ErrorState, LoadingState } from '@/components/states'
 import { StatusBadge } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { formatTime, humanize } from '@/lib/format'
+import { formatTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { CasePanel } from './CasePanel'
 import { ChatCard, CitationList } from './cards/ChatCards'
-import { ProposalSummary } from './cards/ConfirmationCard'
+import { ConfirmationCard, type ProposalState } from './cards/ConfirmationCard'
+import { OperationTracker } from './cards/OperationTracker'
 
 const LANGUAGES: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
@@ -23,8 +25,11 @@ const LANGUAGES: { value: Language; label: string }[] = [
 
 const MAX_TEXT = 4000
 
-/** A turn that failed to send; retrying reuses its client_turn_id so the server can de-duplicate. */
-type FailedTurn = { clientTurnId: string; text: string; error: unknown }
+/** A turn that failed to send. Retrying reuses its client_turn_id so the server can de-duplicate. */
+type FailedTurn = { clientTurnId: string; input: TurnInput; label: string; error: unknown }
+
+/** Errors where resending the same turn can't help; the user needs fresh state or a new request. */
+const NOT_RETRYABLE = new Set(['STALE_VERSION', 'PROPOSAL_EXPIRED', 'PROPOSAL_INVALIDATED', 'VALIDATION_ERROR', 'ACTION_NOT_ALLOWED'])
 
 export function ChatShell({ session }: { session: SessionView }) {
   const [language, setLanguage] = useState<Language>('en')
@@ -34,6 +39,8 @@ export function ChatShell({ session }: { session: SessionView }) {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState<FailedTurn | null>(null)
+  const [decisions, setDecisions] = useState<Record<string, ProposalState>>({})
+  const [caseRefresh, setCaseRefresh] = useState(0)
   const createKey = useRef(newId())
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -55,11 +62,19 @@ export function ChatShell({ session }: { session: SessionView }) {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
-  }, [conversation?.messages.length, sending])
+  }, [conversation?.messages.length, sending, failed])
 
-  const send = useCallback(
-    async (text: string, clientTurnId: string) => {
-      if (!conversation) return
+  const reload = useCallback(async (id: string) => {
+    try {
+      setConversation(await customerApi.getConversation(id))
+    } catch {
+      /* keep the current view; the next action will surface any error */
+    }
+  }, [])
+
+  const sendTurn = useCallback(
+    async (input: TurnInput, label: string, clientTurnId: string) => {
+      if (!conversation) return false
       setSending(true)
       setFailed(null)
       try {
@@ -67,36 +82,67 @@ export function ChatShell({ session }: { session: SessionView }) {
           client_turn_id: clientTurnId,
           expected_version: conversation.version,
           language,
-          input: { type: 'text', text },
+          input,
         })
         // Fetch the canonical conversation rather than patching state locally.
         setConversation(await customerApi.getConversation(conversation.id))
+        setCaseRefresh((n) => n + 1)
+        return true
       } catch (e) {
-        if (isApiError(e) && e.code === 'STALE_VERSION') {
-          // Someone else advanced the conversation: reload, and let the user decide whether to resend.
-          setConversation(await customerApi.getConversation(conversation.id).catch(() => conversation))
-        }
-        setFailed({ clientTurnId, text, error: e })
+        // Anything that says our view is out of date: reload, then let the user decide what to do.
+        if (isApiError(e) && (e.status === 409 || e.status === 422)) await reload(conversation.id)
+        setFailed({ clientTurnId, input, label, error: e })
+        return false
       } finally {
         setSending(false)
       }
     },
-    [conversation, language],
+    [conversation, language, reload],
   )
 
-  const submit = () => {
+  const submitText = () => {
     const text = draft.trim()
     if (!text || sending) return
     setDraft('')
-    void send(text, newId())
+    void sendTurn({ type: 'text', text }, text, newId())
+  }
+
+  const decide = async (proposal: ProposalView, decision: Decision) => {
+    if (sending) return
+    setDecisions((d) => ({ ...d, [proposal.id]: { kind: 'submitting', decision } }))
+    const okSent = await sendTurn(
+      { type: 'action_decision', proposal_id: proposal.id, proposal_hash: proposal.proposal_hash, decision },
+      decision === 'ACCEPT' ? 'Yes, go ahead.' : 'No, thanks.',
+      newId(),
+    )
+    setDecisions((d) => {
+      const next = { ...d }
+      if (okSent) next[proposal.id] = { kind: 'decided', decision }
+      else delete next[proposal.id] // back to whatever the server says is pending
+      return next
+    })
   }
 
   const retryFailed = () => {
     if (!failed) return
-    // Same turn → same ID; a stale-version failure is a new turn against the reloaded conversation.
-    const sameTurn = !(isApiError(failed.error) && failed.error.code === 'STALE_VERSION')
-    void send(failed.text, sameTurn ? failed.clientTurnId : newId())
+    void sendTurn(failed.input, failed.label, failed.clientTurnId)
   }
+
+  const proposalState = (p: ProposalView): ProposalState => {
+    const local = decisions[p.id]
+    if (local) return local
+    return conversation?.pending_proposal?.id === p.id ? { kind: 'open' } : { kind: 'closed' }
+  }
+
+  const renderProposal = (p: ProposalView) => (
+    <ConfirmationCard key={p.id} proposal={p} state={proposalState(p)} onDecide={(d) => void decide(p, d)} />
+  )
+
+  // A pending proposal that didn't arrive inside a message (e.g. a human-review request) is shown at the end.
+  const pending = conversation?.pending_proposal
+  const pendingShownInline =
+    !!pending &&
+    !!conversation?.messages.some((m) => m.result?.cards.some((c) => c.type === 'confirmation' && c.data.id === pending.id))
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -104,7 +150,7 @@ export function ChatShell({ session }: { session: SessionView }) {
         <BrandMark subtitle="Customer support" />
         <div className="flex items-center gap-2">
           <StatusBadge tone={session.role === 'GUEST' ? 'neutral' : 'info'}>
-            {session.role === 'GUEST' ? 'Guest' : 'Signed in'}
+            {session.role === 'GUEST' ? 'Guest' : 'Demo line'}
           </StatusBadge>
           <Select value={language} onValueChange={(v) => setLanguage(v as Language)}>
             <SelectTrigger size="sm" aria-label="Language" className="w-28">
@@ -126,41 +172,44 @@ export function ChatShell({ session }: { session: SessionView }) {
           <div ref={scrollRef} className="flex-1 overflow-y-auto" aria-live="polite">
             <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 py-6">
               {loadError ? (
-                <ErrorState title="Could not open the chat" error={loadError} onRetry={() => { setLoadError(null); setAttempt((n) => n + 1) }} />
+                <ErrorState
+                  title="Could not open the chat"
+                  error={loadError}
+                  onRetry={() => {
+                    setLoadError(null)
+                    setAttempt((n) => n + 1)
+                  }}
+                />
               ) : !conversation ? (
                 <LoadingState label="Opening chat…" rows={2} />
               ) : (
                 <>
                   <Welcome />
-                  {conversation.messages.map((m) => (
-                    <div key={m.id} className="flex flex-col gap-2">
-                      <Bubble speaker={m.speaker} time={m.created_at}>
-                        {m.body}
-                      </Bubble>
-                      {m.speaker === 'ASSISTANT' && m.result && (m.result.cards.length > 0 || m.result.citations.length > 0) && (
-                        <div className="flex max-w-xl flex-col gap-2 sm:ml-9">
-                          {m.result.cards.map((card, i) => (
-                            <ChatCard key={`${m.id}-${i}`} card={card} renderConfirmation={(c) => <ProposalSummary proposal={c.data} />} />
-                          ))}
-                          <CitationList citations={m.result.citations} />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {sending && <Typing />}
-                  {failed && (
-                    <div role="alert" className="ml-auto flex max-w-[85%] flex-col items-end gap-1.5">
-                      <div className="rounded-2xl rounded-br-md border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm">
-                        {failed.text}
+                  {conversation.messages.map((m) => {
+                    const result = m.speaker === 'ASSISTANT' ? m.result : null
+                    const hasExtras = !!result && (result.cards.length > 0 || result.citations.length > 0 || result.operation_ids.length > 0)
+                    return (
+                      <div key={m.id} className="flex flex-col gap-2">
+                        <Bubble speaker={m.speaker} time={m.created_at}>
+                          {m.body}
+                        </Bubble>
+                        {result && hasExtras && (
+                          <div className="flex max-w-xl flex-col gap-2 sm:ml-9">
+                            {result.cards.map((card, i) => (
+                              <ChatCard key={`${m.id}-${i}`} card={card} renderConfirmation={(c) => renderProposal(c.data)} />
+                            ))}
+                            {result.operation_ids.map((id) => (
+                              <OperationTracker key={id} operationId={id} onSettled={() => setCaseRefresh((n) => n + 1)} />
+                            ))}
+                            <CitationList citations={result.citations} />
+                          </div>
+                        )}
                       </div>
-                      <p className="text-xs text-destructive">
-                        Not sent — {describeError(failed.error)}{' '}
-                        <button className="font-semibold underline underline-offset-2" onClick={retryFailed}>
-                          Retry
-                        </button>
-                      </p>
-                    </div>
-                  )}
+                    )
+                  })}
+                  {pending && !pendingShownInline && <div className="max-w-xl sm:ml-9">{renderProposal(pending)}</div>}
+                  {sending && <Typing />}
+                  {failed && <FailedTurnNotice failed={failed} onRetry={retryFailed} />}
                 </>
               )}
             </div>
@@ -170,7 +219,7 @@ export function ChatShell({ session }: { session: SessionView }) {
             className="border-t bg-background px-4 py-3"
             onSubmit={(e) => {
               e.preventDefault()
-              submit()
+              submitText()
             }}
           >
             <div className="mx-auto flex w-full max-w-2xl items-end gap-2">
@@ -180,7 +229,7 @@ export function ChatShell({ session }: { session: SessionView }) {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
-                    submit()
+                    submitText()
                   }
                 }}
                 placeholder="Describe your issue — e.g. “I recharged LKR 1000 but my balance is LKR 420”"
@@ -196,8 +245,34 @@ export function ChatShell({ session }: { session: SessionView }) {
           </form>
         </main>
 
-        <CasePanel conversation={conversation} />
+        <CasePanel conversation={conversation} refreshKey={caseRefresh} />
       </div>
+    </div>
+  )
+}
+
+function FailedTurnNotice({ failed, onRetry }: { failed: FailedTurn; onRetry: () => void }) {
+  const code = isApiError(failed.error) ? failed.error.code : null
+  const canRetry = !code || !NOT_RETRYABLE.has(code)
+  const reason =
+    code === 'PROPOSAL_EXPIRED'
+      ? 'That offer expired before your answer arrived. Nothing was changed — ask again for a new one.'
+      : code === 'PROPOSAL_INVALIDATED'
+        ? 'That offer is no longer valid because something changed. Nothing was changed — check the latest details above.'
+        : code === 'STALE_VERSION'
+          ? 'The conversation moved on while this was sending. We refreshed it — send again if you still need to.'
+          : describeError(failed.error)
+  return (
+    <div role="alert" className="ml-auto flex max-w-[85%] flex-col items-end gap-1.5">
+      <div className="rounded-2xl rounded-br-md border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm">{failed.label}</div>
+      <p className="text-right text-xs text-destructive">
+        Not sent — {reason}{' '}
+        {canRetry && (
+          <button className="font-semibold underline underline-offset-2" onClick={onRetry}>
+            Retry
+          </button>
+        )}
+      </p>
     </div>
   )
 }
@@ -244,34 +319,5 @@ function Typing() {
         <span key={d} className="size-1.5 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: `${d}ms` }} />
       ))}
     </div>
-  )
-}
-
-/** Side panel for case context. Evidence, calculation and confirmation cards arrive in J-02. */
-function CasePanel({ conversation }: { conversation: ConversationView | null }) {
-  return (
-    <aside aria-label="Your cases" className="hidden w-80 shrink-0 flex-col gap-3 overflow-y-auto border-l bg-sidebar p-4 lg:flex">
-      <h2 className="text-sm font-semibold">Your cases</h2>
-      {!conversation || conversation.cases.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          When we look into an issue, the case and the evidence we checked will appear here.
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {conversation.cases.map((c) => (
-            <li
-              key={c.id}
-              className={cn(
-                'rounded-lg border bg-card p-3 text-sm',
-                c.id === conversation.active_case_id && 'border-primary/50 ring-1 ring-primary/30',
-              )}
-            >
-              <p className="font-medium">{humanize(c.complaint_type)}</p>
-              <p className="text-xs text-muted-foreground">{humanize(c.status)}</p>
-            </li>
-          ))}
-        </ul>
-      )}
-    </aside>
   )
 }
