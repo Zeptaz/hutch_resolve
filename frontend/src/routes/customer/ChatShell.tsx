@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { useI18n, type Translate } from '@/i18n/context'
 import { formatTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { CasePanel, CasePanelBody, type CasePanelProps } from './CasePanel'
@@ -19,6 +20,7 @@ import { ConfirmationCard, type ProposalState } from './cards/ConfirmationCard'
 import { OperationTracker } from './cards/OperationTracker'
 import { QuestionPrompt } from './QuestionPrompt'
 
+// Each language is named in its own script so it is recognisable whatever the current UI language.
 const LANGUAGES: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
   { value: 'si', label: 'සිංහල' },
@@ -34,7 +36,7 @@ type FailedTurn = { clientTurnId: string; input: TurnInput; label: string; error
 const NOT_RETRYABLE = new Set(['STALE_VERSION', 'PROPOSAL_EXPIRED', 'PROPOSAL_INVALIDATED', 'VALIDATION_ERROR', 'ACTION_NOT_ALLOWED'])
 
 export function ChatShell({ session }: { session: SessionView }) {
-  const [language, setLanguage] = useState<Language>('en')
+  const { language, setLanguage, t } = useI18n()
   const [conversation, setConversation] = useState<ConversationView | null>(null)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [attempt, setAttempt] = useState(0)
@@ -47,6 +49,8 @@ export function ChatShell({ session }: { session: SessionView }) {
   // The category the customer last picked, so a follow-up details form starts on it.
   const [lastCategory, setLastCategory] = useState<ComplaintType | null>(null)
   const createKey = useRef(newId())
+  // Language at the moment the conversation is opened; later changes go with each turn instead.
+  const openingLanguage = useRef(language)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Reopen this session's conversation after a page refresh, otherwise create one.
@@ -62,7 +66,7 @@ export function ChatShell({ session }: { session: SessionView }) {
           if (!(isApiError(e) && e.status === 404)) throw e
         }
       }
-      const created = await customerApi.createConversation('en', createKey.current)
+      const created = await customerApi.createConversation(openingLanguage.current, createKey.current)
       saveConversation(session.id, created.id)
       return created
     }
@@ -70,7 +74,6 @@ export function ChatShell({ session }: { session: SessionView }) {
       .then((c) => {
         if (cancelled) return
         setConversation(c)
-        setLanguage(c.language)
       })
       .catch((e) => !cancelled && setLoadError(e))
     return () => {
@@ -141,7 +144,7 @@ export function ChatShell({ session }: { session: SessionView }) {
     setDecisions((d) => ({ ...d, [proposal.id]: { kind: 'submitting', decision } }))
     const okSent = await sendTurn(
       { type: 'action_decision', proposal_id: proposal.id, proposal_hash: proposal.proposal_hash, decision },
-      decision === 'ACCEPT' ? 'Yes, go ahead.' : 'No, thanks.',
+      decision === 'ACCEPT' ? t('confirm.yes') : t('confirm.no'),
       newId(),
     )
     setDecisions((d) => {
@@ -184,7 +187,7 @@ export function ChatShell({ session }: { session: SessionView }) {
     disabled: sending,
     onSelectCase: (id, label) => {
       setCasesOpen(false)
-      answer({ type: 'case_selection', case_id: id }, `Switch to: ${label}`)
+      answer({ type: 'case_selection', case_id: id }, t('chat.switchTo', { label }))
     },
     onReviewRequested: () => {
       setCasesOpen(false)
@@ -204,15 +207,15 @@ export function ChatShell({ session }: { session: SessionView }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex items-center justify-between gap-3 border-b px-4 py-3">
-        <BrandMark subtitle="Customer support" />
+        <BrandMark subtitle={t('brand.subtitle')} />
         <div className="flex items-center gap-2">
           <StatusBadge tone={session.role === 'GUEST' ? 'neutral' : 'info'} className="hidden sm:inline-flex">
-            {session.role === 'GUEST' ? 'Guest' : 'Demo line'}
+            {session.role === 'GUEST' ? t('chat.guest') : t('chat.demoLine')}
           </StatusBadge>
           <Dialog open={casesOpen} onOpenChange={setCasesOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" className="lg:hidden">
-                <FolderOpen aria-hidden /> Cases
+                <FolderOpen aria-hidden /> {t('chat.cases')}
                 {!!conversation?.cases.length && (
                   <span className="rounded-full bg-primary px-1.5 text-[11px] leading-4 text-primary-foreground">
                     {conversation.cases.length}
@@ -221,15 +224,15 @@ export function ChatShell({ session }: { session: SessionView }) {
               </Button>
             </DialogTrigger>
             <DialogContent className="max-h-[85dvh] overflow-y-auto">
-              <DialogTitle className="sr-only">Your cases</DialogTitle>
-              <DialogDescription className="sr-only">Cases, receipts and human review for this chat.</DialogDescription>
+              <DialogTitle className="sr-only">{t('panel.yourCases')}</DialogTitle>
+              <DialogDescription className="sr-only">{t('chat.casesDescription')}</DialogDescription>
               <div className="flex flex-col gap-4">
                 <CasePanelBody {...panelProps} />
               </div>
             </DialogContent>
           </Dialog>
           <Select value={language} onValueChange={(v) => setLanguage(v as Language)}>
-            <SelectTrigger size="sm" aria-label="Language" className="w-24 sm:w-28">
+            <SelectTrigger size="sm" aria-label={t('lang.label')} className="w-fit min-w-20">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -249,7 +252,7 @@ export function ChatShell({ session }: { session: SessionView }) {
             <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 py-6">
               {loadError ? (
                 <ErrorState
-                  title="Could not open the chat"
+                  title={t('chat.openFailed')}
                   error={loadError}
                   onRetry={() => {
                     setLoadError(null)
@@ -257,7 +260,7 @@ export function ChatShell({ session }: { session: SessionView }) {
                   }}
                 />
               ) : !conversation ? (
-                <LoadingState label="Opening chat…" rows={2} />
+                <LoadingState label={t('chat.opening')} rows={2} />
               ) : (
                 <>
                   <Welcome />
@@ -297,14 +300,13 @@ export function ChatShell({ session }: { session: SessionView }) {
                       <QuestionPrompt
                         question={conversation.pending_question}
                         defaultComplaint={lastCategory}
-                        activeCaseId={conversation.active_case_id}
                         disabled={sending}
                         onAnswer={answer}
                       />
                     </div>
                   )}
                   {sending && <Typing />}
-                  {failed && <FailedTurnNotice failed={failed} onRetry={retryFailed} />}
+                  {failed && <FailedTurnNotice failed={failed} onRetry={retryFailed} t={t} />}
                 </>
               )}
             </div>
@@ -327,17 +329,13 @@ export function ChatShell({ session }: { session: SessionView }) {
                     submitText()
                   }
                 }}
-                placeholder={
-                  textAllowed
-                    ? 'Describe your issue — e.g. “I recharged LKR 1000 but my balance is LKR 420”'
-                    : 'Please use the options above to answer'
-                }
-                aria-label="Message"
+                placeholder={textAllowed ? t('chat.placeholder') : t('chat.placeholderOptions')}
+                aria-label={t('chat.message')}
                 rows={1}
                 className="max-h-40 min-h-11 resize-none rounded-xl"
                 disabled={!textAllowed}
               />
-              <Button type="submit" size="icon-lg" aria-label="Send" disabled={!conversation || sending || !draft.trim()}>
+              <Button type="submit" size="icon-lg" aria-label={t('chat.send')} disabled={!conversation || sending || !draft.trim()}>
                 <SendHorizontal aria-hidden />
               </Button>
             </div>
@@ -373,25 +371,25 @@ function prefersSmoothScroll() {
   return document.visibilityState === 'visible' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-function FailedTurnNotice({ failed, onRetry }: { failed: FailedTurn; onRetry: () => void }) {
+function FailedTurnNotice({ failed, onRetry, t }: { failed: FailedTurn; onRetry: () => void; t: Translate }) {
   const code = isApiError(failed.error) ? failed.error.code : null
   const canRetry = !code || !NOT_RETRYABLE.has(code)
   const reason =
     code === 'PROPOSAL_EXPIRED'
-      ? 'That offer expired before your answer arrived. Nothing was changed — ask again for a new one.'
+      ? t('chat.err.proposalExpired')
       : code === 'PROPOSAL_INVALIDATED'
-        ? 'That offer is no longer valid because something changed. Nothing was changed — check the latest details above.'
+        ? t('chat.err.proposalInvalidated')
         : code === 'STALE_VERSION'
-          ? 'The conversation moved on while this was sending. We refreshed it — send again if you still need to.'
-          : describeError(failed.error)
+          ? t('chat.err.stale')
+          : describeError(failed.error, t)
   return (
     <div role="alert" className="ml-auto flex max-w-[85%] flex-col items-end gap-1.5">
       <div className="rounded-2xl rounded-br-md border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm">{failed.label}</div>
       <p className="text-right text-xs text-destructive">
-        Not sent — {reason}{' '}
+        {t('chat.notSent', { reason })}{' '}
         {canRetry && (
           <button className="font-semibold underline underline-offset-2" onClick={onRetry}>
-            Retry
+            {t('chat.retry')}
           </button>
         )}
       </p>
@@ -400,15 +398,12 @@ function FailedTurnNotice({ failed, onRetry }: { failed: FailedTurn; onRetry: ()
 }
 
 function Welcome() {
-  return (
-    <Bubble speaker="ASSISTANT">
-      Hi! I can look into balance, data, connection and value-added service issues on your prepaid line. What&apos;s
-      going on?
-    </Bubble>
-  )
+  const { t } = useI18n()
+  return <Bubble speaker="ASSISTANT">{t('chat.welcome')}</Bubble>
 }
 
 function Bubble({ speaker, time, children }: { speaker: 'USER' | 'ASSISTANT'; time?: string; children: React.ReactNode }) {
+  const { t } = useI18n()
   const mine = speaker === 'USER'
   return (
     <div className={cn('flex max-w-[85%] gap-2', mine ? 'ml-auto flex-row-reverse' : 'mr-auto')}>
@@ -418,7 +413,7 @@ function Bubble({ speaker, time, children }: { speaker: 'USER' | 'ASSISTANT'; ti
         </span>
       )}
       <div className={cn('flex flex-col gap-1', mine && 'items-end')}>
-        <span className="sr-only">{mine ? 'You said' : 'Assistant said'}</span>
+        <span className="sr-only">{mine ? t('chat.youSaid') : t('chat.assistantSaid')}</span>
         <div
           className={cn(
             'rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap',
@@ -434,9 +429,10 @@ function Bubble({ speaker, time, children }: { speaker: 'USER' | 'ASSISTANT'; ti
 }
 
 function Typing() {
+  const { t } = useI18n()
   return (
     <div role="status" className="mr-auto flex items-center gap-1 rounded-2xl bg-muted px-4 py-3">
-      <span className="sr-only">Assistant is replying</span>
+      <span className="sr-only">{t('chat.typing')}</span>
       {[0, 150, 300].map((d) => (
         <span key={d} className="size-1.5 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: `${d}ms` }} />
       ))}

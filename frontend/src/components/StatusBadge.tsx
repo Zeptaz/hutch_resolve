@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { useI18n } from '@/i18n/context'
 import { humanize } from '@/lib/format'
 import type { DeliveryState, EvidenceState, OperationStatus, ReviewStatus } from '@/api/types'
 
@@ -51,8 +52,9 @@ function Missing({ label }: { label: string }) {
 }
 
 export function EvidenceBadge({ state }: { state: EvidenceState | null | undefined }) {
-  if (!state) return <Missing label="Not investigated" />
-  return <StatusBadge tone={evidenceTone[state]}>Evidence: {humanize(state)}</StatusBadge>
+  const { t } = useI18n()
+  if (!state) return <Missing label={t('evidence.none')} />
+  return <StatusBadge tone={evidenceTone[state]}>{t('evidence.label', { state: t(`evidence.${state}`) })}</StatusBadge>
 }
 
 export function ReviewBadge({ status }: { status: ReviewStatus }) {
@@ -60,10 +62,12 @@ export function ReviewBadge({ status }: { status: ReviewStatus }) {
 }
 
 export function DeliveryBadge({ state }: { state: DeliveryState | null | undefined }) {
-  if (!state) return <Missing label="No ticket" />
-  return <StatusBadge tone={deliveryTone[state]}>Ticket: {humanize(state)}</StatusBadge>
+  const { t } = useI18n()
+  if (!state) return <Missing label={t('delivery.none')} />
+  return <StatusBadge tone={deliveryTone[state]}>{t('delivery.label', { state: t(`delivery.${state}`) })}</StatusBadge>
 }
 
 export function OperationBadge({ status }: { status: OperationStatus }) {
-  return <StatusBadge tone={operationTone[status]}>{humanize(status)}</StatusBadge>
+  const { t } = useI18n()
+  return <StatusBadge tone={operationTone[status]}>{t(`opStatus.${status}`)}</StatusBadge>
 }
