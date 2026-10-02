@@ -93,8 +93,10 @@ export async function request<T>(realm: Realm, method: Method, path: string, opt
 
   const envelope = (body as { error?: ConstructorParameters<typeof ApiError>[1] } | null)?.error
   const err = new ApiError(status, envelope ?? { code: 'UNEXPECTED_RESPONSE', message: `HTTP ${status}` })
-  // A failed restore (GET /session) is expected on first visit; don't broadcast it as an expiry.
-  if (status === 401 && !path.endsWith('/session')) unauthorizedListeners[realm].forEach((fn) => fn())
+  // Initial restore and refused sign-in do not mean an active session expired.
+  if (status === 401 && !path.endsWith('/session') && !path.endsWith('/sessions')) {
+    unauthorizedListeners[realm].forEach((fn) => fn())
+  }
   throw err
 }
 

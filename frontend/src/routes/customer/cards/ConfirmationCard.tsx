@@ -5,7 +5,7 @@ import { StatusBadge, type Tone } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
 import { hasMessage, useI18n, type Translate } from '@/i18n/context'
 import { formatTime, humanize } from '@/lib/format'
-import { CardFrame } from './ChatCards'
+import { CardFrame } from '@/components/CardFrame'
 
 
 export type ProposalState =

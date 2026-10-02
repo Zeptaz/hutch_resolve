@@ -8,7 +8,7 @@ import { operationTone } from '@/components/tones'
 import { Button } from '@/components/ui/button'
 import { hasMessage, useI18n } from '@/i18n/context'
 import { formatTime, humanize } from '@/lib/format'
-import { CardFrame } from './ChatCards'
+import { CardFrame } from '@/components/CardFrame'
 
 const POLL_MS = 1000
 // UNKNOWN is deliberately not terminal: it stays visible and keeps polling until recovery resolves it.

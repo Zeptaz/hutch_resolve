@@ -4,7 +4,7 @@
 import type { RawResponse, Realm, RequestOptions } from './client'
 import { handleCustomer } from './mock-customer'
 import { emptyState, example, fail, isExpired, ok, type MockState } from './mock-util'
-import type { AgentCaseDetail, AgentSessionView, CaseQueue, CaseQueueRow, ReviewRequest, ReviewResult, SessionView } from './types'
+import type { AgentCaseDetail, AgentSessionView, AuditEvent, CaseQueue, CaseQueueRow, ReviewRequest, ReviewResult, SessionView } from './types'
 
 const SESSION_TTL_MS = 30 * 60 * 1000
 const STORAGE_KEY = 'hutch-resolve.mock-state.v2'
@@ -189,13 +189,21 @@ function mockReview(caseId: string, opts: RequestOptions): RawResponse {
   detail.case.review_status = status
   detail.case.updated_at = now
   detail.review_notes.push(entry)
+  const event: AuditEvent = {
+    id: crypto.randomUUID(),
+    event_type: 'REVIEW_UPDATED',
+    actor_id: state.agent?.principal_id ?? 'mock-agent',
+    created_at: now,
+    details: { from: oldStatus, to: status, version: detail.case.version, disposition: body.disposition ?? null },
+  }
+  detail.audit_events.push(event)
   const result: ReviewResult = {
     case_id: caseId,
     version: detail.case.version,
     review_status: status,
     disposition: body.disposition ?? null,
     note: note || reopenReason ? entry : null,
-    review_sync_state: detail.handoff?.provider_ticket_id ? 'PENDING' : 'NOT_APPLICABLE',
+    review_sync_state: detail.handoff?.delivery_state === 'DELIVERED' && detail.handoff.provider_ticket_id ? 'PENDING' : 'NOT_APPLICABLE',
     updated_at: now,
   }
   state.reviewReplays[key] = { fingerprint, result }
@@ -217,6 +225,17 @@ export async function mockTransport(
 
 /** Dev-only switches for exercising loading / error / expiry states. */
 export const mockControls = {
+  /** Simulates a concurrent agent review so the stale-version draft path can be exercised. */
+  reviewElsewhere(caseId: string, note = 'Another agent added a note.') {
+    const detail = detailFor(caseId)
+    if (!detail) throw new Error('Mock case does not exist')
+    const result = mockReview(caseId, {
+      body: { expected_version: detail.case.version, note },
+      idempotencyKey: crypto.randomUUID(),
+    })
+    if (result.status !== 200) throw new Error(`Mock concurrent review failed: ${result.status}`)
+    save()
+  },
   expireSession(realm: Realm) {
     const s = state[realm]
     if (s) s.expires_at = new Date(Date.now() - 1000).toISOString()

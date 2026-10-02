@@ -42,15 +42,21 @@ export type CaseView = Schemas['CaseView']
 export type CaseQueue = Schemas['CaseQueue']
 export type CaseQueueRow = Schemas['CaseQueueRow']
 export type AgentCaseDetail = Schemas['AgentCaseDetail']
+export type ReviewNote = Schemas['ReviewNote']
+export type AuditEvent = Schemas['AuditEvent']
+export type ConfirmationView = Schemas['ConfirmationView']
+export type SourceStatus = Schemas['SourceStatus']
+export type Disposition = 'REVIEW_COMPLETE' | 'NEEDS_OPERATOR_FOLLOWUP' | 'CUSTOMER_WITHDREW'
 // The OpenAPI ReviewRequest oneOf constraints generate `unknown` arms; keep its wire fields explicit.
 export type ReviewRequest = {
   expected_version: number
   review_status?: ReviewStatus
-  disposition?: 'REVIEW_COMPLETE' | 'NEEDS_OPERATOR_FOLLOWUP' | 'CUSTOMER_WITHDREW'
+  disposition?: Disposition
   note?: string
   reopen_reason?: string
 }
 export type ReviewResult = Schemas['ReviewResult']
+export type ReviewSyncState = ReviewResult['review_sync_state']
 export type VoiceSessionGrant = Schemas['VoiceSessionGrant']
 
 export type QueueFilters = {

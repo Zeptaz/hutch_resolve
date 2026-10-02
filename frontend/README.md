@@ -32,6 +32,10 @@ Copy `.env.example` to `.env.development.local` to run against Resolve. Set `VIT
 | `npm run typecheck` | TypeScript project check |
 | `npm run lint` | oxlint |
 | `npm run build` | Typecheck and production build |
+| `npm run test:e2e` | Mock dashboard and customer browser checks; starts an isolated Vite server |
+| `npm run test:e2e:live` | Opt-in review workflow checks against a disposable Resolve stack; see [e2e/README.md](e2e/README.md) |
+
+The agent dashboard shows server-filtered cases, investigation evidence, action/ticket/receipt history and internal review notes. Review updates send the current case version and a stable retry key. A stale update keeps the unsent draft until the agent reviews the refreshed case. The customer chat/call experience continues on `/` using the same session and conversation.
 
 ## Layout
 
