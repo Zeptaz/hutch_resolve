@@ -3,7 +3,7 @@
   "info": {
     "title": "HUTCH Resolve planned API",
     "version": "1.0.0",
-    "description": "Design contract only. No Resolve endpoints implemented at baseline 8df74d7. Existing Voice strict models imported without runtime changes. See docs/contracts.md for scope, confirmation and error rules."
+    "description": "Shared Resolve wire contract v1.0.0. Implemented routes: health/readiness, session lifecycle, customer-scoped account read, scoped case read and case investigation. Conversation/case creation remains in the in-process facade. Proposal/confirmation, operation, receipt, review, and conversation routes remain planned; see docs/contracts.md and context.md for status."
   },
   "servers": [
     {
@@ -4663,7 +4663,8 @@
             "type": "string",
             "enum": [
               "TEXT",
-              "VOICE"
+              "VOICE",
+              "AGENT"
             ]
           },
           "client_turn_id": {
@@ -4684,6 +4685,23 @@
                 "type": "null"
               }
             ]
+          },
+          "operation_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "PENDING"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "simulation": {
+            "type": "boolean",
+            "const": true
           }
         },
         "required": [
@@ -4694,7 +4712,9 @@
           "channel",
           "client_turn_id",
           "created_at",
-          "operation_id"
+          "operation_id",
+          "operation_status",
+          "simulation"
         ]
       },
       "OperationOutcome": {

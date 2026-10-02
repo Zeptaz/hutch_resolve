@@ -10,8 +10,9 @@ Keep one application process. Suggested module ownership: `backend/resolve/{api,
 
 ## H-01: database and fixture baseline
 
-- [ ] Establish Alembic migration lifecycle without replaying CREATE TABLE over existing data. Verify schemas 001-003 before stamping an existing installation; fresh installation applies the same baseline. Upgrade fresh and existing databases to the same head.
-- [ ] Introduce fixture version 2. Correct B's out-of-bundle posting to -8000 and closing to 2000; remove duplicate E opening; add a separate consistent 10 GB offer for C (preserving 9.7 GB remaining); link B's bucket to a valid 20 GB subscription; remove B's unsupported categories. Complete references used in explanations without inventing activation consent for F.
+- [x] Establish Alembic lifecycle without replaying CREATE TABLE over data. Validate schemas 001-003 before baseline adoption; on fresh Compose PostgreSQL, upgrade through `0003_case_investigations`. Repeated upgrade is idempotent.
+- [x] Introduce fixture version 2. Correct B's out-of-bundle posting to -8000 and closing to 2000; remove duplicate E opening; add a separate consistent 10 GB offer for C (preserving 9.7 GB remaining); link B's bucket to a valid 20 GB subscription; remove B's unsupported categories. Complete references used in explanations without inventing activation consent for F.
+- [x] Add forward persistence for retired runs, GUEST principals/CSRF metadata, language and dialogue state, leased turn claims, one confirmation per operation, idempotency results, review history and escalation delivery. Verified same-case/run foreign keys and append-only application grants on an isolated PostgreSQL 18 database.
 - [ ] Keep historical fixture runs immutable; seed corrected data into a new run. Add explicit linked reversal fixtures and metadata for fault tests. Never choose diagnoses by fixture name.
 - [ ] Run seed/knowledge exactly once during bootstrap and mark readiness only after all required initialization. Add LF checkout rules for shell bootstrap.
 - [ ] Reset creates a new explicit active run, expires prior active sessions and Voice bindings, and preserves historical evidence. Repeated requested run UUID fails clearly without partial data; no implicit newest-run lookup in authorization.
@@ -22,7 +23,8 @@ Forward schema additions (Harry owns all migrations):
 | --- | --- |
 | Sessions/principals | Stable server-configured demo principal key; GUEST role; CSRF hash; account/run for private sessions; revoked/expiry checks |
 | Conversation/message | Persist language and structured dialogue state; immutable input hash/result for client-turn deduplication; one accepted turn at a time per conversation |
-| Cases | `updated_at`; complaint/status validation; distinct review status NEW/IN_REVIEW/CLOSED; composite scope/ownership constraints |
+| Cases | `updated_at`; complaint/status validation; distinct review status NEW/IN_REVIEW/CLOSED; same-run scope; reported facts; originating client-turn hash and dedupe |
+| Investigations | Append-only revisions with window, stable command key/hash, evidence snapshots, calculations, source completeness, missing/conflicts, action eligibility and review reasons |
 | Confirmations | Append-only table for proposal/hash, actor/session, source channel, client turn, ACCEPT/DECLINE, recorded time; declines exist without operations |
 | Operations | One operation per accepted proposal; confirmation FK; request fingerprint; lease/retry/recovery timestamps; provider operation reference |
 | Review history | Append-only notes/dispositions with actor identity, case version, time and note visibility fixed to INTERNAL |
@@ -37,7 +39,10 @@ Acceptance: fresh initialization and existing-volume upgrade pass; A=42000, D ac
 ## H-02: application, authentication and facade
 
 - [ ] Create FastAPI composition, validated configuration, SQLAlchemy repositories, health/readiness and consistent error handling. Pin dependencies in an isolated environment.
-- [ ] Implement opaque hashed sessions, separate customer/agent cookies, Origin/CSRF checks, 30-minute expiry, logout/revocation, and synthetic login mapping. Caller-provided roles/account IDs never establish authorization.
+- [x] Implement guest/demo customer/agent session endpoints with opaque hashed cookie tokens, configured credential hashes and fixed run/account scope, exact Origin checks, deterministic hashed CSRF tokens, atomic guest upgrade, 30-minute expiry, revocation and logout-driven Voice binding invalidation. Unit and isolated PostgreSQL integration pass.
+- [x] Export the shared `AuthContext` and an in-process `ResolveFacade`; create scoped conversations/cases, get cases under session/run scope, and persist idempotent investigation results for Tevin without calling Resolve over HTTP.
+- [ ] Add authenticated request context for domain routes, guest conversation transfer, route-level roles, throttling, and full nested-entity authorization before expanding the API surface.
+- [x] Implement opaque hashed sessions, separate customer/agent cookies, Origin/CSRF checks, 30-minute expiry, logout/revocation, and synthetic login mapping. Caller-provided roles/account IDs never establish authorization.
 - [ ] Add guest FAQ sessions; upgrading a guest rotates the token, scopes its existing conversation to the authenticated run/account, and preserves only public history. Changing an already private identity creates a new session/conversation.
 - [ ] Authorize every entity read/write, including nested IDs. Same-run membership alone is insufficient for customer access: conversation must belong to the current session. Agent access is run-scoped. Distinguish forbidden role (403) from inaccessible entity (404).
 - [ ] Publish shared Pydantic DTOs, scoped conversation/knowledge repositories and ResolveFacade per contracts; validate parity with documented OpenAPI. Tevin can use interface fakes before repositories are complete.
@@ -46,6 +51,9 @@ Facade methods: `get_account`, `create_case`, `get_case`, `investigate`, `propos
 
 ## H-03: providers and primary investigation
 
+- [x] Implement the first in-process synthetic account/balance/subscription read and customer-only `GET /account`; implement the balance statement adapter and deterministic A/D calculator. Verified on fresh PostgreSQL: A=42,000 minor LKR reconciles; D is CONFLICTING at -7,000; account endpoint returns the customer’s fixed account.
+- [x] Persist case origin-turn deduplication and immutable investigation revisions with evidence/calculations/source status, stable command-key replay, audit events and REVIEW_REQUIRED conflicts. Isolated PostgreSQL verified A, D, stale-version, idempotent replay and cross-account 404.
+- [x] Publish the contract-backed customer/agent case-detail and customer investigation routes. Require Idempotency-Key and validate persisted DTOs; verification includes replay, changed-body conflict, customer cross-account 404 and same-run agent read.
 - [ ] Implement separate Customer/CRM, Charging, Recharge, Product/VAS, Usage/Quota and ServiceAssurance provider ports in-process. Investigation code depends on ports, not sandbox SQL.
 - [ ] Implement bounded reads with source metadata, complete pagination, fixed simulation clock, event/posting times and explicit units. Source read timeout is two seconds with at most one safe retry; missing/stale/partial results remain visible.
 - [ ] Persist cases and immutable investigation revisions. Support a maximum 30-day window; require clarification for critical missing dates/amounts. Evidence states are SUFFICIENT/PARTIAL/CONFLICTING, not percentages.
@@ -53,6 +61,25 @@ Facade methods: `get_account`, `create_case`, `get_case`, `investigate`, `propos
 - [ ] Snapshot evidence IDs, source ID/version, observation/fetch time, values/units and source payload. Produce deterministic finding codes/calculations, eligible actions and review reasons. Reinvestigation invalidates affected proposals.
 
 Acceptance: modifying seed values changes calculated outcomes; missing opening or incomplete pages cannot produce a conclusive ledger tie-out. A reconciles; D conflicts. Balance explanation alone never establishes consent/refund eligibility.
+
+### H-04a completed: proposal and confirmation boundary
+
+- [x] Add revision `0004_action_proposals`; bind proposals to sandbox/session/case/evidence revision/case version and stable request hash/key. Confirmation turns and operation confirmation IDs are unique. Runtime confirmation records remain append-only.
+- [x] Add customer-only proposal and confirmation routes with exact configured Origin and CSRF checks. Proposals expire after five minutes, require latest eligible evidence and re-read target version/status.
+- [x] Persist proposal/decline/accept audit. Acceptance atomically inserts the append-only confirmation and a unique durable `PENDING` operation. Same-turn replay returns the saved operation; a second acceptance is rejected.
+- [x] Offer CREATE_REVIEW_TICKET with every persisted investigation; offer DEACTIVATE_VAS only for a sufficient VAS dispute with an active recurring renewal-enabled target. Other action eligibility remains evidence-dependent.
+
+Verification: 17 pytest tests pass. Fresh isolated PostgreSQL bootstrap/Alembic through `0004_action_proposals` and a runtime-role facade integration verified scoped investigation, proposal replay, accepted PENDING operation, confirmation replay, and duplicate-accept rejection. `compileall` and `git diff --check` pass. H-04a alone stopped at PENDING; see H-04b for verified mock execution and receipt outcomes.
+
+### H-04b completed: mock execution, recovery and Trust Receipts
+
+- [x] Add a separate `SANDBOX_DATABASE_URL` for the mock-provider write role. The application role remains read-only on sandbox data. A missing writer URL leaves confirmed operations safely pending and logs the degraded capability.
+- [x] Add one lifespan-managed in-process worker with short PostgreSQL leases, `SKIP LOCKED` claims, restartable expired RUNNING work, and stable operation-derived provider idempotency keys. Provider commits and Resolve result updates use separate transactions.
+- [x] Implement mock VAS renewal cancellation, settings-instruction preparation, and synthetic review ticket creation. Persist provider operation outcome with the mutation; consume seeded provider-unavailable, write-rejection and committed-response-lost fault profiles.
+- [x] Recover UNKNOWN at 2/10-second intervals up to three attempts, then require review. The CRM outage path keeps ticket ID null until a real synthetic ticket row exists.
+- [x] Add customer-session/agent-run scoped operation polling and receipt reads. Append terminal Trust Receipts with findings, calculations, evidence references, action outcome, handoff state and canonical SHA-256 integrity digest.
+
+Verification: 17 pytest tests pass; `compileall` and `git diff --check` pass. Fresh isolated PostgreSQL tests using separate runtime/provider credentials verified CRM unavailability -> UNKNOWN -> one ticket -> SUCCEEDED; VAS evidence -> proposal -> committed-response-lost -> same-key recovery -> exactly one subscription mutation/event; receipt retrieval and digest recomputation. These results are synthetic only. Restart, simultaneous workers, terminal CRM failure and broader fault profiles remain open.
 
 ## H-04: actions, receipts and handoff
 
@@ -110,5 +137,12 @@ Existing Voice read timeout is eight seconds; conversation processing must retur
 | Date | Task | Evidence | Remaining |
 | --- | --- | --- | --- |
 | 2026-10-02 | Baseline | 15 existing Voice tests pass; ephemeral streaming reproduction fails; live DB healthy; seed defects confirmed read-only | H-01 through H-09 remain unchecked |
+| 2026-10-02 | H-01 fixture corrections + H-01 migration phase + H-02 readiness starter | Fixture v2 SQL assertions pass on isolated bootstrap; initial Alembic validation reached `0002_domain_lifecycle`; app-role `/api/v1/readyz` returned 200; runtime role append-only review grant verified | H-01 reset/session and Voice-binding revocation, reversal fixture, readiness-after-seed marker; H-02 auth/facade/repositories and consistent errors; H-03 onward |
+| 2026-10-02 | H-02 session authentication slice | 10 tests pass; isolated PostgreSQL login flow verified guest creation, atomic guest-to-customer token rotation, fixed customer/account and agent/run scopes, CSRF logout, and revoked-cookie rejection; migrated runtime role used successfully | AuthContext middleware for future routes, guest conversation transfer, throttling, all business APIs and authorization; route access policy tests against real domain entities |
+| 2026-10-02 | H-03 account read + deterministic ledger core | 15 tests pass; isolated PostgreSQL verified customer-scoped account read and seeded statements; A=42,000/0, D=42,000 expected and 35,000 observed/-7,000 delta; incomplete page stays provisional; unsafe JSON money integer rejected | Freshness/page fault controls, broader provider ports and other complaint paths |
+| 2026-10-02 | H-03 case/investigation facade | Isolated PostgreSQL revision 0003 verified session-owned conversation/case creation, immutable A investigation persistence, stable command replay, stale-version conflict, D review queue status and cross-account 404 | Public conversation routes, additional customer paths/providers/faults, action proposals/operations/receipts and dashboard APIs |
+| 2026-10-02 | H-03 public case API slice | 16 tests pass; fresh PostgreSQL validates case detail/investigation wire models, origin-scoped customer/agent reads, idempotent success replay and changed-body 409 | Public conversation/controller routes, other complaint providers, proposals, confirmations, operation runner, receipts and review queue |
+| 2026-10-02 | H-04a proposal/confirmation boundary | 17 tests pass; fresh isolated PostgreSQL migrated to revision 0004 and verified customer-scoped proposal/replay, accept/PENDING operation, confirmation replay, and duplicate accept rejection. HTTP test verifies CSRF and 202 response. | Provider operation runner/recovery, operation read, receipts, escalation delivery and action concurrency race test |
+| 2026-10-02 | H-04b execution/recovery/receipt | Separate sandbox writer and Resolve roles; isolated CRM outage and VAS committed-response-lost integrations recover to one ticket / one VAS mutation; receipt hash verifies. | Worker restart/concurrency, unresolved CRM outage, Voice confirmation, and broader provider faults |
 
 Work order and time boxes are in context.md. Harry owns the critical path; publish interfaces early and integrate one vertical text slice before secondary features.

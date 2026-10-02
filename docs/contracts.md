@@ -1,6 +1,6 @@
 # Shared implementation contracts v1.0.0
 
-**Proposed Resolve interfaces, not deployed endpoints.** The database exists; Resolve application work remains unchecked in [context](../context.md). Existing external Voice interfaces are implemented but have known streaming failures. [OpenAPI 3.1](contracts/openapi.json) defines wire shapes; [examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts. Change these documents and affected owner plans before implementations diverge.
+**Mixed implementation status.** Resolve currently implements health/readiness, session lifecycle, customer-scoped account reads, public scoped case reads/investigation routes, and an in-process facade for conversation/case creation and persisted A/D ledger investigations. Customer action proposal/confirmation routes persist immutable decisions and accepted `PENDING` operations; mock-provider execution, operation polling and Trust Receipt reads are implemented; conversation controller and dashboard review APIs remain future work in [OpenAPI 3.1](contracts/openapi.json). Existing external Voice interfaces are implemented but have known streaming failures. [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
 
 ## Ownership and connections
 
@@ -70,11 +70,11 @@ All paths use `/api/v1`; OpenAPI defines exact fields and response models. Sessi
 | GET /account | No account selector ->scoped AccountView |
 | GET /cases/{id} | Scoped ID ->CaseView/current investigation |
 | POST /cases/{id}/investigations | expected_version, complaint_type, window_start/end, reported_facts ->200 InvestigationResult |
-| POST /cases/{id}/action-proposals | expected_version, investigation_id, action_type, target_id ->201 ProposalView |
-| POST /action-proposals/{id}/confirmations | proposal_hash, ACCEPT/DECLINE, client_turn_id ->202 accepted operation or200 decline |
-| GET /operations/{id} | Scoped ID ->OperationView |
+| POST /cases/{id}/action-proposals | Customer cookie, Origin, CSRF, Idempotency-Key; expected_version, investigation_id, action_type, target_id ->201 ProposalView |
+| POST /action-proposals/{id}/confirmations | Customer cookie, Origin, CSRF; proposal_hash, ACCEPT/DECLINE, client_turn_id ->202 persisted PENDING operation or200 decline |
+| GET /operations/{id} | Customer session or agent run scope ->OperationView |
 | POST /cases/{id}/escalations | expected_version, investigation_id, reason ->201 CREATE_REVIEW_TICKET ProposalView |
-| GET /cases/{id}/receipt | Optional revision ->stored ReceiptView |
+| GET /cases/{id}/receipt | Customer session or agent run scope, optional revision ->stored ReceiptView |
 | POST /conversations/{id}/voice-sessions | Empty JSON, server-derived scope/origin ->201 VoiceSessionGrant |
 | POST /integrations/voice/turns; /events | Existing signed Voice body ->strict Voice result/ack |
 | GET /agent/cases | Filters/search/cursor ->queue |
@@ -96,11 +96,13 @@ InvestigationResult: id, case_id, revision, complaint_type, window_start/end, ev
 
 CaseView: id, conversation_id, account_id, complaint_type, status, review_status, version, timestamps, latest investigation, operation IDs and receipt reference. Case.status OPEN/AWAITING_CUSTOMER/ACTION_PENDING/REVIEW_REQUIRED/RESOLVED is independent of review.status NEW/IN_REVIEW/CLOSED. Resolve determines these values.
 
-ProposalView: id, case_id, investigation_id, action_type, target_id/version, target_label, consequences, hash, expiry and simulation. Five-minute hash-bound proposal also binds authenticated subject and evidence revision. Target is subscription for DEACTIVATE_VAS, account for SEND_SETTINGS_INSTRUCTIONS/CREATE_REVIEW_TICKET. Existing Voice gets its narrower six-field proposal projection. Reinvestigation/changed target invalidates affected proposals.
+ProposalView: id, case_id, investigation_id, action_type, target_id/version, target_label, consequences, hash, expiry and simulation. Five-minute hash-bound proposal also binds authenticated session and evidence revision; current target status/version is re-read before confirmation. Target is subscription for DEACTIVATE_VAS, account for SEND_SETTINGS_INSTRUCTIONS/CREATE_REVIEW_TICKET. Existing Voice gets its narrower six-field proposal projection. Reinvestigation/changed target invalidates affected proposals.
 
-Public confirmation uses an explicit authenticated decision. Internal Voice confirmation additionally includes original final transcript, fresh turn and presented ID/hash; Resolve owns the decision gate. Ambiguous yes or no valid presentation context cannot accept. Decline persists a confirmation record without an operation. Accept atomically persists confirmation and operation; database uniqueness permits one operation per accepted proposal even with different request keys.
+Public confirmation uses an explicit authenticated decision. Internal Voice confirmation additionally includes original final transcript, fresh turn and presented ID/hash; Resolve owns the decision gate. Ambiguous yes or no valid presentation context cannot accept. Decline persists a confirmation record without an operation. Accept atomically persists confirmation and operation; the response reports `operation_status=PENDING`, never completion. Database uniqueness permits one operation per proposal. Both actions require customer Origin and CSRF validation.
 
 Operation states: PENDING -> RUNNING -> SUCCEEDED/FAILED/UNKNOWN; UNKNOWN -> SUCCEEDED/FAILED/REVIEW_REQUIRED. Reconcile unknown at0/2/10seconds via provider lookup/readback. Persist lease/retry state, recover after restart, never mint a new provider key. No lock spans external calls; provider writes use a separate transaction.
+
+Forward revisions `0002_domain_lifecycle` through `0004_action_proposals` add scoped lifecycle, investigation and proposal/confirmation persistence after baseline adoption. Revision 0004 binds proposals to sandbox, actor session, case version, evidence revision, request key/hash and target label; confirmation client turns and accepted operations are uniquely scoped. Confirmation rows remain append-only. The runtime PostgreSQL role may append confirmations/review history/investigations but cannot update or delete their records. Accepted operations are durably `PENDING`. A lifespan-managed in-process worker claims them with leases, uses a separate sandbox database role and a stable provider key, records actual mock readback, retries UNKNOWN after 2/10 seconds and appends digest-protected receipts for terminal outcomes. Receipt and operation projections are scoped. Dashboard review lifecycle remains unimplemented.
 
 ReceiptView: id, case_id, revision, issued_at, issue, window, findings, calculations, evidence_references, missing, conflicts, actions, handoff, next_step, simulation, digest_sha256. Store append-only. Digest is SHA256 over UTF-8 JSON with sorted keys/no whitespace/integer numbers, excluding digest_sha256 itself. It is neither a signature nor proof of source truth. Internal notes are excluded from customer receipts.
 
@@ -120,14 +122,15 @@ Commit local review/audit atomically. If provider ticket exists, queue its statu
 
 Tevin exports `ConversationService.handle_turn(AuthContext, NormalizedTurn) -> TurnResult`. Text supplies expected conversation version; Voice bridge obtains it from the validated binding's conversation. NormalizedTurn includes channel, stable turn ID, input, language and optional trusted Voice presentation evidence. Browser body cannot set trusted channel/presentation fields.
 
-Harry exports ResolveFacade methods get_account/create_case/get_case/investigate/propose_action/confirm_action/prepare_escalation/get_operation/get_receipt. Each accepts AuthContext plus typed request; return types match corresponding public domain DTOs. Also provide scoped ConversationRepository (claim/load/save turn, dialogue state, active-case selection) and KnowledgeRepository (bounded lexical lookup with reviewed citation/version). Tevin owns dialogue schema; Harry owns storage/migrations.
+Harry exports ResolveFacade methods create_conversation/get_account/create_case/get_case/investigate/propose_action/confirm_action/prepare_escalation/get_operation/get_receipt. Each accepts AuthContext plus typed request; return types match corresponding public domain DTOs. The current facade implements conversation creation, origin-turn case creation, scoped case reads, persisted balance and VAS-dispute investigations, action proposals, explicit accept/decline persistence, operation reads and receipt reads. The single in-process worker claims leased operations and records sandbox results using separate provider credentials. Also provide scoped ConversationRepository (claim/load/save turn, dialogue state, active-case selection) and KnowledgeRepository (bounded lexical lookup with reviewed citation/version). Tevin owns dialogue schema; Harry owns storage/migrations.
 
 | Internal method | Input after AuthContext | Result |
 | --- | --- | --- |
+| create_conversation | language | ConversationView; session scope comes only from AuthContext |
 | get_account | No account selector | AccountView |
-| create_case | conversation_id, stable originating turn_id, complaint_type | CaseView; replay scoped originating turn rather than duplicate case |
+| create_case | conversation_id, expected conversation version, stable client_turn_id, complaint_type/window/reported_facts | CaseView; replay scoped originating turn rather than duplicate case |
 | get_case | case_id | CaseView |
-| investigate | case_id, InvestigationRequest, stable command key | InvestigationResult |
+| investigate | case_id, expected case version, complaint/window, stable command key | InvestigationResult; replay returns stored revision |
 | propose_action | case_id, ProposalRequest, stable command key | ProposalView |
 | confirm_action | proposal_id, ConfirmationRequest, stable command key, optional trusted VoiceConsentEvidence | ConfirmationResult |
 | prepare_escalation | case_id, EscalationRequest, stable command key | ProposalView |
@@ -166,7 +169,8 @@ Typed in-process ports: get_account, get_statement, list_recharges, list_offers/
 | --- | --- | --- |
 | DATABASE_URL / SANDBOX_DATABASE_URL | Resolve server | Separate Resolve/provider DB role DSNs |
 | APP_ORIGIN | Resolve server | http://localhost:5173; exact HTTPS origin on deployment |
-| DEMO_IDENTITIES_JSON | Resolve secret config | Identity -> credential hash/role/synthetic account selector; never client-selectable role |
+| DEMO_IDENTITIES_JSON | Resolve secret config | JSON map: identity -> `{credential_sha256, role, principal_id, sandbox_id, account_id?}`; credential hashes and fixed synthetic scope are server-side |
+| APP_SECRET_KEY | Resolve secret config | Random secret >=32 bytes for CSRF derivation; replace the example value |
 | VOICE_BASE_URL | Resolve server | http://localhost:8088 |
 | HUTCH_RESOLVE_HMAC_SECRET | Both servers | Same random secret, minimum32 characters |
 | HUTCH_RESOLVE_BASE_URL | Voice server | http://localhost:8080/api/v1 |
