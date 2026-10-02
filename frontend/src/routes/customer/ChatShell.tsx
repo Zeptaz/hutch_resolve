@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, SendHorizontal } from 'lucide-react'
+import { Bot, FolderOpen, SendHorizontal } from 'lucide-react'
 import { newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
@@ -8,11 +8,12 @@ import { BrandMark } from '@/components/BrandMark'
 import { ErrorState, LoadingState } from '@/components/states'
 import { StatusBadge } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { formatTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { CasePanel } from './CasePanel'
+import { CasePanel, CasePanelBody, type CasePanelProps } from './CasePanel'
 import { ChatCard, CitationList } from './cards/ChatCards'
 import { ConfirmationCard, type ProposalState } from './cards/ConfirmationCard'
 import { OperationTracker } from './cards/OperationTracker'
@@ -42,6 +43,7 @@ export function ChatShell({ session }: { session: SessionView }) {
   const [failed, setFailed] = useState<FailedTurn | null>(null)
   const [decisions, setDecisions] = useState<Record<string, ProposalState>>({})
   const [caseRefresh, setCaseRefresh] = useState(0)
+  const [casesOpen, setCasesOpen] = useState(false)
   const createKey = useRef(newId())
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -173,6 +175,21 @@ export function ChatShell({ session }: { session: SessionView }) {
     <ConfirmationCard key={p.id} proposal={p} state={proposalState(p)} onDecide={(d) => void decide(p, d)} />
   )
 
+  const panelProps: CasePanelProps = {
+    conversation,
+    refreshKey: caseRefresh,
+    disabled: sending,
+    onSelectCase: (id, label) => {
+      setCasesOpen(false)
+      answer({ type: 'case_selection', case_id: id }, `Switch to: ${label}`)
+    },
+    onReviewRequested: () => {
+      setCasesOpen(false)
+      setCaseRefresh((n) => n + 1)
+      if (conversation) void reload(conversation.id)
+    },
+  }
+
   const textAllowed = !conversation?.pending_question || conversation.pending_question.allowed_input_types.includes('text')
 
   // A pending proposal that didn't arrive inside a message (e.g. a human-review request) is shown at the end.
@@ -186,11 +203,30 @@ export function ChatShell({ session }: { session: SessionView }) {
       <header className="flex items-center justify-between gap-3 border-b px-4 py-3">
         <BrandMark subtitle="Customer support" />
         <div className="flex items-center gap-2">
-          <StatusBadge tone={session.role === 'GUEST' ? 'neutral' : 'info'}>
+          <StatusBadge tone={session.role === 'GUEST' ? 'neutral' : 'info'} className="hidden sm:inline-flex">
             {session.role === 'GUEST' ? 'Guest' : 'Demo line'}
           </StatusBadge>
+          <Dialog open={casesOpen} onOpenChange={setCasesOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="lg:hidden">
+                <FolderOpen aria-hidden /> Cases
+                {!!conversation?.cases.length && (
+                  <span className="rounded-full bg-primary px-1.5 text-[11px] leading-4 text-primary-foreground">
+                    {conversation.cases.length}
+                  </span>
+                )}
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-h-[85dvh] overflow-y-auto">
+              <DialogTitle className="sr-only">Your cases</DialogTitle>
+              <DialogDescription className="sr-only">Cases, receipts and human review for this chat.</DialogDescription>
+              <div className="flex flex-col gap-4">
+                <CasePanelBody {...panelProps} />
+              </div>
+            </DialogContent>
+          </Dialog>
           <Select value={language} onValueChange={(v) => setLanguage(v as Language)}>
-            <SelectTrigger size="sm" aria-label="Language" className="w-28">
+            <SelectTrigger size="sm" aria-label="Language" className="w-24 sm:w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -299,12 +335,7 @@ export function ChatShell({ session }: { session: SessionView }) {
           </form>
         </main>
 
-        <CasePanel
-          conversation={conversation}
-          refreshKey={caseRefresh}
-          disabled={sending}
-          onSelectCase={(id, label) => answer({ type: 'case_selection', case_id: id }, `Switch to: ${label}`)}
-        />
+        <CasePanel {...panelProps} />
       </div>
     </div>
   )

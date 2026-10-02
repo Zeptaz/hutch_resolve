@@ -8,8 +8,8 @@ export function BrandMark({ subtitle, className }: { subtitle?: string; classNam
         R
       </span>
       <span className="flex flex-col leading-tight">
-        <span className="text-sm font-bold tracking-tight">HUTCH Resolve</span>
-        {subtitle && <span className="text-xs text-muted-foreground">{subtitle}</span>}
+        <span className="text-sm font-bold tracking-tight whitespace-nowrap">HUTCH Resolve</span>
+        {subtitle && <span className="hidden text-xs text-muted-foreground sm:block">{subtitle}</span>}
       </span>
     </div>
   )

@@ -27,6 +27,12 @@ const STATUS_TEXT: Record<OperationView['status'], string> = {
   REVIEW_REQUIRED: 'We could not confirm the result automatically. A person will check it.',
 }
 
+const SUCCESS_TEXT: Record<OperationView['action_type'], string> = {
+  DEACTIVATE_VAS: 'Done. The provider confirmed the subscription will not renew.',
+  SEND_SETTINGS_INSTRUCTIONS: 'Done. The settings instructions were sent.',
+  CREATE_REVIEW_TICKET: 'Done. Your review ticket was created.',
+}
+
 /** Polls an operation every second until it reaches a terminal state or the component unmounts. */
 export function OperationTracker({
   operationId,
@@ -83,7 +89,7 @@ export function OperationTracker({
       <div aria-live="polite">
         {op ? (
           <>
-            <p>{STATUS_TEXT[op.status]}</p>
+            <p>{op.status === 'SUCCEEDED' ? SUCCESS_TEXT[op.action_type] ?? STATUS_TEXT.SUCCEEDED : STATUS_TEXT[op.status]}</p>
             <p className="mt-1 text-muted-foreground">{op.next_step}</p>
             {op.outcome.provider_ticket_id && (
               <p className="mt-2 text-xs">
