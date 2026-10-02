@@ -2,21 +2,33 @@
 
 const COLOMBO = 'Asia/Colombo'
 
-const dateTime = new Intl.DateTimeFormat('en-LK', {
-  timeZone: COLOMBO,
-  dateStyle: 'medium',
-  timeStyle: 'short',
-})
+// Dates follow the customer's chosen language; numbers and money always use en-LK digits.
+let displayLocale = 'en-LK'
+const formatters = new Map<string, { dateTime: Intl.DateTimeFormat; time: Intl.DateTimeFormat }>()
 
-const time = new Intl.DateTimeFormat('en-LK', { timeZone: COLOMBO, timeStyle: 'short' })
+function dates() {
+  let f = formatters.get(displayLocale)
+  if (!f) {
+    f = {
+      dateTime: new Intl.DateTimeFormat(displayLocale, { timeZone: COLOMBO, dateStyle: 'medium', timeStyle: 'short' }),
+      time: new Intl.DateTimeFormat(displayLocale, { timeZone: COLOMBO, timeStyle: 'short' }),
+    }
+    formatters.set(displayLocale, f)
+  }
+  return f
+}
+
+export function setDisplayLocale(locale: string) {
+  displayLocale = locale
+}
 
 /** RFC3339 UTC → local Sri Lanka time, as the contract requires for display. */
 export function formatDateTime(iso: string) {
-  return dateTime.format(new Date(iso))
+  return dates().dateTime.format(new Date(iso))
 }
 
 export function formatTime(iso: string) {
-  return time.format(new Date(iso))
+  return dates().time.format(new Date(iso))
 }
 
 /** Signed integer minor LKR units (100 = LKR 1.00) → "LKR 1,000.00". */
@@ -28,7 +40,8 @@ export function formatLkr(minor: number) {
 
 /** Integer bytes → decimal GB, per the contract. */
 export function formatGb(bytes: number) {
-  return `${(bytes / 1e9).toLocaleString('en-LK', { maximumFractionDigits: 2 })} GB`
+  const sign = bytes < 0 ? '−' : ''
+  return `${sign}${(Math.abs(bytes) / 1e9).toLocaleString('en-LK', { maximumFractionDigits: 2 })} GB`
 }
 
 /** Format a calculation value according to its contract unit. */

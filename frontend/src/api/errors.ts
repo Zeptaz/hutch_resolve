@@ -1,3 +1,5 @@
+import { makeTranslate, type Translate } from '@/i18n/context'
+import type { MessageKey } from '@/i18n/messages'
 import type { ApiErrorBody } from './types'
 
 export type ErrorCode = ApiErrorBody['error']['code'] | 'NETWORK_ERROR' | 'UNEXPECTED_RESPONSE'
@@ -30,25 +32,24 @@ export function isApiError(e: unknown): e is ApiError {
   return e instanceof ApiError
 }
 
-/** Short, user-facing explanation. Never exposes request internals beyond the reference ID. */
-export function describeError(e: unknown): string {
-  if (!isApiError(e)) return 'Something went wrong. Please try again.'
-  switch (e.status) {
-    case 401:
-      return 'Your session has ended. Please start again.'
-    case 403:
-      return 'You do not have access to this.'
-    case 404:
-      return 'We could not find that item.'
-    case 409:
-      return 'This was changed elsewhere. Refresh to see the latest version.'
-    case 429:
-      return 'Too many requests. Please wait a moment and try again.'
-    case 503:
-      return 'A service is temporarily unavailable. Please try again shortly.'
-    case 0:
-      return 'Could not reach the server. Check your connection and try again.'
-    default:
-      return e.message || 'Something went wrong. Please try again.'
-  }
+const STATUS_KEY: Record<number, MessageKey> = {
+  0: 'error.network',
+  401: 'error.401',
+  403: 'error.403',
+  404: 'error.404',
+  409: 'error.409',
+  429: 'error.429',
+  503: 'error.503',
+}
+
+/**
+ * Short, user-facing explanation. Never exposes request internals beyond the reference ID.
+ * Pass `t` for translated text; without it (agent dashboard) other errors show the server's message.
+ */
+export function describeError(e: unknown, t?: Translate): string {
+  const tr = t ?? makeTranslate('en')
+  if (!isApiError(e)) return tr('error.generic')
+  const key = STATUS_KEY[e.status]
+  if (key) return tr(key)
+  return (!t && e.message) || tr('error.generic')
 }

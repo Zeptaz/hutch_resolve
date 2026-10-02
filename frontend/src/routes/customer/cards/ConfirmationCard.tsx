@@ -1,16 +1,12 @@
 import { useEffect, useState } from 'react'
 import { ShieldCheck, Timer } from 'lucide-react'
 import type { Decision, ProposalView } from '@/api/types'
-import { StatusBadge } from '@/components/StatusBadge'
+import { StatusBadge, type Tone } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
+import { hasMessage, useI18n, type Translate } from '@/i18n/context'
 import { formatTime, humanize } from '@/lib/format'
 import { CardFrame } from './ChatCards'
 
-const ACTION_TITLE: Record<ProposalView['action_type'], string> = {
-  DEACTIVATE_VAS: 'Stop a subscription renewing',
-  SEND_SETTINGS_INSTRUCTIONS: 'Send settings instructions',
-  CREATE_REVIEW_TICKET: 'Ask for a human review',
-}
 
 export type ProposalState =
   | { kind: 'open' }
@@ -31,30 +27,40 @@ export function ConfirmationCard({
   state: ProposalState
   onDecide: (decision: Decision) => void
 }) {
+  const { t } = useI18n()
   const expiresMs = Date.parse(proposal.expires_at)
   const now = useNow(state.kind === 'open' || state.kind === 'submitting')
   const remaining = Math.max(0, expiresMs - now)
   const expired = remaining === 0 && (state.kind === 'open' || state.kind === 'submitting')
   const actionable = state.kind === 'open' && !expired
+  const badge = stateBadge(t, state, expired)
 
   return (
     <CardFrame
       icon={<ShieldCheck />}
-      title={state.kind === 'open' || state.kind === 'submitting' ? (expired ? 'Offer expired' : 'Your confirmation is needed') : state.kind === 'decided' ? 'Your decision' : 'Suggested action'}
-      className={actionable ? 'border-primary/40 ring-1 ring-primary/20' : undefined}
-      aside={<StateBadge state={state} expired={expired} />}
+      title={
+        state.kind === 'open' || state.kind === 'submitting'
+          ? expired
+            ? t('confirm.expiredTitle')
+            : t('confirm.needed')
+          : state.kind === 'decided'
+            ? t('confirm.decision')
+            : t('confirm.suggested')
+      }
+      tone={badge.tone}
+      aside={<StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>}
     >
       <dl className="flex flex-col gap-2">
         <div>
-          <dt className="text-xs text-muted-foreground">Action</dt>
-          <dd className="font-medium">{ACTION_TITLE[proposal.action_type] ?? humanize(proposal.action_type)}</dd>
+          <dt className="text-xs text-muted-foreground">{t('confirm.action')}</dt>
+          <dd className="font-medium">{hasMessage(`action.${proposal.action_type}`) ? t(`action.${proposal.action_type}`) : humanize(proposal.action_type)}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted-foreground">Applies to</dt>
+          <dt className="text-xs text-muted-foreground">{t('confirm.appliesTo')}</dt>
           <dd>{proposal.target_label}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted-foreground">What this means</dt>
+          <dt className="text-xs text-muted-foreground">{t('confirm.means')}</dt>
           <dd>{proposal.consequences}</dd>
         </div>
       </dl>
@@ -62,38 +68,34 @@ export function ConfirmationCard({
       {(state.kind === 'open' || state.kind === 'submitting') && (
         <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
           <Timer aria-hidden className="size-3.5" />
-          {expired ? (
-            'This offer has expired. Ask again if you still want it.'
-          ) : (
-            <>
-              Offer valid until {formatTime(proposal.expires_at)} ({formatRemaining(remaining)} left)
-            </>
-          )}
+          {expired
+            ? t('confirm.expiredNote')
+            : t('confirm.validUntil', { time: formatTime(proposal.expires_at), left: formatRemaining(remaining) })}
         </p>
       )}
 
       {(state.kind === 'open' || state.kind === 'submitting') && !expired && (
-        <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Confirm or decline this action">
+        <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={t('confirm.group')}>
           <Button onClick={() => onDecide('ACCEPT')} disabled={!actionable}>
-            {state.kind === 'submitting' && state.decision === 'ACCEPT' ? 'Sending…' : 'Yes, go ahead'}
+            {state.kind === 'submitting' && state.decision === 'ACCEPT' ? t('confirm.sending') : t('confirm.yes')}
           </Button>
           <Button variant="outline" onClick={() => onDecide('DECLINE')} disabled={!actionable}>
-            {state.kind === 'submitting' && state.decision === 'DECLINE' ? 'Sending…' : 'No, thanks'}
+            {state.kind === 'submitting' && state.decision === 'DECLINE' ? t('confirm.sending') : t('confirm.no')}
           </Button>
         </div>
       )}
-      <p className="mt-3 text-[11px] text-muted-foreground">Simulation — no real account is changed.</p>
+      <p className="mt-3 text-[11px] text-muted-foreground">{t('confirm.simNote')}</p>
     </CardFrame>
   )
 }
 
-function StateBadge({ state, expired }: { state: ProposalState; expired: boolean }) {
+function stateBadge(t: Translate, state: ProposalState, expired: boolean): { tone: Tone; label: string } {
   if (state.kind === 'decided') {
-    return state.decision === 'ACCEPT' ? <StatusBadge tone="info">You accepted</StatusBadge> : <StatusBadge tone="neutral">You declined</StatusBadge>
+    return state.decision === 'ACCEPT' ? { tone: 'info', label: t('confirm.accepted') } : { tone: 'neutral', label: t('confirm.declined') }
   }
-  if (state.kind === 'closed') return <StatusBadge tone="neutral">No longer open</StatusBadge>
-  if (expired) return <StatusBadge tone="neutral">Expired</StatusBadge>
-  return <StatusBadge tone="warning">Waiting for you</StatusBadge>
+  if (state.kind === 'closed') return { tone: 'neutral', label: t('confirm.closed') }
+  if (expired) return { tone: 'neutral', label: t('confirm.expired') }
+  return { tone: 'warning', label: t('confirm.waiting') }
 }
 
 function formatRemaining(ms: number) {

@@ -5,7 +5,7 @@
 /*
  * Theme: tweakcn "autoblog" (https://tweakcn.com/themes/cmhxosuz5000804l7gqzefqxg),
  * adjusted for HUTCH Resolve:
- *  - primary darkened to #d03e0e so white text meets WCAG AA (4.78:1; original 3.7:1)
+ *  - primary set to #ec4100 (team choice). White text on it is 3.95:1: meets AA for large text and UI parts, not for small body text
  *  - destructive moved to a deeper crimson (#b9192e) so errors never read as the brand orange
  *  - added success / warning / info tokens for operation, evidence and review states
  *  - base radius reduced from 1.4rem to 0.75rem (chat bubbles use rounded-2xl explicitly)
@@ -85,7 +85,7 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(0.9911 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.575 0.19 36);
+  --primary: oklch(0.6243 0.215 35.78);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.954 0.0063 255.48);
   --secondary-foreground: oklch(0.1344 0 0);
@@ -103,7 +103,7 @@
   --info-foreground: oklch(1 0 0);
   --border: oklch(0.93 0.0094 286.22);
   --input: oklch(0.9 0 0);
-  --ring: oklch(0.575 0.19 36);
+  --ring: oklch(0.6243 0.215 35.78);
   --chart-1: oklch(0.6404 0.2153 35.9);
   --chart-2: oklch(0.8231 0.0995 30.75);
   --chart-3: oklch(0.7336 0.1758 50.55);
@@ -111,12 +111,12 @@
   --chart-5: oklch(0.886 0.123 84.75);
   --sidebar: oklch(0.9777 0.0051 247.88);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.575 0.19 36);
+  --sidebar-primary: oklch(0.6243 0.215 35.78);
   --sidebar-primary-foreground: oklch(1 0 0);
   --sidebar-accent: oklch(0.9563 0.0228 41.41);
   --sidebar-accent-foreground: oklch(0.145 0 0);
   --sidebar-border: oklch(0.9401 0 0);
-  --sidebar-ring: oklch(0.575 0.19 36);
+  --sidebar-ring: oklch(0.6243 0.215 35.78);
 }
 
 .dark {
@@ -126,7 +126,7 @@
   --card-foreground: oklch(0.9551 0 0);
   --popover: oklch(0.2138 0.0019 286.23);
   --popover-foreground: oklch(0.9551 0 0);
-  --primary: oklch(0.575 0.19 36);
+  --primary: oklch(0.6243 0.215 35.78);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.257 0.0037 286.14);
   --secondary-foreground: oklch(0.9551 0 0);
@@ -152,7 +152,7 @@
   --chart-5: oklch(0.886 0.123 84.75);
   --sidebar: oklch(0.1822 0 0);
   --sidebar-foreground: oklch(0.9551 0 0);
-  --sidebar-primary: oklch(0.575 0.19 36);
+  --sidebar-primary: oklch(0.6243 0.215 35.78);
   --sidebar-primary-foreground: oklch(1 0 0);
   --sidebar-accent: oklch(0.2562 0.0765 39.79);
   --sidebar-accent-foreground: oklch(0.82 0.1 40);
@@ -173,5 +173,53 @@
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
+  }
+}
+
+/* Chat motion. New replies rise in from their corner; the thinking indicator breathes. Off for reduced motion. */
+@layer utilities {
+  .animate-bubble-in {
+    animation: bubble-in 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .animate-typing-dot {
+    animation: typing-dot 1.2s ease-in-out infinite;
+  }
+  .animate-thinking-ring {
+    animation: thinking-ring 1.6s ease-out infinite;
+  }
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+}
+
+@keyframes typing-dot {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@keyframes thinking-ring {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 45%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 8px color-mix(in oklch, var(--primary) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-bubble-in,
+  .animate-typing-dot,
+  .animate-thinking-ring {
+    animation: none;
   }
 }

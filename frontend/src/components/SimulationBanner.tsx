@@ -1,5 +1,6 @@
 import { FlaskConical, Wrench } from 'lucide-react'
 import { API_MODE, type Realm } from '@/api/client'
+import { useI18n } from '@/i18n/context'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -12,11 +13,12 @@ import {
 
 /** Always-visible notice: every account and result here is synthetic (contract `simulation: true`). */
 export function SimulationBanner({ realm }: { realm: Realm }) {
+  const { t } = useI18n()
   return (
     <div className="flex items-center justify-center gap-2 bg-secondary px-4 py-1.5 text-xs text-secondary-foreground">
       <FlaskConical className="size-3.5 shrink-0" aria-hidden />
       <span>
-        Simulation — synthetic accounts and records, not connected to real HUTCH systems.
+        {t('banner.simulation')}
         {API_MODE === 'mock' && <strong className="ml-1">Mock data from contract examples.</strong>}
       </span>
       {API_MODE === 'mock' && <MockControls realm={realm} />}

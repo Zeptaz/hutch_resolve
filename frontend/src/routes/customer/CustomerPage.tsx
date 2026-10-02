@@ -3,18 +3,22 @@ import { customerApi } from '@/api/endpoints'
 import { BrandMark } from '@/components/BrandMark'
 import { SimulationBanner } from '@/components/SimulationBanner'
 import { ErrorState, ExpiredState, LoadingState } from '@/components/states'
+import { useI18n } from '@/i18n/context'
+import { LanguageProvider } from '@/i18n/LanguageProvider'
 import { CustomerSessionProvider } from '@/session/providers'
 import { useCustomerSession } from '@/session/context'
 import { ChatShell } from './ChatShell'
 
 export default function CustomerPage() {
   return (
-    <CustomerSessionProvider>
-      <div className="flex h-dvh flex-col">
-        <SimulationBanner realm="customer" />
-        <CustomerSessionGate />
-      </div>
-    </CustomerSessionProvider>
+    <LanguageProvider>
+      <CustomerSessionProvider>
+        <div className="flex h-dvh flex-col">
+          <SimulationBanner realm="customer" />
+          <CustomerSessionGate />
+        </div>
+      </CustomerSessionProvider>
+    </LanguageProvider>
   )
 }
 
@@ -24,6 +28,7 @@ export default function CustomerPage() {
  */
 function CustomerSessionGate() {
   const { status, session, error, establish, retry } = useCustomerSession()
+  const { t } = useI18n()
   const startedGuest = useRef(false)
 
   useEffect(() => {
@@ -45,19 +50,19 @@ function CustomerSessionGate() {
   return (
     <div className="flex flex-1 flex-col">
       <header className="border-b px-4 py-3">
-        <BrandMark subtitle="Customer support" />
+        <BrandMark subtitle={t('brand.subtitle')} />
       </header>
       <main className="mx-auto w-full max-w-md flex-1 pt-10">
         {status === 'expired' ? (
           <ExpiredState
-            message="For your security, chats end after 30 minutes of inactivity."
-            actionLabel="Start a new chat"
+            message={t('chat.expired')}
+            actionLabel={t('chat.startNew')}
             onAction={startOver}
           />
         ) : error ? (
-          <ErrorState title="Could not start the chat" error={error} onRetry={status === 'error' ? retry : startOver} />
+          <ErrorState title={t('chat.startFailed')} error={error} onRetry={status === 'error' ? retry : startOver} />
         ) : (
-          <LoadingState label="Starting chat…" rows={2} />
+          <LoadingState label={t('chat.starting')} rows={2} />
         )}
       </main>
     </div>

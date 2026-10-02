@@ -1,23 +1,25 @@
 import { cn } from '@/lib/utils'
+import { useI18n } from '@/i18n/context'
 import { humanize } from '@/lib/format'
 import type { DeliveryState, EvidenceState, OperationStatus, ReviewStatus } from '@/api/types'
+import { deliveryTone, evidenceTone, operationTone, reviewTone, type Tone } from './tones'
 
-export type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
+export type { Tone }
 
-// Solid warning (dark text) because amber text on white fails contrast; others use AA-safe tinted styles.
+// Solid fills; text is white or black, whichever passes contrast on that fill (amber takes black).
 const toneClasses: Record<Tone, string> = {
-  neutral: 'bg-muted text-muted-foreground border-border',
-  info: 'bg-info/10 text-info border-info/25',
-  success: 'bg-success/10 text-success border-success/25',
-  warning: 'bg-warning text-warning-foreground border-transparent',
-  danger: 'bg-destructive/10 text-destructive border-destructive/25',
+  neutral: 'bg-muted-foreground text-white',
+  info: 'bg-info text-info-foreground',
+  success: 'bg-success text-success-foreground',
+  warning: 'bg-warning text-warning-foreground',
+  danger: 'bg-destructive text-destructive-foreground',
 }
 
 export function StatusBadge({ tone, children, className }: { tone: Tone; children: React.ReactNode; className?: string }) {
   return (
     <span
       className={cn(
-        'inline-flex h-6 items-center gap-1 rounded-md border px-2 text-xs font-semibold whitespace-nowrap',
+        'inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs font-semibold whitespace-nowrap',
         toneClasses[tone],
         className,
       )}
@@ -27,32 +29,14 @@ export function StatusBadge({ tone, children, className }: { tone: Tone; childre
   )
 }
 
-// Each state family maps to tones explicitly so "pending" never looks like "success".
-
-const evidenceTone: Record<EvidenceState, Tone> = { SUFFICIENT: 'success', PARTIAL: 'warning', CONFLICTING: 'danger' }
-const reviewTone: Record<ReviewStatus, Tone> = { NEW: 'info', IN_REVIEW: 'warning', CLOSED: 'neutral' }
-const deliveryTone: Record<DeliveryState, Tone> = {
-  PENDING: 'warning',
-  DELIVERED: 'success',
-  FAILED: 'danger',
-  REVIEW_REQUIRED: 'danger',
-}
-const operationTone: Record<OperationStatus, Tone> = {
-  PENDING: 'warning',
-  RUNNING: 'info',
-  SUCCEEDED: 'success',
-  FAILED: 'danger',
-  UNKNOWN: 'warning',
-  REVIEW_REQUIRED: 'danger',
-}
-
 function Missing({ label }: { label: string }) {
   return <StatusBadge tone="neutral">{label}</StatusBadge>
 }
 
 export function EvidenceBadge({ state }: { state: EvidenceState | null | undefined }) {
-  if (!state) return <Missing label="Not investigated" />
-  return <StatusBadge tone={evidenceTone[state]}>Evidence: {humanize(state)}</StatusBadge>
+  const { t } = useI18n()
+  if (!state) return <Missing label={t('evidence.none')} />
+  return <StatusBadge tone={evidenceTone[state]}>{t('evidence.label', { state: t(`evidence.${state}`) })}</StatusBadge>
 }
 
 export function ReviewBadge({ status }: { status: ReviewStatus }) {
@@ -60,10 +44,12 @@ export function ReviewBadge({ status }: { status: ReviewStatus }) {
 }
 
 export function DeliveryBadge({ state }: { state: DeliveryState | null | undefined }) {
-  if (!state) return <Missing label="No ticket" />
-  return <StatusBadge tone={deliveryTone[state]}>Ticket: {humanize(state)}</StatusBadge>
+  const { t } = useI18n()
+  if (!state) return <Missing label={t('delivery.none')} />
+  return <StatusBadge tone={deliveryTone[state]}>{t('delivery.label', { state: t(`delivery.${state}`) })}</StatusBadge>
 }
 
 export function OperationBadge({ status }: { status: OperationStatus }) {
-  return <StatusBadge tone={operationTone[status]}>{humanize(status)}</StatusBadge>
+  const { t } = useI18n()
+  return <StatusBadge tone={operationTone[status]}>{t(`opStatus.${status}`)}</StatusBadge>
 }
