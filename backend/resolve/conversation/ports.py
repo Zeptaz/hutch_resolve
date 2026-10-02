@@ -127,6 +127,8 @@ class TurnDraft:
     # The deterministic English reply when reply_text was rewritten into the customer's language.
     # Storage must keep it with the assistant message so history and audit retain Resolve's wording.
     source_reply_text: str | None = None
+    # Already written in the customer's language/style (e.g. by the package agent): do not rewrite again.
+    localized: bool = False
 
 
 class ConversationRepository(Protocol):

@@ -51,6 +51,12 @@ class ActionType(StrEnum):
     DEACTIVATE_VAS = "DEACTIVATE_VAS"
     SEND_SETTINGS_INSTRUCTIONS = "SEND_SETTINGS_INSTRUCTIONS"
     CREATE_REVIEW_TICKET = "CREATE_REVIEW_TICKET"
+    # PROPOSED, not in contract v1.0.0 (docs/plans/tevin.md, contract proposal CP-1). Only produced when a
+    # PackagePort is configured, which today is the dev backend's dummy mode (packages.py).
+    ACTIVATE_PACKAGE = "ACTIVATE_PACKAGE"
+
+
+CONTRACT_ACTION_TYPES = (ActionType.DEACTIVATE_VAS, ActionType.SEND_SETTINGS_INSTRUCTIONS, ActionType.CREATE_REVIEW_TICKET)
 
 
 class EvidenceState(StrEnum):

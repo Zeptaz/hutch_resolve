@@ -16,7 +16,11 @@
 | `rewrite.py` | `ReplyRewriter`: re-expresses the English reply in the customer's detected language/style (e.g. Singlish). Code keeps every number/ID, rejects new numbers, links and "80k"-style magnitudes, and falls back to English on any doubt. Optional; off unless passed to the service. |
 | `templates.py` | Deterministic replies. English is authoritative; Sinhala/Tamil load from `locales/*.json` only when marked `REVIEWED`. |
 | `locales/` | Machine-drafted, **unreviewed** Sinhala and Tamil wording (inactive). See `LANGUAGE_REVIEW.md`. |
-| `eval/extraction_cases.jsonl` | 41-case multilingual extraction set; `try_extract --eval` scores live Gemini per variety. |
+| `eval/extraction_cases.jsonl` | 57-case multilingual extraction set; `try_extract --eval` scores live Gemini per variety. |
+| `answer.py` | `GroundedAnswerer`: how-to answers written from knowledge cards only, code-checked (see T-03). |
+| `packages.py` | **Prototype.** Proposed `PackagePort` (Harry), package/usage DTOs and the code ranking of packages against 30-day use. |
+| `agent.py` | **Prototype.** `PackageAgent`: bounded tool-using agent for package turns (two tools, no confirm tool, code-checked reply). |
+| `knowledge/hutch_public_drafts.json` | 7 unreviewed draft cards from public HUTCH pages, proposed for `knowledge_seed.sql`; dev backend only. |
 
 ## What Harry's implementations must do
 
@@ -77,6 +81,17 @@ PYTHON=~/.venvs/hutch/bin/python sh tests/conversation/run_integration.sh
 ```
 
 This starts a **throwaway** PostgreSQL on port 55433 (never the shared container), applies Harry's migrations, runs `tests/conversation/test_resolve_integration.py` against his real facade, and removes the container. Turn storage is still the in-memory fake until Harry's repository exists.
+
+## Packages and the package agent (PROTOTYPE, dev dummy only)
+
+Active only when the service gets a `PackagePort`; today only the dev backend's dummy mode passes one (`FakePackagePort`). It is **contract proposal CP-1** in [Tevin's plan](../../../docs/plans/tevin.md): `ActionType.ACTIVATE_PACKAGE` and the port are not in contract v1.0.0, and the parity test allows exactly that one extra value until the contract adopts or drops it.
+
+- **Routing.** `PACKAGES` (suggest/compare, "activate it for me", "the second one") goes to the package turn; "how do I activate a package" stays FAQ. Without a port, `PACKAGES` falls back to the how-to FAQ answer. Guests are asked to sign in. `OFF_TOPIC` (weather, homework, coding…) gets one polite line and the menu, for guests too. "Is my package active?" is `STATUS`, answered from Resolve's operation state (and alongside an active case's status).
+- **Facts first, by code.** The turn loads the balance, the 30-day usage summary and the catalogue, and `recommend()` ranks packages: the cheapest that covers last month's use, then the largest that don't; multi-buy packages are costed per 30 days. Every value is pre-formatted (`LKR 399.00`, `20.8 GB`, `30 days`).
+- **The agent.** Gemini sees the message, those facts and the packages shown before ("the second one"). It has two tools: `offer_activation(package_key)` (a normal hash-bound Resolve proposal → the Accept/Decline card) and `search_help(query)`. There is **no confirm tool**; only the button activates, and a typed "yes" never does. At most 3 model calls within the turn deadline (one when the reply comes with a successful offer), one offer per turn, keys must be from the catalogue.
+- **Reply check.** Every number, contact and domain must appear in the facts or tool results (step numbers 1-9 excepted); keys and field names are internal. A known amount with a glued Singlish "-ak" ("LKR 279.00k") is respaced to "LKR 279.00 ak"; any other k/m suffix is rejected. The check confirms values exist, **not that they are paired correctly** (a real price next to the wrong package passes), and it cannot catch a number-free "activated!" claim; the card and the operation state are the source of truth. Any failure gives the deterministic English reply (rewritten as usual); without an agent, the best affordable fit is offered as a card so buttons alone work.
+- **Telemetry.** One `PACKAGE_AGENT` record per model call; for `NOT_GROUNDED`, `error_type` names the failed check (NUMBERS, CONTACTS, LINK, MAGNITUDE, LENGTH), never the text.
+- **Dummy data.** `FakePackagePort`: 5 synthetic packages (LKR 49 to 699) and the demo customer's 30 days (20.8 GB: a 20 GB package used up, then 0.8 GB charged LKR 80). Accepting debits the price and adds the package on the account after the simulated 4 s, so the account card shows it. Activation requests are not cases (their proposal `case_id` is a request ID).
 
 ## Dev backend (simulation for end-to-end testing)
 

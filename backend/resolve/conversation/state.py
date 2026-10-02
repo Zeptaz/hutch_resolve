@@ -66,6 +66,22 @@ class ActionChoice(BaseModel):
     target_label: str
 
 
+class ActivationRef(BaseModel):
+    """The last package activation the customer accepted in this conversation (PROTOTYPE, packages.py)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    operation_id: UUID
+    package_label: str
+
+
+class ShownPackage(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: UUID
+    name: str
+
+
 class DialogueState(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -78,6 +94,9 @@ class DialogueState(BaseModel):
     candidate: Candidate | None = None
     pending_proposal: PendingProposalRef | None = None
     pending_choices: list[ActionChoice] = []
+    # Package prototype: packages named in the last package reply (for "the second one"), last activation.
+    packages_shown: list[ShownPackage] = []
+    last_activation: ActivationRef | None = None
 
     def evolve(self, **changes: object) -> "DialogueState":
         """Return a validated copy with changes applied."""

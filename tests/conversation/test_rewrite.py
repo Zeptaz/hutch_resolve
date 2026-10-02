@@ -54,6 +54,10 @@ def harness(transform=lambda english: f"[si] {english}") -> tuple[Harness, Rewri
         ("0.8 GB was charged as LKR 80.", "0.8 GB ekata LKR 80k charge wela.", False),  # reads as 80,000
         ("It adds up to LKR 420.", "LKR 420kata hariyanawa.", True),  # Singlish ending, not a magnitude
         ("It adds up to LKR 420.", "LKR 420 m hariyanawa.", False),
+        ("3 options: A, B, C.", "Options 3k thiyenawa: A, B, C.", True),  # Singlish count, not 3,000
+        ("You paid LKR 80.", "Oya LKR 80k gewwa.", False),
+        ("You paid 400.", "Oya 400k gewwa.", False),
+        ("You paid 1.5.", "Oya 1.5k gewwa.", False),
     ],
 )
 def test_fact_guard(source: str, rewrite: str, ok: bool) -> None:
@@ -181,3 +185,13 @@ def test_extraction_is_cut_to_the_remaining_turn_budget() -> None:
     assert time.monotonic() - started < 1.0  # stopped at the turn deadline, not the 6 s extractor budget
     assert result.pending_question.code == "CHOOSE_COMPLAINT_TYPE"  # structured fallback
     assert [r.outcome for r in h.telemetry.records] == ["TIMEOUT"]
+
+
+def test_singlish_ak_glued_to_the_same_amount_is_respaced() -> None:
+    from resolve.conversation.rewrite import soften_singlish_k
+
+    source = "0.8 GB was charged as LKR 80."
+    rewrite = soften_singlish_k("0.8 GB ekata LKR 80k charge wela.", source)
+    assert rewrite == "0.8 GB ekata LKR 80 ak charge wela." and preserves_facts(source, rewrite)
+    assert soften_singlish_k("LKR 800k charge wela.", source) == "LKR 800k charge wela."  # not the source amount
+    assert soften_singlish_k("LKR 80 k charge wela.", source) == "LKR 80 ak charge wela."

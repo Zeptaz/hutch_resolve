@@ -18,10 +18,10 @@ from typing import Annotated, Any, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from .dto import ActionType, ComplaintType, Language, MAX_TEXT_CHARS
+from .dto import CONTRACT_ACTION_TYPES, ActionType, ComplaintType, Language, MAX_TEXT_CHARS
 from .model import ModelClient, ModelError, ModelReply
 
-PROMPT_VERSION = "extract-v4"
+PROMPT_VERSION = "extract-v5"
 TOTAL_BUDGET_SECONDS = 6.0
 MAX_WINDOW = timedelta(days=30)
 # Sri Lanka observes no DST; a fixed offset avoids a tzdata dependency.
@@ -37,6 +37,8 @@ class Intent(StrEnum):
     ACTION_DECISION = "ACTION_DECISION"  # yes/no about an offered action
     STATUS = "STATUS"  # status of a request, operation or receipt
     HUMAN_REQUEST = "HUMAN_REQUEST"
+    PACKAGES = "PACKAGES"  # wants package suggestions, or wants the assistant to activate one (prototype)
+    OFF_TOPIC = "OFF_TOPIC"  # nothing to do with their mobile service
     OTHER = "OTHER"
 
 
@@ -123,7 +125,7 @@ RESPONSE_SCHEMA: dict[str, Any] = {
     "properties": {
         "intent": _enum(Intent),
         "decision": _nullable(_enum(SpokenDecision)),
-        "action_choice": _nullable(_enum(ActionType)),
+        "action_choice": _nullable({"type": "string", "enum": [a.value for a in CONTRACT_ACTION_TYPES]}),
         "detected_language": _enum(Language),
         "script": _enum(Script),
         "complaint_type": _nullable(_enum(ComplaintType)),
@@ -166,11 +168,15 @@ intent:
 - CORRECTION: the customer changes facts (time, amount, which service) of the active case.
 - ACCOUNT_ENQUIRY: asks for their own balance, packages or account state without reporting a problem.
 - FAQ: a general question about services, OR the customer wants to do something themselves and needs to know how:
-  reload/recharge/top up, activate a package or data plan, use the app, check balance in general, contact support or
-  register a complaint. A greeting before the request ("hi, ...") does not change this. Set faq_query.
+  reload/recharge/top up, activate a package or data plan themselves, use the app, check balance in general,
+  contact support or register a complaint. A greeting before the request ("hi, ...") does not change this. Set faq_query.
+- PACKAGES: wants a package suggested or compared ("which package suits me", "mata hoda package ekak kiyanna"),
+  asks about package prices, wants the assistant to activate a package for them ("activate it for me",
+  "mata 25GB package eka danna"), or picks one of the packages_shown ("the second one", "eka").
 - ACTION_DECISION: answers yes/no to an action offered by the assistant.
-- STATUS: asks whether a request/action/ticket is done, or asks for a receipt.
+- STATUS: asks whether a request/action/ticket/package activation is done, or asks for a receipt.
 - HUMAN_REQUEST: wants a person, agent or review.
+- OFF_TOPIC: clearly unrelated to their mobile line or HUTCH (weather, homework, coding, news, jokes, other companies).
 - OTHER: greetings, thanks or anything else.
 
 decision (only for ACTION_DECISION, else null):
@@ -208,7 +214,15 @@ Examples (message -> key fields):
 "how do I activate a package" -> FAQ, faq_query "package activation"
 "hi mata reload ekak danna one" -> FAQ, si, faq_query "how to reload"
 "reload karanne kohomada" -> FAQ, si, faq_query "how to reload"
-"mata data package ekak activate karanna one" -> FAQ, si, faq_query "activate data package"
+"data package ekak activate karanne kohomada" -> FAQ, si, faq_query "activate data package"
+"mata hoda data package ekak kiyanna" -> PACKAGES, si
+"which package is best for me?" -> PACKAGES
+"mata data package ekak activate karala denna" -> PACKAGES, si
+"deweni eka danna" (packages_shown) -> PACKAGES, si
+"enakku nalla data package sollunga" -> PACKAGES, ta
+"package eka active da?" -> STATUS, si
+"what's the weather in Colombo today?" -> OFF_TOPIC
+"write me a python script" -> OFF_TOPIC
 "customer care ekata call karanna number eka mokakda" -> FAQ, si, faq_query "contact support"
 "reload pannanum eppadi" -> FAQ, ta, faq_query "how to reload"
 "how can I check my balance" -> FAQ, faq_query "check balance"
@@ -228,6 +242,7 @@ class ExtractionContext:
     active_case_complaint_type: ComplaintType | None = None
     has_pending_proposal: bool = False
     actions_offered: tuple[str, ...] = ()
+    packages_shown: tuple[str, ...] = ()
 
 
 def build_prompt(text: str, context: ExtractionContext) -> str:
@@ -239,6 +254,7 @@ def build_prompt(text: str, context: ExtractionContext) -> str:
             "active_case_type": context.active_case_complaint_type,
             "action_offer_open": context.has_pending_proposal,
             "actions_offered": list(context.actions_offered),
+            "packages_shown": list(context.packages_shown),
         },
         "message": text[:MAX_TEXT_CHARS],
     }

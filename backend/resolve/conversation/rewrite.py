@@ -30,8 +30,24 @@ REWRITE_PROMPT_VERSION = "rewrite-v2"
 REWRITE_BUDGET_SECONDS = 5.0
 
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
-# "80k" / "5m" read as thousand/million; Singlish endings like "420kata" are fine.
-_MAGNITUDE_SUFFIX = re.compile(r"\d\s?[kKmM]\b")
+# "80k" / "LKR 5m" read as thousand/million; Singlish endings like "420kata" are fine, and so is a bare
+# single digit counting things ("package 3k" = three packages).
+_MAGNITUDE = re.compile(r"(?P<currency>(?:LKR|Rs\.?)\s?)?(?P<number>\d[\d,.]*)\s?[kKmM]\b")
+
+
+def has_magnitude(text: str) -> bool:
+    return any(m.group("currency") or not re.fullmatch(r"[1-9]", m.group("number")) for m in _MAGNITUDE.finditer(text))
+
+
+_CURRENCY_K = re.compile(r"((?:LKR|Rs\.?)\s?\d[\d,]*(?:\.\d+)?)\s?([kK])\b")
+
+
+def soften_singlish_k(text: str, sources: str) -> str:
+    """Singlish "-ak" after a known amount: "LKR 279.00k one" or "LKR 279.00 k one" -> "LKR 279.00 ak one", not
+    read as 279,000. Only for an amount written exactly so in the sources; any other k/m suffix is still rejected."""
+    return _CURRENCY_K.sub(lambda m: f"{m.group(1)} a{m.group(2).lower()}" if m.group(1) in sources else m.group(0), text)
+
+
 _ID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b[A-Z]{2,}-[A-Z0-9]{2,}-[A-Za-z0-9-]+\b")
 
 STYLE = {
@@ -81,7 +97,7 @@ def preserves_facts(source: str, rewrite: str) -> bool:
         return False
     if "http" in rewrite.lower() and "http" not in source.lower():
         return False
-    if _MAGNITUDE_SUFFIX.search(rewrite) and not _MAGNITUDE_SUFFIX.search(source):
+    if has_magnitude(rewrite) and not has_magnitude(source):
         return False
     return len(rewrite) <= 2 * len(source) + 200
 
@@ -129,7 +145,7 @@ class ReplyRewriter:
         except ModelError:
             return done(None, "MODEL_ERROR")
         try:
-            candidate = _Rewrite.model_validate_json(reply.text).reply.strip()
+            candidate = soften_singlish_k(_Rewrite.model_validate_json(reply.text).reply.strip(), english)
         except ValidationError:
             return done(None, "INVALID_OUTPUT", reply)
         if not preserves_facts(english, candidate):

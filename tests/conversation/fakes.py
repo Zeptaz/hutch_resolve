@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -19,6 +19,7 @@ from typing import Any, Callable
 from uuid import UUID, uuid4
 
 from resolve.conversation.dto import (
+    ActionType,
     AuthContext,
     CaseView,
     ComplaintType,
@@ -34,6 +35,7 @@ from resolve.conversation.dto import (
     ProposalRequest,
     ProposalView,
     Role,
+    SubscriptionSummary,
     TurnResult,
     VoiceConsentEvidence,
 )
@@ -335,11 +337,24 @@ class FakeResolveFacade:
         self.escalation_reasons: list[str] = []
         self.handoffs: dict[UUID, dict] = {}
         self._ids = itertools.count(1)
+        # Package prototype: activation requests are not cases; their effects show on the account.
+        self.package_requests: dict[UUID, UUID] = {}  # request id (ProposalView.case_id) -> account id
+        self.activations: dict[UUID, Any] = {}  # proposal id -> PackageOffer
+        self.balance_delta: Counter[UUID] = Counter()
+        self.extra_subscriptions: defaultdict[UUID, list[SubscriptionSummary]] = defaultdict(list)
 
     def _maybe_fail(self, method: str) -> None:
         self.calls[method] += 1
         if method in self.fail_next:
             raise self.fail_next.pop(method)
+
+    def _scope(self, ctx: AuthContext, case_id: UUID) -> None:
+        """A case, or a package activation request, owned by this customer."""
+        if case_id in self.package_requests:
+            if ctx.role is not Role.CUSTOMER or self.package_requests[case_id] != ctx.account_id:
+                raise ResolveError("RESOURCE_NOT_FOUND")
+            return
+        self._scoped_case(ctx, case_id)
 
     def _scoped_case(self, ctx: AuthContext, case_id: UUID) -> CaseView:
         case = self.cases.get(case_id)
@@ -357,7 +372,11 @@ class FakeResolveFacade:
             raise ResolveError("ROLE_FORBIDDEN")
         from resolve.conversation.dto import AccountView
 
-        return AccountView.model_validate(example("account")).model_copy(update={"id": ctx.account_id})
+        account = AccountView.model_validate(example("account")).model_copy(update={"id": ctx.account_id})
+        balances = [b.model_copy(update={"amount_minor": b.amount_minor + self.balance_delta[ctx.account_id]})
+                    if b.wallet == "MAIN" else b for b in account.balances]
+        return account.model_copy(update={"balances": balances,
+                                          "subscriptions": account.subscriptions + self.extra_subscriptions[ctx.account_id]})
 
     async def create_case(self, ctx, conversation_id, turn_id, complaint_type: ComplaintType, *, expected_conversation_version: int):
         self._maybe_fail("create_case")
@@ -471,7 +490,7 @@ class FakeResolveFacade:
         proposal = self.proposals.get(proposal_id)
         if proposal is None:
             raise ResolveError("RESOURCE_NOT_FOUND")
-        self._scoped_case(ctx, proposal.case_id)
+        self._scope(ctx, proposal.case_id)
         if command_key in self._by_key:
             return self._by_key[command_key]
         if request.proposal_hash != proposal.proposal_hash:
@@ -513,7 +532,9 @@ class FakeResolveFacade:
             ),
             operation=operation,
         )
-        if operation:
+        if operation and proposal.case_id in self.package_requests:
+            self._accepted[proposal_id] = result
+        elif operation:
             self._accepted[proposal_id] = result
             case = self.cases[proposal.case_id]
             self.cases[proposal.case_id] = case.model_copy(
@@ -552,7 +573,28 @@ class FakeResolveFacade:
         operation = self.operations.get(operation_id)
         if operation is None:
             raise ResolveError("RESOURCE_NOT_FOUND")
-        self._scoped_case(ctx, operation.case_id)
+        self._scope(ctx, operation.case_id)
+        return operation
+
+    def complete_activation(self, operation_id: UUID, now: datetime) -> OperationView:
+        """Simulated provider success for a package activation: debit the price, add the package."""
+        operation = self.operations[operation_id]
+        if operation.status != "PENDING":
+            return operation
+        package = self.activations[operation.proposal_id]
+        account_id = self.package_requests[operation.case_id]
+        self.balance_delta[account_id] -= package.price_minor
+        self.extra_subscriptions[account_id].append(SubscriptionSummary(
+            id=uuid4(), name=package.name, kind="PACKAGE", status="ACTIVE", version=1, remaining_bytes=package.data_bytes,
+            expires_at=now + timedelta(days=package.validity_days), renewal=False,
+        ))
+        from resolve.conversation.dto import OperationStatus
+
+        operation = operation.model_copy(update={
+            "status": OperationStatus.SUCCEEDED, "updated_at": now, "next_step": "Simulated activation, not a real provider readback.",
+            "outcome": operation.outcome.model_copy(update={"code": "SIMULATED", "actual_target_status": "ACTIVE"}),
+        })
+        self.operations[operation_id] = operation
         return operation
 
     async def get_receipt(self, ctx, case_id, revision=None):
@@ -565,6 +607,84 @@ class FakeResolveFacade:
         return ReceiptView.model_validate(example("receipt")).model_copy(
             update={"case_id": case_id, "handoff": Handoff.model_validate(handoff) if handoff else None}
         )
+
+
+# --- PackagePort (PROTOTYPE, packages.py) --------------------------------------------
+
+GB_BYTES = 1_000_000_000
+# Synthetic simulation catalogue: not HUTCH packages or prices.
+PACKAGE_CATALOGUE = [
+    ("91000000-0000-4000-8000-000000000201", "Synthetic 1-day 1 GB data", 4900, 1, 1),
+    ("91000000-0000-4000-8000-000000000202", "Synthetic 7-day 6 GB data", 19900, 7, 6),
+    ("91000000-0000-4000-8000-000000000203", "Synthetic 30-day 12 GB data", 29900, 30, 12),
+    ("91000000-0000-4000-8000-000000000204", "Synthetic 30-day 25 GB data", 39900, 30, 25),
+    ("91000000-0000-4000-8000-000000000205", "Synthetic 30-day 50 GB data", 69900, 30, 50),
+]
+# 30 days ending at the fixture clock: a 20 GB package used up, then 0.8 GB charged outside it (as in B).
+USAGE_30_DAYS = {
+    "window_days": 30, "data_used_bytes": 20_800_000_000, "out_of_bundle_bytes": 800_000_000,
+    "out_of_bundle_charge_minor": 8000, "last_package_name": "Synthetic 30-day 20 GB data",
+    "last_package_ran_out_at": "2026-10-02T04:45:00Z", "as_of": "2026-10-02T06:30:00Z",
+}
+
+
+class FakePackagePort:
+    """Catalogue, usage and activation offers for any signed-in customer; offers confirm via the facade."""
+
+    def __init__(self, facade: FakeResolveFacade) -> None:
+        from resolve.conversation.packages import PackageOffer, UsageSummary
+
+        self._facade = facade
+        self.packages = [PackageOffer(id=UUID(i), name=n, price_minor=price, validity_days=days, data_bytes=gb * GB_BYTES)
+                         for i, n, price, days, gb in PACKAGE_CATALOGUE]
+        self.usage = UsageSummary.model_validate(USAGE_30_DAYS)
+
+    def _customer(self, ctx) -> None:
+        if ctx.role is not Role.CUSTOMER or ctx.account_id is None:
+            raise ResolveError("ROLE_FORBIDDEN")
+
+    async def list_packages(self, ctx):
+        self._facade._maybe_fail("list_packages")
+        self._customer(ctx)
+        return list(self.packages)
+
+    async def get_usage_summary(self, ctx):
+        self._facade._maybe_fail("get_usage_summary")
+        self._customer(ctx)
+        return self.usage
+
+    async def propose_activation(self, ctx, conversation_id, package_id, command_key):
+        from resolve.conversation.packages import describe
+        from resolve.conversation.templates import format_lkr
+
+        facade = self._facade
+        facade._maybe_fail("propose_activation")
+        self._customer(ctx)
+        if command_key in facade._by_key:
+            return facade._by_key[command_key]
+        package = next((p for p in self.packages if p.id == package_id), None)
+        if package is None:
+            raise ResolveError("RESOURCE_NOT_FOUND")
+        account = await facade.get_account(ctx)
+        balance = next(b.amount_minor for b in account.balances if b.wallet == "MAIN")
+        if balance < package.price_minor:
+            raise ResolveError("ACTION_NOT_ALLOWED", details={"reason": "BALANCE_TOO_LOW"})
+        shown = describe(package)
+        request_id = uuid4()
+        facade.package_requests[request_id] = ctx.account_id
+        proposal = ProposalView(
+            id=uuid4(), case_id=request_id, investigation_id=uuid4(), action_type=ActionType.ACTIVATE_PACKAGE,
+            target_id=package.id, target_version=1, target_label=package.name,
+            consequences=(f"{shown['price']} is taken from your main balance ({format_lkr(balance)} now, "
+                          f"{format_lkr(balance - package.price_minor)} after). You get {shown['data']} for "
+                          f"{shown['validity']}. Simulation: no real HUTCH package is bought."),
+            proposal_hash=hashlib.sha256(f"activate:{request_id}:{package.id}:{balance}".encode()).hexdigest(),
+            expires_at=facade._clock() + timedelta(minutes=5), simulation=True,
+        )
+        facade.proposals[proposal.id] = proposal
+        facade.activations[proposal.id] = package
+        facade._by_key[command_key] = proposal
+        return proposal
 
 
 class RecordingTelemetry:

@@ -42,8 +42,10 @@ from .dto import (
     InputType,
     InvestigationRequest,
     InvestigationResult,
+    KnowledgeCard,
     Language,
     NormalizedTurn,
+    OperationStatus,
     PendingQuestion,
     ProposalRequest,
     ProposalView,
@@ -73,7 +75,9 @@ from .extraction import (
     resolve_window,
 )
 from .identity import command_key, turn_fingerprint
+from .agent import AGENT_PROMPT_VERSION, PackageAgent
 from .answer import ANSWER_PROMPT_VERSION, GroundedAnswerer
+from .packages import PackageOffer, PackagePort, describe, facts as package_facts, recommend
 from .rewrite import REWRITE_PROMPT_VERSION, ReplyRewriter
 from .ports import (
     ConversationRepository,
@@ -85,12 +89,13 @@ from .ports import (
     ResolveFacade,
     TurnDraft,
 )
-from .state import ActionChoice, Candidate, DialogueState, PendingProposalRef
+from .state import ActionChoice, ActivationRef, Candidate, DialogueState, PendingProposalRef, ShownPackage
 
 MAX_WINDOW = timedelta(days=30)
 # One deadline per turn shared by every model call: Voice must answer inside its 8 s read timeout.
 TURN_BUDGET_SECONDS = {Channel.TEXT: 15.0, Channel.VOICE: 7.0}
 MIN_REWRITE_SECONDS = 1.5  # below this, keep the English reply rather than risk the deadline
+MIN_AGENT_SECONDS = 3.0  # the package agent needs at least one model call
 _DEADLINE: ContextVar[float | None] = ContextVar("turn_deadline", default=None)
 # Knowledge topics where a signed-in customer's current balance is useful context.
 _BALANCE_TOPICS = {"how-to-reload", "check-balance-how", "reload-not-received", "prepaid-recharge"}
@@ -147,6 +152,8 @@ class ConversationService:
         turn_budgets: dict[Channel, float] | None = None,
         answerer: GroundedAnswerer | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        packages: PackagePort | None = None,
+        package_agent: PackageAgent | None = None,
     ) -> None:
         """`simulation_now` returns the scoped run's simulation clock (Harry); business
         windows use it, while auth and proposal expiry stay on real time in Resolve."""
@@ -160,6 +167,9 @@ class ConversationService:
         self._budgets = {**TURN_BUDGET_SECONDS, **(turn_budgets or {})}
         self._answerer = answerer  # grounded how-to answers from knowledge cards (answer.py)
         self._monotonic = monotonic
+        # PROTOTYPE (packages.py, agent.py): package suggestions/activation, only with a configured port.
+        self._packages = packages
+        self._package_agent = package_agent
 
     async def handle_turn(self, ctx: AuthContext, turn: NormalizedTurn) -> TurnResult:
         _check_trusted_fields(ctx, turn)
@@ -228,6 +238,15 @@ class ConversationService:
             return _confirm_prompt(state, turn.channel)
         if intent is Intent.FAQ:
             return await self._faq(ctx, turn, inp.text, extraction, state)
+        if intent is Intent.OFF_TOPIC:
+            return _ask(state, Q_CHOOSE_COMPLAINT, t.text("off_topic", state.language), ["category_selection", "text"])
+        if intent is Intent.PACKAGES:
+            if self._packages is None:  # no package service: explain how to do it instead
+                how_to = extraction.model_copy(update={"faq_query": extraction.faq_query or "activate data package"})
+                return await self._faq(ctx, turn, inp.text, how_to, state)
+            if not _is_customer(ctx):
+                return _ask(state, Q_LOGIN_REQUIRED, t.text("packages_login", state.language), ["text"])
+            return await self._package_turn(ctx, turn, inp.text, state)
         if not _is_customer(ctx):
             if intent is Intent.OTHER:
                 return _ask(state, Q_LOGIN_REQUIRED, t.text("guest_help", state.language), ["text"])
@@ -274,6 +293,7 @@ class ConversationService:
             active_case_complaint_type=active_type,
             has_pending_proposal=state.pending_proposal is not None,
             actions_offered=tuple(c.action_type.value for c in state.pending_choices),
+            packages_shown=tuple(p.name for p in state.packages_shown),
         )
         outcome = await self._extractor.extract(text, context, budget_seconds=self._remaining())
         await self._record_usage(ctx, turn, state, outcome)
@@ -283,8 +303,8 @@ class ConversationService:
         """Re-express the reply in the customer's language/style; keep English on any doubt."""
         if self._rewriter is None or self._rewriter.style_for(state.language, state.script) is None:
             return draft
-        if draft.citations:
-            return draft  # reviewed knowledge text is shown exactly as reviewed, never machine-rewritten
+        if draft.citations or draft.localized:
+            return draft  # reviewed knowledge text, or already written in the customer's style
         remaining = self._remaining()
         if remaining < MIN_REWRITE_SECONDS:
             return draft  # not enough of the turn budget left (e.g. Voice after a slow extraction)
@@ -481,6 +501,8 @@ class ConversationService:
     async def _status(self, ctx: AuthContext, state: DialogueState) -> Step:
         lang = state.language
         if state.active_case_id is None:
+            if state.last_activation is not None:
+                return await self._activation_status(ctx, state)
             return _ask(state, Q_CHOOSE_COMPLAINT, t.text("no_active_case", lang), ["category_selection", "text"])
         case = await self._facade.get_case(ctx, state.active_case_id)
         parts = [t.text("case_status", lang, complaint=t.complaint_label(case.complaint_type, lang), status=t.case_status_label(case.status, lang))]
@@ -498,6 +520,10 @@ class ConversationService:
             parts.append(t.text("receipt_ready", lang))
             cards.append(ReceiptCard(data=ReceiptCardData(case_id=case.id, receipt_id=receipt.id, revision=receipt.revision)))
         draft = TurnDraft(reply_text=" ".join(parts), case_id=case.id, cards=cards, operation_ids=operation_ids)
+        if state.last_activation is not None:  # package prototype: report the latest activation too
+            activation, _ = await self._activation_status(ctx, state)
+            draft = TurnDraft(reply_text=f"{draft.reply_text} {activation.reply_text}", case_id=case.id,
+                              cards=draft.cards + activation.cards, operation_ids=operation_ids + activation.operation_ids)
         return draft, state
 
     async def _human_request(self, ctx: AuthContext, turn: NormalizedTurn, ex: Extraction, state: DialogueState) -> Step:
@@ -567,6 +593,110 @@ class ConversationService:
                               version=c.version, scope=c.scope) for c in outcome.used]
         return TurnDraft(reply_text=outcome.text, case_id=state.active_case_id, cards=extra_cards, citations=citations,
                          source_reply_text=" ".join(c.content for c in outcome.used))
+
+    # --- packages (PROTOTYPE: packages.py, agent.py) -----------------------------
+
+    async def _package_turn(self, ctx: AuthContext, turn: NormalizedTurn, text: str, state: DialogueState) -> Step:
+        """Suggest packages from the customer's own usage; activation only through a confirmation card."""
+        lang = state.language
+        try:
+            account = await self._facade.get_account(ctx)
+            usage = await self._packages.get_usage_summary(ctx)
+            catalogue = await self._packages.list_packages(ctx)
+        except ResolveError as err:
+            if err.code not in {"DEPENDENCY_UNAVAILABLE", "RESOURCE_NOT_FOUND", "RATE_LIMITED"}:
+                raise
+            return TurnDraft(reply_text=t.text("packages_unavailable", lang), case_id=state.active_case_id), state
+        if not catalogue:
+            return TurnDraft(reply_text=t.text("packages_unavailable", lang), case_id=state.active_case_id), state
+        main = next((b for b in account.balances if b.wallet.upper() == "MAIN"), None)
+        balance = main.amount_minor if main else None
+        keys = {p.id: f"P{i + 1}" for i, p in enumerate(catalogue)}
+        by_key = {key: p for p, key in ((p, keys[p.id]) for p in catalogue)}
+        ranked = recommend(usage, catalogue, balance)
+        data = package_facts(usage, catalogue, ranked, keys, balance, main.as_of if main else None)
+        if state.last_activation is not None:
+            try:
+                operation = await self._facade.get_operation(ctx, state.last_activation.operation_id)
+                data["last_activation_request"] = {"package": state.last_activation.package_label,
+                                                   "status": t.operation_status_text(operation.status, Language.EN)}
+            except ResolveError:
+                pass
+        tools = _PackageTools(self, ctx, turn, by_key, balance, lang)
+
+        outcome = None
+        if self._package_agent is not None and self._remaining() >= MIN_AGENT_SECONDS:
+            pending = state.pending_proposal
+            conversation = {
+                "packages_shown_before": [{"key": keys[p.id], "name": p.name} for p in state.packages_shown if p.id in keys],
+                "activation_offer_open": pending.target_label if pending and pending.action_type is ActionType.ACTIVATE_PACKAGE else None,
+            }
+            outcome = await self._package_agent.run(
+                text, GroundedAnswerer.style_for(lang, state.script), data, conversation, tools,
+                budget_seconds=self._remaining() - 0.5,
+            )
+            await self._record_agent(ctx, turn, state, outcome)
+
+        proposal = tools.proposal
+        fallback = _package_fallback(data, lang)
+        if outcome is not None and outcome.reply is not None:
+            reply, localized = outcome.reply, True
+            mentioned = [by_key[k] for k in outcome.mentioned_keys if k in by_key]
+        elif proposal is not None:  # the agent prepared an offer but its reply failed the checks
+            reply, localized, mentioned = _offer_draft(proposal, lang, proposal.case_id).reply_text, False, []
+        else:
+            reply, localized, mentioned = fallback, False, [r.package for r in ranked]
+            best = ranked[0] if ranked else None
+            if self._package_agent is None and best is not None and best.affordable_now:
+                # No model: offer the best fit directly, so buttons alone can still activate it.
+                await tools.offer_activation(keys[best.package.id])
+                proposal = tools.proposal
+            hint = "package_offer_hint" if proposal is not None else ("package_choose" if self._package_agent else None)
+            if hint:
+                reply = f"{reply} {t.text(hint, lang)}"
+
+        question = None
+        if proposal is not None:
+            question = PendingQuestion(code=Q_CONFIRM_ACTION, text=t.text("confirm_prompt", lang),
+                                       allowed_input_types=["action_decision", "text"])
+        # Remember a list ("the second one" refers to it); a reply about one package keeps the previous list.
+        shown = [ShownPackage(id=p.id, name=p.name) for p in mentioned] if len(mentioned) >= 2 else state.packages_shown
+        new_state = state.evolve(
+            packages_shown=shown,
+            pending_question=question or (state.pending_question if state.pending_proposal else None),
+        )
+        if proposal is not None:
+            new_state = new_state.evolve(pending_proposal=_proposal_ref(proposal, turn))
+        citations = _citations(tools.help_cards) if localized else []
+        draft = TurnDraft(
+            reply_text=reply, case_id=proposal.case_id if proposal else state.active_case_id,
+            cards=[ConfirmationCard(data=proposal)] if proposal else [], citations=citations, pending_question=question,
+            source_reply_text=fallback if localized else None, localized=localized,
+        )
+        return draft, new_state
+
+    async def _record_agent(self, ctx: AuthContext, turn: NormalizedTurn, state: DialogueState, outcome) -> None:
+        client = self._package_agent.client
+        for number, step in enumerate(outcome.steps, start=1):
+            reply = step.reply
+            await self._safe_record(ctx, ModelCallRecord(
+                request_id=ctx.request_id, conversation_id=turn.conversation_id, case_id=state.active_case_id,
+                purpose="PACKAGE_AGENT", prompt_version=AGENT_PROMPT_VERSION, attempt=number,
+                provider=reply.provider if reply else client.provider, model=reply.model if reply else client.model_name,
+                outcome=step.outcome, latency_ms=step.latency_ms,
+                input_tokens=reply.input_tokens if reply else None, output_tokens=reply.output_tokens if reply else None,
+                error_type=step.error_type,
+            ))
+
+    async def _activation_status(self, ctx: AuthContext, state: DialogueState) -> Step:
+        lang = state.language
+        ref = state.last_activation
+        operation = await self._facade.get_operation(ctx, ref.operation_id)
+        reply = t.text("activation_status", lang, package=ref.package_label, status=t.operation_status_text(operation.status, lang))
+        cards: list = []
+        if operation.status == OperationStatus.SUCCEEDED:
+            cards.append(AccountCard(data=await self._facade.get_account(ctx)))
+        return TurnDraft(reply_text=reply, case_id=None, cards=cards, operation_ids=[operation.id]), state
 
     # --- structured paths -----------------------------------------------------
 
@@ -701,6 +831,12 @@ class ConversationService:
             base = TurnDraft(reply_text=t.text("declined", lang), case_id=pending.case_id)
         else:
             base = _operation_draft(result.operation, pending.action_type, lang)
+        if pending.action_type is ActionType.ACTIVATE_PACKAGE and decision is Decision.ACCEPT and result.operation is not None:
+            label = pending.target_label or t.action_label(pending.action_type, lang)
+            status = t.operation_status_text(result.operation.status, lang)
+            base = TurnDraft(reply_text=t.text("accepted_package", lang, package=label, status=status),
+                             case_id=pending.case_id, operation_ids=[result.operation.id])
+            cleared = cleared.evolve(last_activation=ActivationRef(operation_id=result.operation.id, package_label=label))
         remaining = [c for c in state.pending_choices if c.case_id == pending.case_id]
         others = [c for c in state.pending_choices if c.case_id != pending.case_id]
         if remaining:
@@ -834,6 +970,66 @@ def _window_problem(inp: DetailsInput) -> str | None:
     if inp.window_end - inp.window_start > MAX_WINDOW:
         return "invalid_window_length"
     return None
+
+
+class _PackageTools:
+    """The package agent's only tools. Scoped by code to this customer, conversation and turn."""
+
+    def __init__(self, service: "ConversationService", ctx: AuthContext, turn: NormalizedTurn,
+                 packages: dict[str, PackageOffer], balance_minor: int | None, lang: Language) -> None:
+        self._service, self._ctx, self._turn = service, ctx, turn
+        self._packages, self._balance, self._lang = packages, balance_minor, lang
+        self.proposal: ProposalView | None = None
+        self.help_cards: list[KnowledgeCard] = []
+
+    async def offer_activation(self, package_key: str) -> dict:
+        package = self._packages.get(package_key)
+        if package is None:
+            return {"ok": False, "error": "UNKNOWN_PACKAGE"}
+        if self.proposal is not None:
+            return {"ok": False, "error": "ALREADY_OFFERED_THIS_TURN"}
+        turn = self._turn
+        try:
+            self.proposal = await self._service._packages.propose_activation(
+                self._ctx, turn.conversation_id, package.id, command_key(turn.conversation_id, turn.turn_id, "activate", package.id)
+            )
+        except ResolveError as err:
+            if err.code != "ACTION_NOT_ALLOWED":
+                raise
+            short = None if self._balance is None else package.price_minor - self._balance
+            return {"ok": False, "error": (err.details or {}).get("reason", "NOT_ALLOWED"), "package": describe(package),
+                    "main_balance": t.format_lkr(self._balance) if self._balance is not None else None,
+                    "reload_needed_first": t.format_lkr(short) if short and short > 0 else None}
+        after = None if self._balance is None else t.format_lkr(self._balance - package.price_minor)
+        return {"ok": True, "offer_card_shown_for": describe(package), "balance_after_if_accepted": after,
+                "note": "Nothing is activated until the customer taps 'Yes, go ahead' on the card."}
+
+    async def search_help(self, query: str) -> dict:
+        cards = await self._service._knowledge.search(self._ctx, query, self._lang, limit=2)
+        self.help_cards += [c for c in cards if c not in self.help_cards]
+        return {"articles": [{"title": c.title, "content": c.content} for c in cards]}
+
+
+def _package_fallback(data: dict, lang: Language) -> str:
+    """Deterministic English suggestion from code-ranked facts (used without a model or when it fails)."""
+    recommendations = data["recommendations"]
+    if not recommendations:
+        return t.text("packages_unavailable", lang)
+    best, others = recommendations[0], recommendations[1:]
+    usage = data["usage"]
+    parts = [t.text("package_best_fit", lang, period=usage["period"], used=usage["data_used"], name=best["name"],
+                    data=best["data"], validity=best["validity"], price=best["price"])]
+    if others:
+        options = "; ".join(f"{o['name']} ({o['data']}, {o['validity']}, {o['price']})" for o in others)
+        parts.append(t.text("package_alternatives", lang, options=options))
+    if best["reload_needed_first"]:
+        parts.append(t.text("package_reload_first", lang, balance=data["main_balance"], reload=best["reload_needed_first"]))
+    return " ".join(parts)
+
+
+def _citations(cards: list[KnowledgeCard]) -> list[Citation]:
+    return [Citation(article_id=c.article_id, title=c.title, url=c.url, reviewed_at=c.reviewed_at, version=c.version,
+                     scope=c.scope) for c in cards]
 
 
 def _offer_draft(proposal: ProposalView, lang: Language, case_id) -> TurnDraft:

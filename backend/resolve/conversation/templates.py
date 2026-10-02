@@ -69,12 +69,23 @@ _EN: dict[str, str] = {
     "user_case_selection": "Switch to another case",
     "user_accept": "Yes, go ahead.",
     "user_decline": "No, don't make that change.",
+    "off_topic": "I can only help with your HUTCH prepaid line: balance, reloads, data, packages, connection and services. What can I help you with?",
+    "packages_login": "Please sign in so I can look at your data use and suggest a package. You can still ask me how packages work.",
+    "packages_unavailable": "I couldn't load the packages right now. Please try again in a moment.",
+    "package_best_fit": "In the {period} you used {used} of data. The best fit is {name}: {data} for {validity}, {price}.",
+    "package_alternatives": "Other options: {options}.",
+    "package_offer_hint": "Tap 'Yes, go ahead' on the offer to activate it, or tell me which other package you'd like.",
+    "package_choose": "Tell me which one you'd like and I'll prepare it for you to confirm.",
+    "package_reload_first": "Your main balance is {balance}, so you would need to reload at least {reload} first.",
+    "accepted_package": "Activation of {package} is requested. {status}",
+    "activation_status": "Your {package} activation: {status}",
 }
 
 _ACTION_LABELS_EN: dict[ActionType, str] = {
     ActionType.DEACTIVATE_VAS: "stop future renewals",
     ActionType.SEND_SETTINGS_INSTRUCTIONS: "send settings instructions",
     ActionType.CREATE_REVIEW_TICKET: "send this to our review team",
+    ActionType.ACTIVATE_PACKAGE: "activate the package",
 }
 
 _COMPLAINT_LABELS_EN: dict[ComplaintType, str] = {

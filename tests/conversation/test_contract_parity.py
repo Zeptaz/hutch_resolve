@@ -28,6 +28,9 @@ MIRRORS: dict[str, type[BaseModel]] = {
     ]
 }
 ENUMS = ["Language", "ComplaintType", "Decision", "ActionType", "EvidenceState", "OperationStatus", "ReviewStatus", "DeliveryState"]
+# Prototype-only values proposed to Harry/Jayith (docs/plans/tevin.md, CP-1); remove once the contract adopts them.
+PROPOSED_EXTENSIONS = {"ActionType": {"ACTIVATE_PACKAGE"}}
+PROPOSED_VALUES = set().union(*PROPOSED_EXTENSIONS.values())
 
 
 @pytest.mark.parametrize("name", sorted(MIRRORS))
@@ -82,13 +85,20 @@ def test_property_enum_values_match_openapi(name: str) -> None:
         expected = _allowed_values(prop)
         if expected is None:
             continue
-        actual = _model_values(model.model_fields[field].annotation)
+        actual = _model_values(model.model_fields[field].annotation) - PROPOSED_VALUES
         assert actual == expected, f"{name}.{field}: model {actual} != contract {expected}"
 
 
 @pytest.mark.parametrize("name", ENUMS)
 def test_enums_match_openapi(name: str) -> None:
-    assert {member.value for member in getattr(dto, name)} == set(SCHEMAS[name]["enum"])
+    proposed = PROPOSED_EXTENSIONS.get(name, set())
+    assert {member.value for member in getattr(dto, name)} - proposed == set(SCHEMAS[name]["enum"])
+
+
+@pytest.mark.parametrize("name", sorted(PROPOSED_EXTENSIONS))
+def test_proposed_extensions_are_not_yet_in_the_contract(name: str) -> None:
+    # Fails once the contract adopts them: then drop the allowance above.
+    assert not PROPOSED_EXTENSIONS[name] & set(SCHEMAS[name]["enum"])
 
 
 # Contract gap on ResolveDev 48c35ad: ConfirmationView gained required operation_status/simulation,
