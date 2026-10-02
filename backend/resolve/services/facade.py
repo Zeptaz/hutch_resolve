@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import unicodedata
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -11,11 +12,36 @@ from sqlalchemy import Engine, text
 
 from backend.resolve.app.auth import AuthContext, ResolveError
 from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_quota, reconcile_recharge_records, reconcile_service_status, reconcile_statement
+from .voice_consent import VoiceConsentEvidence
 from .review import AgentReviewService
 
 ALLOWED_LANGUAGES = {"en", "si", "ta"}
 ALLOWED_COMPLAINTS = {"BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE"}
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
+
+VOICE_DECISIONS = {
+    "en": {"ACCEPT": {"yes", "yes i confirm", "i confirm", "confirm", "yes please"},
+           "DECLINE": {"no", "no thank you", "i decline", "decline"}},
+    "si": {"ACCEPT": {"ඔව්", "ඔව් මම එකඟයි", "මම එකඟයි"},
+           "DECLINE": {"නැහැ", "නෑ", "මම එකඟ නැහැ"}},
+    "ta": {"ACCEPT": {"ஆம்", "ஆமாம்", "நான் ஒப்புக்கொள்கிறேன்"},
+           "DECLINE": {"இல்லை", "வேண்டாம்", "நான் மறுக்கிறேன்"}},
+}
+
+
+def _voice_decision(transcript: str, language: str) -> str | None:
+    """Only a complete, unqualified affirmative or refusal can decide an action."""
+    if language not in VOICE_DECISIONS or not isinstance(transcript, str):
+        return None
+    normalized = unicodedata.normalize("NFC", transcript).casefold().strip()
+    if "?" in normalized or "؟" in normalized:
+        return None
+    normalized = normalized.strip(" \t\r\n.!।,;:…")
+    normalized = " ".join(normalized.split())
+    for decision, allowed in VOICE_DECISIONS[language].items():
+        if normalized in allowed:
+            return decision
+    return None
 
 
 def _fingerprint(value: dict[str, Any]) -> str:
@@ -624,28 +650,118 @@ class ResolveFacade:
                 "consequences": consequences.get("text", "Review the proposed action before confirming."),
                 "proposal_hash": row["proposal_hash"], "expires_at": row["expires_at"], "simulation": True}
 
+    @staticmethod
+    def _check_voice_consent(connection: Any, context: AuthContext, *, consent: VoiceConsentEvidence,
+                             proposal: Any, proposal_id: UUID, proposal_hash: str,
+                             decision: str, client_turn_id: UUID, now: datetime,
+                             check_presentation: bool = True) -> None:
+        if (consent.turn_id != client_turn_id or consent.presented_proposal_id != proposal_id
+                or consent.presented_proposal_hash != proposal_hash or not consent.presentation_response_id):
+            raise ResolveError(409, "VOICE_PRESENTATION_INVALID", "Voice proposal presentation does not match")
+        interpreted = _voice_decision(consent.final_transcript, consent.language)
+        if interpreted is None:
+            raise ResolveError(422, "VOICE_CONSENT_UNCLEAR", "Please say a clear yes or no before continuing")
+        if interpreted != decision:
+            raise ResolveError(409, "VOICE_DECISION_MISMATCH", "Voice decision does not match the final transcript")
+        binding = connection.execute(text("""
+            SELECT b.id,b.conversation_id,b.account_id,b.voice_session_id,b.expires_at,b.revoked_at,
+                   c.session_id,c.expires_at AS conversation_expires_at,
+                   s.role,s.account_id AS session_account_id,s.expires_at AS session_expires_at,s.revoked_at AS session_revoked_at,
+                   r.run_status
+            FROM resolve.voice_bindings b
+            JOIN resolve.conversations c ON (c.sandbox_id,c.id)=(b.sandbox_id,b.conversation_id)
+            JOIN resolve.sessions s ON (s.sandbox_id,s.id)=(c.sandbox_id,c.session_id)
+            JOIN sandbox.sandbox_runs r ON r.id=b.sandbox_id
+            WHERE b.id=:binding AND b.sandbox_id=:sandbox AND b.account_id=:account
+            FOR SHARE OF b,c,s
+        """), {"binding": consent.binding_id, "sandbox": context.sandbox_id,
+               "account": context.account_id}).mappings().one_or_none()
+        if (binding is None or binding["conversation_id"] != consent.conversation_id
+                or binding["voice_session_id"] != consent.voice_session_id
+                or binding["session_id"] != context.session_id or binding["role"] != "CUSTOMER"
+                or binding["account_id"] != binding["session_account_id"]
+                or binding["run_status"] != "ACTIVE" or binding["revoked_at"] is not None
+                or binding["session_revoked_at"] is not None or binding["expires_at"] <= now
+                or binding["session_expires_at"] <= now or binding["conversation_expires_at"] <= now):
+            raise ResolveError(404, "NOT_FOUND", "Voice binding is unavailable")
+        if not check_presentation:
+            return
+        # The presentation must be the latest completed proposal response for this conversation.
+        presented = connection.execute(text("""
+            SELECT result FROM resolve.turn_claims
+            WHERE sandbox_id=:sandbox AND conversation_id=:conversation
+              AND input_payload->>'binding_id'=:binding_id
+              AND completed_at IS NOT NULL AND result->'proposal' IS NOT NULL
+            ORDER BY completed_at DESC,client_turn_id DESC LIMIT 1
+        """), {"sandbox": context.sandbox_id,
+               "conversation": consent.conversation_id,
+               "binding_id": str(consent.binding_id)}).scalar_one_or_none()
+        if not isinstance(presented, dict):
+            raise ResolveError(409, "VOICE_PRESENTATION_INVALID", "Voice proposal presentation was not recorded")
+        shown = presented.get("proposal")
+        if (str(presented.get("response_id")) != consent.presentation_response_id
+                or not isinstance(shown, dict) or str(shown.get("id")) != str(proposal_id)
+                or shown.get("proposal_hash") != proposal_hash):
+            raise ResolveError(409, "VOICE_PRESENTATION_INVALID", "Voice proposal presentation does not match")
+        latest_revision = connection.execute(text("""
+            SELECT max(revision) FROM resolve.investigations WHERE case_id=:case
+        """), {"case": proposal["case_id"]}).scalar_one_or_none()
+        if latest_revision != proposal["evidence_revision"]:
+            raise ResolveError(409, "STALE_VERSION", "A newer investigation invalidated this proposal")
+
     def confirm_action(self, context: AuthContext, *, proposal_id: UUID, proposal_hash: str,
-                       decision: str, client_turn_id: UUID) -> dict[str, Any]:
+                       decision: str, client_turn_id: UUID,
+                       voice_consent: VoiceConsentEvidence | None = None) -> dict[str, Any]:
         if context.role != "CUSTOMER" or not context.account_id or not context.sandbox_id:
             raise ResolveError(403, "ROLE_FORBIDDEN", "A customer session is required to confirm an action")
         if decision not in {"ACCEPT", "DECLINE"}:
             raise ResolveError(422, "VALIDATION_ERROR", "Decision must be ACCEPT or DECLINE")
-        fingerprint = _fingerprint({"proposal_id": str(proposal_id), "proposal_hash": proposal_hash, "decision": decision})
+        if context.channel == "VOICE" and voice_consent is None:
+            raise ResolveError(422, "VOICE_CONSENT_REQUIRED", "Trusted Voice consent evidence is required")
+        if context.channel != "VOICE" and voice_consent is not None:
+            raise ResolveError(422, "VALIDATION_ERROR", "Voice consent cannot be used on this channel")
+        fingerprint_data = {"proposal_id": str(proposal_id), "proposal_hash": proposal_hash, "decision": decision}
+        if voice_consent is not None:
+            fingerprint_data["voice_consent"] = {
+                "binding_id": str(voice_consent.binding_id), "voice_session_id": voice_consent.voice_session_id,
+                "conversation_id": str(voice_consent.conversation_id), "turn_id": str(voice_consent.turn_id),
+                "language": voice_consent.language, "transcript": voice_consent.final_transcript,
+                "presentation_response_id": voice_consent.presentation_response_id,
+                "presented_proposal_id": str(voice_consent.presented_proposal_id),
+                "presented_proposal_hash": voice_consent.presented_proposal_hash,
+            }
+        fingerprint = _fingerprint(fingerprint_data)
         now = datetime.now(UTC)
         with self._engine.begin() as connection:
-            prior = connection.execute(text("SELECT c.*,o.id AS operation_id,o.status AS operation_status FROM resolve.confirmations c LEFT JOIN resolve.operations o ON o.confirmation_id=c.id WHERE c.sandbox_id=:sandbox AND c.actor_session_id=:session AND c.client_turn_id=:turn"),
-                {"sandbox": context.sandbox_id, "session": context.session_id, "turn": client_turn_id}).mappings().one_or_none()
-            if prior:
-                if prior["request_fingerprint"] != fingerprint:
-                    raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Confirmation turn was used with different input")
-                return {"id": prior["id"], "proposal_id": prior["proposal_id"], "proposal_hash": prior["proposal_hash"],
-                        "decision": prior["decision"], "channel": prior["source_channel"], "client_turn_id": client_turn_id,
-                        "created_at": prior["recorded_at"], "operation_id": prior["operation_id"],
-                        "operation_status": prior["operation_status"], "simulation": True}
-            proposal = connection.execute(text("SELECT p.*,c.account_id,c.version AS current_case_version FROM resolve.action_proposals p JOIN resolve.cases c ON c.id=p.case_id AND c.sandbox_id=p.sandbox_id WHERE p.id=:id AND p.sandbox_id=:sandbox AND c.account_id=:account FOR UPDATE OF p"),
-                {"id": proposal_id, "sandbox": context.sandbox_id, "account": context.account_id}).mappings().one_or_none()
-            if proposal is None or proposal["actor_session_id"] != context.session_id:
+            case_id = connection.execute(text("""
+                SELECT p.case_id FROM resolve.action_proposals p
+                JOIN resolve.cases c ON c.id=p.case_id AND c.sandbox_id=p.sandbox_id
+                WHERE p.id=:id AND p.sandbox_id=:sandbox AND c.account_id=:account
+                  AND p.actor_session_id=:session
+            """), {"id": proposal_id, "sandbox": context.sandbox_id,
+                   "account": context.account_id, "session": context.session_id}).scalar_one_or_none()
+            if case_id is None:
                 raise ResolveError(404, "RESOURCE_NOT_FOUND", "Proposal was not found")
+            locked_case = connection.execute(text("""
+                SELECT id,version FROM resolve.cases
+                WHERE id=:case AND sandbox_id=:sandbox AND account_id=:account FOR UPDATE
+            """), {"case": case_id, "sandbox": context.sandbox_id,
+                   "account": context.account_id}).mappings().one_or_none()
+            if locked_case is None:
+                raise ResolveError(404, "RESOURCE_NOT_FOUND", "Proposal was not found")
+            proposal = connection.execute(text("""
+                SELECT * FROM resolve.action_proposals
+                WHERE id=:id AND case_id=:case AND sandbox_id=:sandbox AND actor_session_id=:session
+                FOR UPDATE
+            """), {"id": proposal_id, "case": case_id, "sandbox": context.sandbox_id,
+                   "session": context.session_id}).mappings().one_or_none()
+            if proposal is None:
+                raise ResolveError(404, "RESOURCE_NOT_FOUND", "Proposal was not found")
+            if voice_consent is not None:
+                self._check_voice_consent(connection, context, consent=voice_consent,
+                    proposal=proposal, proposal_id=proposal_id, proposal_hash=proposal_hash,
+                    decision=decision, client_turn_id=client_turn_id, now=now,
+                    check_presentation=False)
             prior = connection.execute(text("SELECT c.*,o.id AS operation_id,o.status AS operation_status FROM resolve.confirmations c LEFT JOIN resolve.operations o ON o.confirmation_id=c.id WHERE c.sandbox_id=:sandbox AND c.actor_session_id=:session AND c.client_turn_id=:turn"),
                 {"sandbox": context.sandbox_id, "session": context.session_id, "turn": client_turn_id}).mappings().one_or_none()
             if prior:
@@ -655,22 +771,35 @@ class ResolveFacade:
                         "decision": prior["decision"], "channel": prior["source_channel"], "client_turn_id": client_turn_id,
                         "created_at": prior["recorded_at"], "operation_id": prior["operation_id"],
                         "operation_status": prior["operation_status"], "simulation": True}
+            if voice_consent is not None:
+                self._check_voice_consent(connection, context, consent=voice_consent,
+                    proposal=proposal, proposal_id=proposal_id, proposal_hash=proposal_hash,
+                    decision=decision, client_turn_id=client_turn_id, now=now)
             if proposal["proposal_hash"] != proposal_hash:
                 raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Proposal confirmation does not match the presented proposal")
             existing_operation = connection.execute(text("SELECT id FROM resolve.operations WHERE case_id=:case AND proposal_id=:proposal"),
                 {"case": proposal["case_id"], "proposal": proposal_id}).scalar_one_or_none()
             if existing_operation:
                 raise ResolveError(409, "ACTION_ALREADY_CONFIRMED", "This proposal already has an accepted operation")
-            if proposal["invalidated_at"] or proposal["expires_at"] <= now or proposal["case_version"] != proposal["current_case_version"]:
+            if proposal["invalidated_at"] or proposal["expires_at"] <= now or proposal["case_version"] != locked_case["version"]:
                 raise ResolveError(409, "STALE_VERSION", "Proposal expired or case changed; request a fresh proposal")
             target = self._provider.get_action_target(context.sandbox_id, context.account_id, proposal["action_type"], proposal["target_id"])  # type: ignore[attr-defined]
             if target is None or target["version"] != proposal["target_version"]:
                 raise ResolveError(409, "STALE_VERSION", "Action target changed; request a fresh proposal")
             confirmation_id = uuid4()
-            connection.execute(text("INSERT INTO resolve.confirmations(id,sandbox_id,case_id,proposal_id,proposal_hash,actor_session_id,source_channel,client_turn_id,decision,recorded_at,request_fingerprint) VALUES (:id,:sandbox,:case,:proposal,:hash,:session,:channel,:turn,:decision,:now,:fingerprint)"),
+            connection.execute(text("""INSERT INTO resolve.confirmations
+                (id,sandbox_id,case_id,proposal_id,proposal_hash,actor_session_id,source_channel,
+                 client_turn_id,decision,recorded_at,request_fingerprint,voice_binding_id,voice_turn_id,
+                 voice_transcript_sha256,voice_presentation_response_id)
+                VALUES (:id,:sandbox,:case,:proposal,:hash,:session,:channel,:turn,:decision,:now,:fingerprint,
+                        :voice_binding_id,:voice_turn_id,:voice_transcript_sha256,:voice_presentation_response_id)"""),
                 {"id": confirmation_id, "sandbox": context.sandbox_id, "case": proposal["case_id"], "proposal": proposal_id,
                  "hash": proposal_hash, "session": context.session_id, "channel": context.channel,
-                 "turn": client_turn_id, "decision": decision, "now": now, "fingerprint": fingerprint})
+                 "turn": client_turn_id, "decision": decision, "now": now, "fingerprint": fingerprint,
+                 "voice_binding_id": voice_consent.binding_id if voice_consent else None,
+                 "voice_turn_id": voice_consent.turn_id if voice_consent else None,
+                 "voice_transcript_sha256": hashlib.sha256(voice_consent.final_transcript.encode("utf-8")).hexdigest() if voice_consent else None,
+                 "voice_presentation_response_id": voice_consent.presentation_response_id if voice_consent else None})
             operation_id = None
             operation_status = None
             if decision == "ACCEPT":

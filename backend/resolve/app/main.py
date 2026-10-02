@@ -16,6 +16,8 @@ from .action_api import build_action_router
 from .auth import ResolveError, build_auth_router
 from .case_api import build_case_router
 from .review_api import build_review_router
+from .voice_api import build_voice_router
+from .voice_client import VoiceSessionClient
 from .config import Settings
 from .database import Database
 from .observability import create_request_middleware
@@ -38,6 +40,8 @@ def create_app(
     auth_store=None,
     account_provider=None,
     resolve_facade: ResolveFacade | None = None,
+    voice_client=None,
+    conversation_service=None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -45,6 +49,7 @@ def create_app(
         active_settings = settings
         sandbox_database = None
         operation_task = None
+        owns_voice_client = False
         if active_database is None:
             if active_settings is None:
                 load_dotenv()
@@ -75,6 +80,12 @@ def create_app(
         application.state.resolve_facade = resolve_facade or (
             ResolveFacade(active_database.engine, provider, cursor_secret=active_settings.app_secret_key) if hasattr(active_database, "engine") else None
         )
+        active_voice_client = voice_client
+        if active_voice_client is None and active_settings.voice_base_url and active_settings.voice_hmac_secret:
+            active_voice_client = VoiceSessionClient(active_settings.voice_base_url, active_settings.voice_hmac_secret)
+            owns_voice_client = True
+        application.state.voice_client = active_voice_client
+        application.state.conversation_service = conversation_service
         application.state.operation_runner = None
         if sandbox_engine is not None and hasattr(active_database, "engine") and resolve_facade is None:
             runner = OperationRunner(active_database.engine, sandbox_engine)
@@ -83,6 +94,8 @@ def create_app(
         try:
             yield
         finally:
+            if owns_voice_client and active_voice_client is not None:
+                await active_voice_client.close()
             if operation_task is not None:
                 operation_task.cancel()
                 try:
@@ -104,6 +117,7 @@ def create_app(
     application.include_router(build_case_router())
     application.include_router(build_action_router())
     application.include_router(build_review_router())
+    application.include_router(build_voice_router())
 
     application.middleware("http")(create_request_middleware(logging.getLogger("hutch_resolve.http")))
 

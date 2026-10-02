@@ -146,9 +146,11 @@ class MockSandboxWriter:
         return status, result
 
     def sync_review(self, *, sandbox_id: UUID, account_id: UUID, ticket_id: UUID, event_id: UUID,
-                    review_status: str, disposition: str | None, note: str) -> tuple[str, dict[str, Any]]:
+                    case_id: UUID, case_version: int, review_status: str,
+                    disposition: str | None, note: str) -> tuple[str, dict[str, Any]]:
         provider_key = f"resolve-review:{event_id}"
-        body = {"event_id": str(event_id), "ticket_id": str(ticket_id), "review_status": review_status,
+        body = {"event_id": str(event_id), "ticket_id": str(ticket_id), "case_id": str(case_id),
+                "case_version": case_version, "review_status": review_status,
                 "disposition": disposition, "note": note}
         request_hash = hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"),
             ensure_ascii=False).encode()).hexdigest()
@@ -158,7 +160,13 @@ class MockSandboxWriter:
                 WHERE sandbox_id=:sandbox AND provider='crm' AND idempotency_key=:key
             """), {"sandbox": sandbox_id, "key": provider_key}).mappings().one_or_none()
         if prior is not None:
-            if prior["request_hash"] != request_hash:
+            # Jobs committed by an earlier deployment used the same stable key
+            # before case/version became part of the provider request body.
+            legacy_body = {"event_id": str(event_id), "ticket_id": str(ticket_id),
+                "review_status": review_status, "disposition": disposition, "note": note}
+            legacy_hash = hashlib.sha256(json.dumps(legacy_body, sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+            if prior["request_hash"] not in {request_hash, legacy_hash}:
                 return "FAILED", {"code": "IDEMPOTENCY_CONFLICT", "message": "Review sync key was reused with different input"}
             result = prior["result"] or {}
             return prior["status"], result
@@ -187,25 +195,34 @@ class MockSandboxWriter:
                 status = "FAILED"
                 result = {"code": "TICKET_NOT_FOUND", "message": "The mock CRM ticket no longer exists."}
             else:
-                review_update = {"event_id": str(event_id), "review_status": review_status,
-                    "disposition": disposition, "note": note, "updated_at": datetime.now(UTC).isoformat()}
-                connection.execute(text("""
+                previous = connection.execute(text("""
+                    SELECT packet->'resolve_review' FROM sandbox.tickets
+                    WHERE sandbox_id=:sandbox AND id=:ticket
+                """), {"sandbox": sandbox_id, "ticket": ticket_id}).scalar_one()
+                if previous and previous.get("case_id") == str(case_id) and int(previous.get("case_version", 0)) >= case_version:
+                    status = "FAILED"
+                    result = {"code": "STALE_REVIEW_VERSION", "message": "A newer review is already on the mock CRM ticket."}
+                else:
+                    review_update = {"event_id": str(event_id), "case_id": str(case_id),
+                        "case_version": case_version, "review_status": review_status,
+                        "disposition": disposition, "note": note, "updated_at": datetime.now(UTC).isoformat()}
+                    connection.execute(text("""
                     UPDATE sandbox.tickets SET
                       packet=jsonb_set(COALESCE(packet,'{}'::jsonb),'{resolve_review}',CAST(:update AS jsonb),true),
                       agent_notes=CASE WHEN agent_notes='' THEN :note ELSE agent_notes || E'\\n' || :note END,
                       version=version+1
                     WHERE sandbox_id=:sandbox AND id=:ticket
-                """), {"update": json.dumps(review_update, ensure_ascii=False), "note": note,
-                    "sandbox": sandbox_id, "ticket": ticket_id})
-                status = "SUCCEEDED"
-                result = {"code": "REVIEW_SYNCED", "ticket_id": str(ticket_id),
-                    "ticket_version": ticket["version"] + 1, "event_id": str(event_id)}
+                    """), {"update": json.dumps(review_update, ensure_ascii=False), "note": note,
+                        "sandbox": sandbox_id, "ticket": ticket_id})
+                    status = "SUCCEEDED"
+                    result = {"code": "REVIEW_SYNCED", "ticket_id": str(ticket_id),
+                        "ticket_version": ticket["version"] + 1, "event_id": str(event_id)}
             connection.execute(text("""
                 INSERT INTO sandbox.provider_operations
                   (id,sandbox_id,provider,idempotency_key,request_hash,target_id,expected_version,status,result)
                 VALUES (:id,:sandbox,'crm',:key,:hash,:target,:version,:status,CAST(:result AS jsonb))
             """), {"id": operation_id, "sandbox": sandbox_id, "key": provider_key,
-                "hash": request_hash, "target": ticket_id, "version": ticket["version"] if ticket else 0,
+                "hash": request_hash, "target": ticket_id, "version": case_version,
                 "status": status, "result": json.dumps(result)})
         if fault == "COMMITTED_RESPONSE_LOST":
             raise ProviderUnavailable("COMMITTED_RESPONSE_LOST")
@@ -290,13 +307,25 @@ class OperationRunner:
         with self._resolve.begin() as connection:
             row = connection.execute(text("""
                 SELECT j.id,j.review_event_id,j.case_id,j.provider_ticket_id,j.attempt_count,
-                       c.sandbox_id,c.account_id,re.review_status,re.disposition,re.note
+                       c.sandbox_id,c.account_id,re.case_version,re.review_status,re.disposition,re.note
                 FROM resolve.review_sync_jobs j
                 JOIN resolve.cases c ON (c.sandbox_id,c.id)=(j.sandbox_id,j.case_id)
                 JOIN resolve.review_events re ON re.id=j.review_event_id AND re.case_id=j.case_id
-                WHERE j.status='PENDING'
+                WHERE (j.status='PENDING'
                    OR (j.status='RUNNING' AND j.lease_until<=:now)
-                   OR (j.status='UNKNOWN' AND j.recovery_after<=:now)
+                   OR (j.status='UNKNOWN' AND j.recovery_after<=:now))
+                  AND NOT EXISTS (
+                    SELECT 1 FROM resolve.review_sync_jobs older
+                    JOIN resolve.review_events previous ON previous.id=older.review_event_id
+                    WHERE older.sandbox_id=j.sandbox_id
+                      AND older.provider_ticket_id=j.provider_ticket_id
+                      AND older.id<>j.id
+                      AND older.status IN ('PENDING','RUNNING','UNKNOWN')
+                      AND ((older.case_id=j.case_id AND
+                            (previous.case_version,older.created_at,older.id)<(re.case_version,j.created_at,j.id))
+                           OR (older.case_id<>j.case_id AND
+                               (older.created_at,older.id)<(j.created_at,j.id)))
+                  )
                 ORDER BY j.created_at,j.id LIMIT 1 FOR UPDATE OF j SKIP LOCKED
             """), {"now": now}).mappings().one_or_none()
             if row is None:
@@ -311,7 +340,8 @@ class OperationRunner:
         try:
             provider_status, result = self._writer.sync_review(sandbox_id=job["sandbox_id"],
                 account_id=job["account_id"], ticket_id=UUID(job["provider_ticket_id"]),
-                event_id=job["review_event_id"], review_status=job["review_status"],
+                event_id=job["review_event_id"], case_id=job["case_id"],
+                case_version=job["case_version"], review_status=job["review_status"],
                 disposition=job["disposition"], note=job["note"])
         except ProviderUnavailable as exc:
             terminal = job["attempt_count"] >= 3
@@ -347,11 +377,16 @@ class OperationRunner:
         now = datetime.now(UTC)
         provider_id = uuid5(NAMESPACE_URL, f"resolve-review:{job['review_event_id']}") if state == "SYNCED" else None
         with self._resolve.begin() as connection:
-            connection.execute(text("""
+            claimed = connection.execute(text("""
                 UPDATE resolve.review_sync_jobs SET status=:status,lease_until=NULL,recovery_after=:recovery,
-                  last_error_code=:error,provider_operation_id=:provider,updated_at=:now WHERE id=:id
+                  last_error_code=:error,provider_operation_id=:provider,updated_at=:now
+                WHERE id=:id AND status='RUNNING' AND attempt_count=:attempt
+                RETURNING id
             """), {"id": job["id"], "status": state, "recovery": recovery_after,
-                "error": None if state == "SYNCED" else result.get("code"), "provider": provider_id, "now": now})
+                "error": None if state == "SYNCED" else result.get("code"), "provider": provider_id,
+                "attempt": job["attempt_count"], "now": now}).scalar_one_or_none()
+            if claimed is None:
+                return
             connection.execute(text("""
                 INSERT INTO resolve.audit_events(id,case_id,event_type,details,created_at)
                 VALUES (:id,:case,'REVIEW_SYNC_CHANGED',CAST(:details AS jsonb),:now)
@@ -364,9 +399,11 @@ class OperationRunner:
         now = datetime.now(UTC)
         terminal = status in {"SUCCEEDED", "FAILED", "REVIEW_REQUIRED"}
         with self._resolve.begin() as connection:
-            connection.execute(text("UPDATE resolve.operations SET status=:status,outcome=CAST(:outcome AS jsonb),provider_operation_ref=:provider_ref,lease_until=NULL,recovery_after=:recovery,updated_at=:now WHERE id=:id"),
+            claimed = connection.execute(text("UPDATE resolve.operations SET status=:status,outcome=CAST(:outcome AS jsonb),provider_operation_ref=:provider_ref,lease_until=NULL,recovery_after=:recovery,updated_at=:now WHERE id=:id AND status='RUNNING' AND attempt_count=:attempt RETURNING id"),
                 {"id": operation["id"], "status": status, "outcome": json.dumps(result), "provider_ref": provider_ref,
-                 "recovery": recovery_after, "now": now})
+                 "recovery": recovery_after, "attempt": operation["attempt_count"], "now": now}).scalar_one_or_none()
+            if claimed is None:
+                return
             if operation["action_type"] == "CREATE_REVIEW_TICKET":
                 delivery = "DELIVERED" if status == "SUCCEEDED" and result.get("provider_ticket_id") else ("REVIEW_REQUIRED" if terminal else "PENDING")
                 connection.execute(text("UPDATE resolve.escalation_deliveries SET delivery_state=:state,provider_ticket_id=:ticket,last_error_code=:error,updated_at=:now WHERE operation_id=:operation"),
@@ -378,7 +415,8 @@ class OperationRunner:
             connection.execute(text("INSERT INTO resolve.audit_events(id,case_id,event_type,details,created_at) VALUES (:id,:case,'OPERATION_CHANGED',CAST(:details AS jsonb),:now)"),
                 {"id": uuid5(NAMESPACE_URL, f"{operation['id']}:{status}:{operation['attempt_count']}"), "case": operation["case_id"],
                  "details": json.dumps({"operation_id": str(operation["id"]), "status": status, "attempt": operation["attempt_count"], "code": result.get("code")}), "now": now})
-            if terminal:
+            if terminal and connection.execute(text("SELECT 1 FROM resolve.receipts WHERE id=:id"),
+                {"id": uuid5(NAMESPACE_URL, f"{operation['id']}:receipt")}).scalar_one_or_none() is None:
                 self._write_receipt(connection, operation, status, result, now)
 
     @staticmethod

@@ -205,18 +205,17 @@ class AgentReviewService:
         request_data = {"case_id": str(case_id), "expected_version": expected_version, "review_status": review_status,
                         "disposition": disposition, "note": note, "reopen_reason": reopen_reason}
         request_hash = _fingerprint(request_data)
-        route_key = f"PATCH:/agent/cases/{case_id}/review"
+        route_key = f"PATCH:/agent/sandboxes/{sandbox_id}/cases/{case_id}/review"
+        legacy_route_key = f"PATCH:/agent/cases/{case_id}/review"
         now = datetime.now(UTC)
         with self._engine.begin() as connection:
-            replay = self._review_replay(connection, context, route_key, idempotency_key, request_hash)
-            if replay is not None:
-                self._refresh_sync_state(connection, case_id, replay)
-                return replay
             case = connection.execute(text("SELECT id,version,review_status FROM resolve.cases WHERE id=:id AND sandbox_id=:sandbox FOR UPDATE"),
                 {"id": case_id, "sandbox": sandbox_id}).mappings().one_or_none()
             if case is None:
                 raise ResolveError(404, "RESOURCE_NOT_FOUND", "Case was not found")
             replay = self._review_replay(connection, context, route_key, idempotency_key, request_hash)
+            if replay is None:
+                replay = self._review_replay(connection, context, legacy_route_key, idempotency_key, request_hash)
             if replay is not None:
                 self._refresh_sync_state(connection, case_id, replay)
                 return replay
