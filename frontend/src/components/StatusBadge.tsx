@@ -6,20 +6,20 @@ import { deliveryTone, evidenceTone, operationTone, reviewTone, type Tone } from
 
 export type { Tone }
 
-// Solid warning (dark text) because amber text on white fails contrast; others use AA-safe tinted styles.
+// One neutral chip for every state; only the text colour carries the tone. Amber uses a darker ink so it stays readable.
 const toneClasses: Record<Tone, string> = {
-  neutral: 'bg-muted text-muted-foreground border-border',
-  info: 'bg-info/10 text-info border-info/25',
-  success: 'bg-success/10 text-success border-success/25',
-  warning: 'bg-warning text-warning-foreground border-transparent',
-  danger: 'bg-destructive/10 text-destructive border-destructive/25',
+  neutral: 'text-muted-foreground',
+  info: 'text-info',
+  success: 'text-success',
+  warning: 'text-warning-ink',
+  danger: 'text-destructive',
 }
 
 export function StatusBadge({ tone, children, className }: { tone: Tone; children: React.ReactNode; className?: string }) {
   return (
     <span
       className={cn(
-        'inline-flex h-6 items-center gap-1 rounded-md border px-2 text-xs font-semibold whitespace-nowrap',
+        'inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-semibold whitespace-nowrap',
         toneClasses[tone],
         className,
       )}
