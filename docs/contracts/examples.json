@@ -1,0 +1,1953 @@
+{
+  "contract_version": "1.0.0",
+  "notice": "Synthetic proposed contract examples; not runtime responses. Tokens/hashes are placeholders except the computed receipt digest. Repeated IDs illustrate replay, not separate executable seed records.",
+  "examples": {
+    "customer_session": {
+      "schema": "SessionView",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000001",
+        "role": "CUSTOMER",
+        "account_id": "90000000-0000-4000-8000-000000000010",
+        "sandbox_id": "90000000-0000-4000-8000-000000000030",
+        "expires_at": "2026-10-02T07:00:00Z",
+        "csrf_token": "EXAMPLE_ONLY_NOT_A_VALID_TOKEN",
+        "simulation": true
+      }
+    },
+    "guest_session": {
+      "schema": "SessionView",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000031",
+        "role": "GUEST",
+        "account_id": null,
+        "sandbox_id": null,
+        "expires_at": "2026-10-02T07:00:00Z",
+        "csrf_token": "EXAMPLE_ONLY_NOT_A_VALID_TOKEN",
+        "simulation": true
+      }
+    },
+    "agent_session": {
+      "schema": "AgentSessionView",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000032",
+        "role": "AGENT",
+        "account_id": null,
+        "sandbox_id": "90000000-0000-4000-8000-000000000030",
+        "principal_id": "synthetic-review-agent",
+        "expires_at": "2026-10-02T07:00:00Z",
+        "csrf_token": "EXAMPLE_ONLY_NOT_A_VALID_TOKEN",
+        "simulation": true
+      }
+    },
+    "message_request": {
+      "schema": "MessageRequest",
+      "value": {
+        "client_turn_id": "90000000-0000-4000-8000-000000000011",
+        "expected_version": 1,
+        "language": "en",
+        "input": {
+          "type": "text",
+          "text": "I recharged LKR 1000. Why is my balance LKR 420?"
+        }
+      }
+    },
+    "structured_fallback": {
+      "schema": "MessageRequest",
+      "value": {
+        "client_turn_id": "90000000-0000-4000-8000-000000000011",
+        "expected_version": 1,
+        "language": "en",
+        "input": {
+          "type": "complaint_details",
+          "complaint_type": "BALANCE_RECHARGE",
+          "window_start": "2026-10-02T02:30:00Z",
+          "window_end": "2026-10-02T06:30:00Z",
+          "reported_facts": {
+            "amount_minor": 100000
+          }
+        }
+      }
+    },
+    "investigation_request": {
+      "schema": "InvestigationRequest",
+      "value": {
+        "expected_version": 1,
+        "complaint_type": "BALANCE_RECHARGE",
+        "window_start": "2026-10-02T02:30:00Z",
+        "window_end": "2026-10-02T06:30:00Z",
+        "reported_facts": {
+          "amount_minor": 100000
+        }
+      }
+    },
+    "a_sufficient": {
+      "schema": "InvestigationResult",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000004",
+        "case_id": "90000000-0000-4000-8000-000000000003",
+        "revision": 1,
+        "complaint_type": "BALANCE_RECHARGE",
+        "window_start": "2026-10-02T02:30:00Z",
+        "window_end": "2026-10-02T06:30:00Z",
+        "evidence_state": "SUFFICIENT",
+        "findings": [
+          {
+            "code": "BALANCE_RECONCILED",
+            "text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+            "evidence_ids": [
+              "90000000-0000-4000-8000-000000000100",
+              "90000000-0000-4000-8000-000000000101",
+              "90000000-0000-4000-8000-000000000102",
+              "90000000-0000-4000-8000-000000000103"
+            ]
+          }
+        ],
+        "calculations": [
+          {
+            "code": "MONEY_RECONCILIATION",
+            "unit": "LKR_MINOR",
+            "opening": 0,
+            "terms": [
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000100",
+                "label": "Recharge posted",
+                "value": 100000
+              },
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000101",
+                "label": "Package renewal",
+                "value": -49900
+              },
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000102",
+                "label": "VAS charge",
+                "value": -6000
+              },
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000103",
+                "label": "Rated usage",
+                "value": -2100
+              }
+            ],
+            "expected": 42000,
+            "observed": 42000,
+            "delta": 0,
+            "evidence_ids": [
+              "90000000-0000-4000-8000-000000000100",
+              "90000000-0000-4000-8000-000000000101",
+              "90000000-0000-4000-8000-000000000102",
+              "90000000-0000-4000-8000-000000000103"
+            ]
+          }
+        ],
+        "evidence": [
+          {
+            "id": "90000000-0000-4000-8000-000000000100",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000200",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": 100000,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 1,
+              "amount_minor": 100000,
+              "currency": "LKR"
+            }
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000101",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000201",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": -49900,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 2,
+              "amount_minor": -49900,
+              "currency": "LKR"
+            }
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000102",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000202",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": -6000,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 3,
+              "amount_minor": -6000,
+              "currency": "LKR"
+            }
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000103",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000203",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": -2100,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 4,
+              "amount_minor": -2100,
+              "currency": "LKR"
+            }
+          }
+        ],
+        "source_status": [
+          {
+            "source": "charging",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "as_of": "2026-10-02T06:30:00Z",
+            "complete_through": "2026-10-02T06:30:00Z",
+            "source_version": "fixture-v2:4",
+            "complete": true,
+            "next_cursor": null,
+            "warnings": []
+          }
+        ],
+        "missing": [],
+        "conflicts": [],
+        "eligible_actions": [
+          {
+            "action_type": "DEACTIVATE_VAS",
+            "target_id": "90000000-0000-4000-8000-000000000020",
+            "target_label": "Synthetic video alerts"
+          }
+        ],
+        "review_reasons": [
+          "A past-charge dispute is separate from future renewal."
+        ],
+        "created_at": "2026-10-02T06:30:00Z",
+        "simulation": true
+      }
+    },
+    "d_conflicting": {
+      "schema": "InvestigationResult",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000040",
+        "case_id": "90000000-0000-4000-8000-000000000041",
+        "revision": 1,
+        "complaint_type": "BALANCE_RECHARGE",
+        "window_start": "2026-10-02T02:30:00Z",
+        "window_end": "2026-10-02T06:30:00Z",
+        "evidence_state": "CONFLICTING",
+        "findings": [
+          {
+            "code": "BALANCE_MISMATCH",
+            "text": "The observed closing balance differs by LKR 70. Review is required.",
+            "evidence_ids": [
+              "90000000-0000-4000-8000-000000000100",
+              "90000000-0000-4000-8000-000000000101",
+              "90000000-0000-4000-8000-000000000102",
+              "90000000-0000-4000-8000-000000000103"
+            ]
+          }
+        ],
+        "calculations": [
+          {
+            "code": "MONEY_RECONCILIATION",
+            "unit": "LKR_MINOR",
+            "opening": 0,
+            "terms": [
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000100",
+                "label": "Recharge posted",
+                "value": 100000
+              },
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000101",
+                "label": "Package renewal",
+                "value": -49900
+              },
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000102",
+                "label": "VAS charge",
+                "value": -6000
+              },
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000103",
+                "label": "Rated usage",
+                "value": -2100
+              }
+            ],
+            "expected": 42000,
+            "observed": 35000,
+            "delta": -7000,
+            "evidence_ids": [
+              "90000000-0000-4000-8000-000000000100",
+              "90000000-0000-4000-8000-000000000101",
+              "90000000-0000-4000-8000-000000000102",
+              "90000000-0000-4000-8000-000000000103"
+            ]
+          }
+        ],
+        "evidence": [
+          {
+            "id": "90000000-0000-4000-8000-000000000100",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000200",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": 100000,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 1,
+              "amount_minor": 100000,
+              "currency": "LKR"
+            }
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000101",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000201",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": -49900,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 2,
+              "amount_minor": -49900,
+              "currency": "LKR"
+            }
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000102",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000202",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": -6000,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 3,
+              "amount_minor": -6000,
+              "currency": "LKR"
+            }
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000103",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000203",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": -2100,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 4,
+              "amount_minor": -2100,
+              "currency": "LKR"
+            }
+          }
+        ],
+        "source_status": [
+          {
+            "source": "charging",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "as_of": "2026-10-02T06:30:00Z",
+            "complete_through": "2026-10-02T06:30:00Z",
+            "source_version": "fixture-v2:4",
+            "complete": true,
+            "next_cursor": null,
+            "warnings": []
+          }
+        ],
+        "missing": [],
+        "conflicts": [
+          "Closing balance is 35000 minor; expected 42000."
+        ],
+        "eligible_actions": [
+          {
+            "action_type": "CREATE_REVIEW_TICKET",
+            "target_id": "90000000-0000-4000-8000-000000000042",
+            "target_label": "Synthetic customer D"
+          }
+        ],
+        "review_reasons": [
+          "A past-charge dispute is separate from future renewal."
+        ],
+        "created_at": "2026-10-02T06:30:00Z",
+        "simulation": true
+      }
+    },
+    "partial_evidence": {
+      "schema": "InvestigationResult",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000004",
+        "case_id": "90000000-0000-4000-8000-000000000003",
+        "revision": 1,
+        "complaint_type": "BALANCE_RECHARGE",
+        "window_start": "2026-10-02T02:30:00Z",
+        "window_end": "2026-10-02T06:30:00Z",
+        "evidence_state": "PARTIAL",
+        "findings": [
+          {
+            "code": "MISSING_OPENING",
+            "text": "Opening balance is missing; no conclusive reconciliation is available.",
+            "evidence_ids": []
+          }
+        ],
+        "calculations": [],
+        "evidence": [
+          {
+            "id": "90000000-0000-4000-8000-000000000100",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000200",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": 100000,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 1,
+              "amount_minor": 100000,
+              "currency": "LKR"
+            }
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000101",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000201",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": -49900,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 2,
+              "amount_minor": -49900,
+              "currency": "LKR"
+            }
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000102",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000202",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": -6000,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 3,
+              "amount_minor": -6000,
+              "currency": "LKR"
+            }
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000103",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000203",
+            "source_version": "1",
+            "observed_at": "2026-10-02T06:30:00Z",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "value": -2100,
+            "unit": "LKR_MINOR",
+            "source_payload": {
+              "posting_seq": 4,
+              "amount_minor": -2100,
+              "currency": "LKR"
+            }
+          }
+        ],
+        "source_status": [
+          {
+            "source": "charging",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "as_of": "2026-10-02T06:30:00Z",
+            "complete_through": "2026-10-02T06:30:00Z",
+            "source_version": "fixture-v2:4",
+            "complete": false,
+            "next_cursor": null,
+            "warnings": [
+              "missing_opening_snapshot"
+            ]
+          }
+        ],
+        "missing": [
+          "opening_balance"
+        ],
+        "conflicts": [],
+        "eligible_actions": [],
+        "review_reasons": [
+          "A past-charge dispute is separate from future renewal."
+        ],
+        "created_at": "2026-10-02T06:30:00Z",
+        "simulation": true
+      }
+    },
+    "account": {
+      "schema": "AccountView",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000010",
+        "line_alias": "SIM-LK-0001",
+        "display_name": "Synthetic customer A",
+        "region": "WEST",
+        "status": "ACTIVE",
+        "balances": [
+          {
+            "wallet": "MAIN",
+            "amount_minor": 42000,
+            "currency": "LKR",
+            "as_of": "2026-10-02T06:30:00Z"
+          }
+        ],
+        "subscriptions": [
+          {
+            "id": "90000000-0000-4000-8000-000000000020",
+            "name": "Synthetic video alerts",
+            "kind": "VAS",
+            "status": "ACTIVE",
+            "version": 1,
+            "remaining_bytes": null,
+            "expires_at": null,
+            "renewal": true
+          }
+        ],
+        "source_status": [
+          {
+            "source": "charging",
+            "fetched_at": "2026-10-02T06:30:00Z",
+            "as_of": "2026-10-02T06:30:00Z",
+            "complete_through": "2026-10-02T06:30:00Z",
+            "source_version": "fixture-v2:4",
+            "complete": true,
+            "next_cursor": null,
+            "warnings": []
+          }
+        ],
+        "simulation": true
+      }
+    },
+    "case": {
+      "schema": "CaseView",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000003",
+        "conversation_id": "90000000-0000-4000-8000-000000000002",
+        "account_id": "90000000-0000-4000-8000-000000000010",
+        "complaint_type": "BALANCE_RECHARGE",
+        "status": "AWAITING_CUSTOMER",
+        "review_status": "NEW",
+        "version": 2,
+        "created_at": "2026-10-02T06:30:00Z",
+        "updated_at": "2026-10-02T06:30:00Z",
+        "investigation": {
+          "id": "90000000-0000-4000-8000-000000000004",
+          "case_id": "90000000-0000-4000-8000-000000000003",
+          "revision": 1,
+          "complaint_type": "BALANCE_RECHARGE",
+          "window_start": "2026-10-02T02:30:00Z",
+          "window_end": "2026-10-02T06:30:00Z",
+          "evidence_state": "SUFFICIENT",
+          "findings": [
+            {
+              "code": "BALANCE_RECONCILED",
+              "text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000100",
+                "90000000-0000-4000-8000-000000000101",
+                "90000000-0000-4000-8000-000000000102",
+                "90000000-0000-4000-8000-000000000103"
+              ]
+            }
+          ],
+          "calculations": [
+            {
+              "code": "MONEY_RECONCILIATION",
+              "unit": "LKR_MINOR",
+              "opening": 0,
+              "terms": [
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000100",
+                  "label": "Recharge posted",
+                  "value": 100000
+                },
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000101",
+                  "label": "Package renewal",
+                  "value": -49900
+                },
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000102",
+                  "label": "VAS charge",
+                  "value": -6000
+                },
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000103",
+                  "label": "Rated usage",
+                  "value": -2100
+                }
+              ],
+              "expected": 42000,
+              "observed": 42000,
+              "delta": 0,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000100",
+                "90000000-0000-4000-8000-000000000101",
+                "90000000-0000-4000-8000-000000000102",
+                "90000000-0000-4000-8000-000000000103"
+              ]
+            }
+          ],
+          "evidence": [
+            {
+              "id": "90000000-0000-4000-8000-000000000100",
+              "source": "charging",
+              "source_record_id": "90000000-0000-4000-8000-000000000200",
+              "source_version": "1",
+              "observed_at": "2026-10-02T06:30:00Z",
+              "fetched_at": "2026-10-02T06:30:00Z",
+              "value": 100000,
+              "unit": "LKR_MINOR",
+              "source_payload": {
+                "posting_seq": 1,
+                "amount_minor": 100000,
+                "currency": "LKR"
+              }
+            },
+            {
+              "id": "90000000-0000-4000-8000-000000000101",
+              "source": "charging",
+              "source_record_id": "90000000-0000-4000-8000-000000000201",
+              "source_version": "1",
+              "observed_at": "2026-10-02T06:30:00Z",
+              "fetched_at": "2026-10-02T06:30:00Z",
+              "value": -49900,
+              "unit": "LKR_MINOR",
+              "source_payload": {
+                "posting_seq": 2,
+                "amount_minor": -49900,
+                "currency": "LKR"
+              }
+            },
+            {
+              "id": "90000000-0000-4000-8000-000000000102",
+              "source": "charging",
+              "source_record_id": "90000000-0000-4000-8000-000000000202",
+              "source_version": "1",
+              "observed_at": "2026-10-02T06:30:00Z",
+              "fetched_at": "2026-10-02T06:30:00Z",
+              "value": -6000,
+              "unit": "LKR_MINOR",
+              "source_payload": {
+                "posting_seq": 3,
+                "amount_minor": -6000,
+                "currency": "LKR"
+              }
+            },
+            {
+              "id": "90000000-0000-4000-8000-000000000103",
+              "source": "charging",
+              "source_record_id": "90000000-0000-4000-8000-000000000203",
+              "source_version": "1",
+              "observed_at": "2026-10-02T06:30:00Z",
+              "fetched_at": "2026-10-02T06:30:00Z",
+              "value": -2100,
+              "unit": "LKR_MINOR",
+              "source_payload": {
+                "posting_seq": 4,
+                "amount_minor": -2100,
+                "currency": "LKR"
+              }
+            }
+          ],
+          "source_status": [
+            {
+              "source": "charging",
+              "fetched_at": "2026-10-02T06:30:00Z",
+              "as_of": "2026-10-02T06:30:00Z",
+              "complete_through": "2026-10-02T06:30:00Z",
+              "source_version": "fixture-v2:4",
+              "complete": true,
+              "next_cursor": null,
+              "warnings": []
+            }
+          ],
+          "missing": [],
+          "conflicts": [],
+          "eligible_actions": [
+            {
+              "action_type": "DEACTIVATE_VAS",
+              "target_id": "90000000-0000-4000-8000-000000000020",
+              "target_label": "Synthetic video alerts"
+            }
+          ],
+          "review_reasons": [
+            "A past-charge dispute is separate from future renewal."
+          ],
+          "created_at": "2026-10-02T06:30:00Z",
+          "simulation": true
+        },
+        "operation_ids": [],
+        "receipt": null,
+        "simulation": true
+      }
+    },
+    "conversation": {
+      "schema": "ConversationView",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000002",
+        "version": 2,
+        "language": "en",
+        "active_case_id": "90000000-0000-4000-8000-000000000003",
+        "expires_at": "2026-10-02T07:00:00Z",
+        "messages": [
+          {
+            "id": "90000000-0000-4000-8000-000000000009",
+            "client_turn_id": "90000000-0000-4000-8000-000000000011",
+            "speaker": "ASSISTANT",
+            "body": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+            "created_at": "2026-10-02T06:30:00Z",
+            "result": {
+              "message_id": "90000000-0000-4000-8000-000000000009",
+              "conversation_id": "90000000-0000-4000-8000-000000000002",
+              "conversation_version": 2,
+              "case_id": "90000000-0000-4000-8000-000000000003",
+              "reply_text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+              "cards": [
+                {
+                  "type": "calculation",
+                  "data": {
+                    "code": "MONEY_RECONCILIATION",
+                    "unit": "LKR_MINOR",
+                    "opening": 0,
+                    "terms": [
+                      {
+                        "evidence_id": "90000000-0000-4000-8000-000000000100",
+                        "label": "Recharge posted",
+                        "value": 100000
+                      },
+                      {
+                        "evidence_id": "90000000-0000-4000-8000-000000000101",
+                        "label": "Package renewal",
+                        "value": -49900
+                      },
+                      {
+                        "evidence_id": "90000000-0000-4000-8000-000000000102",
+                        "label": "VAS charge",
+                        "value": -6000
+                      },
+                      {
+                        "evidence_id": "90000000-0000-4000-8000-000000000103",
+                        "label": "Rated usage",
+                        "value": -2100
+                      }
+                    ],
+                    "expected": 42000,
+                    "observed": 42000,
+                    "delta": 0,
+                    "evidence_ids": [
+                      "90000000-0000-4000-8000-000000000100",
+                      "90000000-0000-4000-8000-000000000101",
+                      "90000000-0000-4000-8000-000000000102",
+                      "90000000-0000-4000-8000-000000000103"
+                    ]
+                  }
+                },
+                {
+                  "type": "finding",
+                  "data": {
+                    "code": "BALANCE_RECONCILED",
+                    "text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+                    "evidence_ids": [
+                      "90000000-0000-4000-8000-000000000100",
+                      "90000000-0000-4000-8000-000000000101",
+                      "90000000-0000-4000-8000-000000000102",
+                      "90000000-0000-4000-8000-000000000103"
+                    ]
+                  }
+                }
+              ],
+              "citations": [],
+              "pending_question": null,
+              "operation_ids": [],
+              "simulation": true
+            }
+          }
+        ],
+        "cases": [
+          {
+            "id": "90000000-0000-4000-8000-000000000003",
+            "complaint_type": "BALANCE_RECHARGE",
+            "status": "AWAITING_CUSTOMER"
+          }
+        ],
+        "pending_question": null,
+        "pending_proposal": {
+          "id": "90000000-0000-4000-8000-000000000005",
+          "case_id": "90000000-0000-4000-8000-000000000003",
+          "investigation_id": "90000000-0000-4000-8000-000000000004",
+          "action_type": "DEACTIVATE_VAS",
+          "target_id": "90000000-0000-4000-8000-000000000020",
+          "target_version": 1,
+          "target_label": "Synthetic video alerts",
+          "consequences": "Stop future renewal in simulation. Past charges are not refunded or adjudicated.",
+          "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "expires_at": "2026-10-02T06:35:00Z",
+          "simulation": true
+        },
+        "operation_ids": []
+      }
+    },
+    "turn_result": {
+      "schema": "TurnResult",
+      "value": {
+        "message_id": "90000000-0000-4000-8000-000000000009",
+        "conversation_id": "90000000-0000-4000-8000-000000000002",
+        "conversation_version": 2,
+        "case_id": "90000000-0000-4000-8000-000000000003",
+        "reply_text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+        "cards": [
+          {
+            "type": "calculation",
+            "data": {
+              "code": "MONEY_RECONCILIATION",
+              "unit": "LKR_MINOR",
+              "opening": 0,
+              "terms": [
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000100",
+                  "label": "Recharge posted",
+                  "value": 100000
+                },
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000101",
+                  "label": "Package renewal",
+                  "value": -49900
+                },
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000102",
+                  "label": "VAS charge",
+                  "value": -6000
+                },
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000103",
+                  "label": "Rated usage",
+                  "value": -2100
+                }
+              ],
+              "expected": 42000,
+              "observed": 42000,
+              "delta": 0,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000100",
+                "90000000-0000-4000-8000-000000000101",
+                "90000000-0000-4000-8000-000000000102",
+                "90000000-0000-4000-8000-000000000103"
+              ]
+            }
+          },
+          {
+            "type": "finding",
+            "data": {
+              "code": "BALANCE_RECONCILED",
+              "text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000100",
+                "90000000-0000-4000-8000-000000000101",
+                "90000000-0000-4000-8000-000000000102",
+                "90000000-0000-4000-8000-000000000103"
+              ]
+            }
+          }
+        ],
+        "citations": [],
+        "pending_question": null,
+        "operation_ids": [],
+        "simulation": true
+      }
+    },
+    "matching_turn_replay": {
+      "schema": "TurnResult",
+      "value": {
+        "message_id": "90000000-0000-4000-8000-000000000009",
+        "conversation_id": "90000000-0000-4000-8000-000000000002",
+        "conversation_version": 2,
+        "case_id": "90000000-0000-4000-8000-000000000003",
+        "reply_text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+        "cards": [
+          {
+            "type": "calculation",
+            "data": {
+              "code": "MONEY_RECONCILIATION",
+              "unit": "LKR_MINOR",
+              "opening": 0,
+              "terms": [
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000100",
+                  "label": "Recharge posted",
+                  "value": 100000
+                },
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000101",
+                  "label": "Package renewal",
+                  "value": -49900
+                },
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000102",
+                  "label": "VAS charge",
+                  "value": -6000
+                },
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000103",
+                  "label": "Rated usage",
+                  "value": -2100
+                }
+              ],
+              "expected": 42000,
+              "observed": 42000,
+              "delta": 0,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000100",
+                "90000000-0000-4000-8000-000000000101",
+                "90000000-0000-4000-8000-000000000102",
+                "90000000-0000-4000-8000-000000000103"
+              ]
+            }
+          },
+          {
+            "type": "finding",
+            "data": {
+              "code": "BALANCE_RECONCILED",
+              "text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000100",
+                "90000000-0000-4000-8000-000000000101",
+                "90000000-0000-4000-8000-000000000102",
+                "90000000-0000-4000-8000-000000000103"
+              ]
+            }
+          }
+        ],
+        "citations": [],
+        "pending_question": null,
+        "operation_ids": [],
+        "simulation": true
+      },
+      "note": "Matching client_turn_id/input replays this exact saved result without advancing version."
+    },
+    "proposal": {
+      "schema": "ProposalView",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000005",
+        "case_id": "90000000-0000-4000-8000-000000000003",
+        "investigation_id": "90000000-0000-4000-8000-000000000004",
+        "action_type": "DEACTIVATE_VAS",
+        "target_id": "90000000-0000-4000-8000-000000000020",
+        "target_version": 1,
+        "target_label": "Synthetic video alerts",
+        "consequences": "Stop future renewal in simulation. Past charges are not refunded or adjudicated.",
+        "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expires_at": "2026-10-02T06:35:00Z",
+        "simulation": true
+      },
+      "note": "Proposal hash is a placeholder; real hash binds full immutable subject/proposal payload."
+    },
+    "confirm_request": {
+      "schema": "ConfirmationRequest",
+      "value": {
+        "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "decision": "ACCEPT",
+        "client_turn_id": "90000000-0000-4000-8000-000000000008"
+      }
+    },
+    "accepted_202": {
+      "schema": "ConfirmationResult",
+      "value": {
+        "confirmation": {
+          "id": "90000000-0000-4000-8000-000000000007",
+          "proposal_id": "90000000-0000-4000-8000-000000000005",
+          "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "decision": "ACCEPT",
+          "channel": "TEXT",
+          "client_turn_id": "90000000-0000-4000-8000-000000000008",
+          "created_at": "2026-10-02T06:30:00Z",
+          "operation_id": "90000000-0000-4000-8000-000000000006"
+        },
+        "operation": {
+          "id": "90000000-0000-4000-8000-000000000006",
+          "case_id": "90000000-0000-4000-8000-000000000003",
+          "proposal_id": "90000000-0000-4000-8000-000000000005",
+          "action_type": "DEACTIVATE_VAS",
+          "status": "PENDING",
+          "created_at": "2026-10-02T06:30:00Z",
+          "updated_at": "2026-10-02T06:30:00Z",
+          "provider_operation_id": null,
+          "outcome": {
+            "code": null,
+            "message": null,
+            "actual_target_status": null,
+            "provider_ticket_id": null
+          },
+          "next_step": "Wait for confirmed provider readback.",
+          "simulation": true
+        }
+      }
+    },
+    "declined_200": {
+      "schema": "ConfirmationResult",
+      "value": {
+        "confirmation": {
+          "id": "90000000-0000-4000-8000-000000000050",
+          "proposal_id": "90000000-0000-4000-8000-000000000005",
+          "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "decision": "DECLINE",
+          "channel": "TEXT",
+          "client_turn_id": "90000000-0000-4000-8000-000000000008",
+          "created_at": "2026-10-02T06:30:00Z",
+          "operation_id": null
+        },
+        "operation": null
+      }
+    },
+    "unknown_operation": {
+      "schema": "OperationView",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000006",
+        "case_id": "90000000-0000-4000-8000-000000000003",
+        "proposal_id": "90000000-0000-4000-8000-000000000005",
+        "action_type": "DEACTIVATE_VAS",
+        "status": "UNKNOWN",
+        "created_at": "2026-10-02T06:30:00Z",
+        "updated_at": "2026-10-02T06:30:00Z",
+        "provider_operation_id": null,
+        "outcome": {
+          "code": null,
+          "message": null,
+          "actual_target_status": null,
+          "provider_ticket_id": null
+        },
+        "next_step": "Provider outcome lookup is pending. Do not submit a replacement action.",
+        "simulation": true
+      }
+    },
+    "succeeded_operation": {
+      "schema": "OperationView",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000006",
+        "case_id": "90000000-0000-4000-8000-000000000003",
+        "proposal_id": "90000000-0000-4000-8000-000000000005",
+        "action_type": "DEACTIVATE_VAS",
+        "status": "SUCCEEDED",
+        "created_at": "2026-10-02T06:30:00Z",
+        "updated_at": "2026-10-02T06:30:00Z",
+        "provider_operation_id": "90000000-0000-4000-8000-000000000051",
+        "outcome": {
+          "code": "DEACTIVATED",
+          "message": "Future renewal stopped in simulation.",
+          "actual_target_status": "INACTIVE",
+          "provider_ticket_id": null
+        },
+        "next_step": "Download the receipt; past-charge disputes remain separate.",
+        "simulation": true
+      }
+    },
+    "receipt": {
+      "schema": "ReceiptView",
+      "value": {
+        "id": "90000000-0000-4000-8000-000000000012",
+        "case_id": "90000000-0000-4000-8000-000000000003",
+        "revision": 1,
+        "issued_at": "2026-10-02T06:30:00Z",
+        "issue": "Reduced balance after recharge",
+        "window": {
+          "start": "2026-10-02T02:30:00Z",
+          "end": "2026-10-02T06:30:00Z"
+        },
+        "findings": [
+          {
+            "code": "BALANCE_RECONCILED",
+            "text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+            "evidence_ids": [
+              "90000000-0000-4000-8000-000000000100",
+              "90000000-0000-4000-8000-000000000101",
+              "90000000-0000-4000-8000-000000000102",
+              "90000000-0000-4000-8000-000000000103"
+            ]
+          }
+        ],
+        "calculations": [
+          {
+            "code": "MONEY_RECONCILIATION",
+            "unit": "LKR_MINOR",
+            "opening": 0,
+            "terms": [
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000100",
+                "label": "Recharge posted",
+                "value": 100000
+              },
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000101",
+                "label": "Package renewal",
+                "value": -49900
+              },
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000102",
+                "label": "VAS charge",
+                "value": -6000
+              },
+              {
+                "evidence_id": "90000000-0000-4000-8000-000000000103",
+                "label": "Rated usage",
+                "value": -2100
+              }
+            ],
+            "expected": 42000,
+            "observed": 42000,
+            "delta": 0,
+            "evidence_ids": [
+              "90000000-0000-4000-8000-000000000100",
+              "90000000-0000-4000-8000-000000000101",
+              "90000000-0000-4000-8000-000000000102",
+              "90000000-0000-4000-8000-000000000103"
+            ]
+          }
+        ],
+        "evidence_references": [
+          {
+            "id": "90000000-0000-4000-8000-000000000100",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000200",
+            "observed_at": "2026-10-02T06:30:00Z"
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000101",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000201",
+            "observed_at": "2026-10-02T06:30:00Z"
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000102",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000202",
+            "observed_at": "2026-10-02T06:30:00Z"
+          },
+          {
+            "id": "90000000-0000-4000-8000-000000000103",
+            "source": "charging",
+            "source_record_id": "90000000-0000-4000-8000-000000000203",
+            "observed_at": "2026-10-02T06:30:00Z"
+          }
+        ],
+        "missing": [],
+        "conflicts": [],
+        "actions": [
+          {
+            "proposal_id": "90000000-0000-4000-8000-000000000005",
+            "action_type": "DEACTIVATE_VAS",
+            "requested": true,
+            "decision": "ACCEPT",
+            "operation_id": "90000000-0000-4000-8000-000000000006",
+            "operation_status": "SUCCEEDED",
+            "completed": true
+          }
+        ],
+        "handoff": null,
+        "next_step": "Future renewal stopped in simulation. Any past-charge dispute remains open for review.",
+        "simulation": true,
+        "digest_sha256": "67e80b06573cbbbda1faa13c975ca24e935b9dded8c6c5553a798daf5498af47"
+      }
+    },
+    "crm_outage_handoff": {
+      "schema": "Handoff",
+      "value": {
+        "reference": "90000000-0000-4000-8000-000000000052",
+        "queue": "BILLING_REVIEW",
+        "delivery_state": "PENDING",
+        "provider_ticket_id": null,
+        "review_sync_state": "NOT_APPLICABLE",
+        "next_step": "Review request is saved in Resolve; CRM delivery is pending."
+      }
+    },
+    "queue": {
+      "schema": "CaseQueue",
+      "value": {
+        "items": [
+          {
+            "case_id": "90000000-0000-4000-8000-000000000041",
+            "line_alias": "SIM-LK-0004",
+            "complaint_type": "BALANCE_RECHARGE",
+            "evidence_state": "CONFLICTING",
+            "review_status": "NEW",
+            "delivery_state": "PENDING",
+            "updated_at": "2026-10-02T06:30:00Z",
+            "version": 2
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    "review_request": {
+      "schema": "ReviewRequest",
+      "value": {
+        "expected_version": 2,
+        "review_status": "IN_REVIEW",
+        "note": "Checking the LKR 70 discrepancy against saved source evidence."
+      }
+    },
+    "close_review": {
+      "schema": "ReviewRequest",
+      "value": {
+        "expected_version": 3,
+        "review_status": "CLOSED",
+        "disposition": "NEEDS_OPERATOR_FOLLOWUP",
+        "note": "Review completed. Operator follow-up is required; no refund was issued."
+      }
+    },
+    "review_result": {
+      "schema": "ReviewResult",
+      "value": {
+        "case_id": "90000000-0000-4000-8000-000000000041",
+        "version": 3,
+        "review_status": "IN_REVIEW",
+        "disposition": null,
+        "note": {
+          "id": "90000000-0000-4000-8000-000000000053",
+          "actor_id": "synthetic-review-agent",
+          "note": "Checking the discrepancy.",
+          "created_at": "2026-10-02T06:30:00Z",
+          "visibility": "INTERNAL"
+        },
+        "review_sync_state": "NOT_APPLICABLE",
+        "updated_at": "2026-10-02T06:30:00Z"
+      }
+    },
+    "agent_detail": {
+      "schema": "AgentCaseDetail",
+      "value": {
+        "case": {
+          "id": "90000000-0000-4000-8000-000000000003",
+          "conversation_id": "90000000-0000-4000-8000-000000000002",
+          "account_id": "90000000-0000-4000-8000-000000000010",
+          "complaint_type": "BALANCE_RECHARGE",
+          "status": "AWAITING_CUSTOMER",
+          "review_status": "NEW",
+          "version": 2,
+          "created_at": "2026-10-02T06:30:00Z",
+          "updated_at": "2026-10-02T06:30:00Z",
+          "investigation": {
+            "id": "90000000-0000-4000-8000-000000000004",
+            "case_id": "90000000-0000-4000-8000-000000000003",
+            "revision": 1,
+            "complaint_type": "BALANCE_RECHARGE",
+            "window_start": "2026-10-02T02:30:00Z",
+            "window_end": "2026-10-02T06:30:00Z",
+            "evidence_state": "SUFFICIENT",
+            "findings": [
+              {
+                "code": "BALANCE_RECONCILED",
+                "text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+                "evidence_ids": [
+                  "90000000-0000-4000-8000-000000000100",
+                  "90000000-0000-4000-8000-000000000101",
+                  "90000000-0000-4000-8000-000000000102",
+                  "90000000-0000-4000-8000-000000000103"
+                ]
+              }
+            ],
+            "calculations": [
+              {
+                "code": "MONEY_RECONCILIATION",
+                "unit": "LKR_MINOR",
+                "opening": 0,
+                "terms": [
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000100",
+                    "label": "Recharge posted",
+                    "value": 100000
+                  },
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000101",
+                    "label": "Package renewal",
+                    "value": -49900
+                  },
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000102",
+                    "label": "VAS charge",
+                    "value": -6000
+                  },
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000103",
+                    "label": "Rated usage",
+                    "value": -2100
+                  }
+                ],
+                "expected": 42000,
+                "observed": 42000,
+                "delta": 0,
+                "evidence_ids": [
+                  "90000000-0000-4000-8000-000000000100",
+                  "90000000-0000-4000-8000-000000000101",
+                  "90000000-0000-4000-8000-000000000102",
+                  "90000000-0000-4000-8000-000000000103"
+                ]
+              }
+            ],
+            "evidence": [
+              {
+                "id": "90000000-0000-4000-8000-000000000100",
+                "source": "charging",
+                "source_record_id": "90000000-0000-4000-8000-000000000200",
+                "source_version": "1",
+                "observed_at": "2026-10-02T06:30:00Z",
+                "fetched_at": "2026-10-02T06:30:00Z",
+                "value": 100000,
+                "unit": "LKR_MINOR",
+                "source_payload": {
+                  "posting_seq": 1,
+                  "amount_minor": 100000,
+                  "currency": "LKR"
+                }
+              },
+              {
+                "id": "90000000-0000-4000-8000-000000000101",
+                "source": "charging",
+                "source_record_id": "90000000-0000-4000-8000-000000000201",
+                "source_version": "1",
+                "observed_at": "2026-10-02T06:30:00Z",
+                "fetched_at": "2026-10-02T06:30:00Z",
+                "value": -49900,
+                "unit": "LKR_MINOR",
+                "source_payload": {
+                  "posting_seq": 2,
+                  "amount_minor": -49900,
+                  "currency": "LKR"
+                }
+              },
+              {
+                "id": "90000000-0000-4000-8000-000000000102",
+                "source": "charging",
+                "source_record_id": "90000000-0000-4000-8000-000000000202",
+                "source_version": "1",
+                "observed_at": "2026-10-02T06:30:00Z",
+                "fetched_at": "2026-10-02T06:30:00Z",
+                "value": -6000,
+                "unit": "LKR_MINOR",
+                "source_payload": {
+                  "posting_seq": 3,
+                  "amount_minor": -6000,
+                  "currency": "LKR"
+                }
+              },
+              {
+                "id": "90000000-0000-4000-8000-000000000103",
+                "source": "charging",
+                "source_record_id": "90000000-0000-4000-8000-000000000203",
+                "source_version": "1",
+                "observed_at": "2026-10-02T06:30:00Z",
+                "fetched_at": "2026-10-02T06:30:00Z",
+                "value": -2100,
+                "unit": "LKR_MINOR",
+                "source_payload": {
+                  "posting_seq": 4,
+                  "amount_minor": -2100,
+                  "currency": "LKR"
+                }
+              }
+            ],
+            "source_status": [
+              {
+                "source": "charging",
+                "fetched_at": "2026-10-02T06:30:00Z",
+                "as_of": "2026-10-02T06:30:00Z",
+                "complete_through": "2026-10-02T06:30:00Z",
+                "source_version": "fixture-v2:4",
+                "complete": true,
+                "next_cursor": null,
+                "warnings": []
+              }
+            ],
+            "missing": [],
+            "conflicts": [],
+            "eligible_actions": [
+              {
+                "action_type": "DEACTIVATE_VAS",
+                "target_id": "90000000-0000-4000-8000-000000000020",
+                "target_label": "Synthetic video alerts"
+              }
+            ],
+            "review_reasons": [
+              "A past-charge dispute is separate from future renewal."
+            ],
+            "created_at": "2026-10-02T06:30:00Z",
+            "simulation": true
+          },
+          "operation_ids": [],
+          "receipt": null,
+          "simulation": true
+        },
+        "account": {
+          "id": "90000000-0000-4000-8000-000000000010",
+          "line_alias": "SIM-LK-0001",
+          "display_name": "Synthetic customer A",
+          "region": "WEST",
+          "status": "ACTIVE",
+          "balances": [
+            {
+              "wallet": "MAIN",
+              "amount_minor": 42000,
+              "currency": "LKR",
+              "as_of": "2026-10-02T06:30:00Z"
+            }
+          ],
+          "subscriptions": [
+            {
+              "id": "90000000-0000-4000-8000-000000000020",
+              "name": "Synthetic video alerts",
+              "kind": "VAS",
+              "status": "ACTIVE",
+              "version": 1,
+              "remaining_bytes": null,
+              "expires_at": null,
+              "renewal": true
+            }
+          ],
+          "source_status": [
+            {
+              "source": "charging",
+              "fetched_at": "2026-10-02T06:30:00Z",
+              "as_of": "2026-10-02T06:30:00Z",
+              "complete_through": "2026-10-02T06:30:00Z",
+              "source_version": "fixture-v2:4",
+              "complete": true,
+              "next_cursor": null,
+              "warnings": []
+            }
+          ],
+          "simulation": true
+        },
+        "conversation": {
+          "id": "90000000-0000-4000-8000-000000000002",
+          "version": 2,
+          "language": "en",
+          "active_case_id": "90000000-0000-4000-8000-000000000003",
+          "expires_at": "2026-10-02T07:00:00Z",
+          "messages": [
+            {
+              "id": "90000000-0000-4000-8000-000000000009",
+              "client_turn_id": "90000000-0000-4000-8000-000000000011",
+              "speaker": "ASSISTANT",
+              "body": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+              "created_at": "2026-10-02T06:30:00Z",
+              "result": {
+                "message_id": "90000000-0000-4000-8000-000000000009",
+                "conversation_id": "90000000-0000-4000-8000-000000000002",
+                "conversation_version": 2,
+                "case_id": "90000000-0000-4000-8000-000000000003",
+                "reply_text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+                "cards": [
+                  {
+                    "type": "calculation",
+                    "data": {
+                      "code": "MONEY_RECONCILIATION",
+                      "unit": "LKR_MINOR",
+                      "opening": 0,
+                      "terms": [
+                        {
+                          "evidence_id": "90000000-0000-4000-8000-000000000100",
+                          "label": "Recharge posted",
+                          "value": 100000
+                        },
+                        {
+                          "evidence_id": "90000000-0000-4000-8000-000000000101",
+                          "label": "Package renewal",
+                          "value": -49900
+                        },
+                        {
+                          "evidence_id": "90000000-0000-4000-8000-000000000102",
+                          "label": "VAS charge",
+                          "value": -6000
+                        },
+                        {
+                          "evidence_id": "90000000-0000-4000-8000-000000000103",
+                          "label": "Rated usage",
+                          "value": -2100
+                        }
+                      ],
+                      "expected": 42000,
+                      "observed": 42000,
+                      "delta": 0,
+                      "evidence_ids": [
+                        "90000000-0000-4000-8000-000000000100",
+                        "90000000-0000-4000-8000-000000000101",
+                        "90000000-0000-4000-8000-000000000102",
+                        "90000000-0000-4000-8000-000000000103"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "finding",
+                    "data": {
+                      "code": "BALANCE_RECONCILED",
+                      "text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+                      "evidence_ids": [
+                        "90000000-0000-4000-8000-000000000100",
+                        "90000000-0000-4000-8000-000000000101",
+                        "90000000-0000-4000-8000-000000000102",
+                        "90000000-0000-4000-8000-000000000103"
+                      ]
+                    }
+                  }
+                ],
+                "citations": [],
+                "pending_question": null,
+                "operation_ids": [],
+                "simulation": true
+              }
+            }
+          ],
+          "cases": [
+            {
+              "id": "90000000-0000-4000-8000-000000000003",
+              "complaint_type": "BALANCE_RECHARGE",
+              "status": "AWAITING_CUSTOMER"
+            }
+          ],
+          "pending_question": null,
+          "pending_proposal": {
+            "id": "90000000-0000-4000-8000-000000000005",
+            "case_id": "90000000-0000-4000-8000-000000000003",
+            "investigation_id": "90000000-0000-4000-8000-000000000004",
+            "action_type": "DEACTIVATE_VAS",
+            "target_id": "90000000-0000-4000-8000-000000000020",
+            "target_version": 1,
+            "target_label": "Synthetic video alerts",
+            "consequences": "Stop future renewal in simulation. Past charges are not refunded or adjudicated.",
+            "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "expires_at": "2026-10-02T06:35:00Z",
+            "simulation": true
+          },
+          "operation_ids": []
+        },
+        "investigations": [
+          {
+            "id": "90000000-0000-4000-8000-000000000004",
+            "case_id": "90000000-0000-4000-8000-000000000003",
+            "revision": 1,
+            "complaint_type": "BALANCE_RECHARGE",
+            "window_start": "2026-10-02T02:30:00Z",
+            "window_end": "2026-10-02T06:30:00Z",
+            "evidence_state": "SUFFICIENT",
+            "findings": [
+              {
+                "code": "BALANCE_RECONCILED",
+                "text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+                "evidence_ids": [
+                  "90000000-0000-4000-8000-000000000100",
+                  "90000000-0000-4000-8000-000000000101",
+                  "90000000-0000-4000-8000-000000000102",
+                  "90000000-0000-4000-8000-000000000103"
+                ]
+              }
+            ],
+            "calculations": [
+              {
+                "code": "MONEY_RECONCILIATION",
+                "unit": "LKR_MINOR",
+                "opening": 0,
+                "terms": [
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000100",
+                    "label": "Recharge posted",
+                    "value": 100000
+                  },
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000101",
+                    "label": "Package renewal",
+                    "value": -49900
+                  },
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000102",
+                    "label": "VAS charge",
+                    "value": -6000
+                  },
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000103",
+                    "label": "Rated usage",
+                    "value": -2100
+                  }
+                ],
+                "expected": 42000,
+                "observed": 42000,
+                "delta": 0,
+                "evidence_ids": [
+                  "90000000-0000-4000-8000-000000000100",
+                  "90000000-0000-4000-8000-000000000101",
+                  "90000000-0000-4000-8000-000000000102",
+                  "90000000-0000-4000-8000-000000000103"
+                ]
+              }
+            ],
+            "evidence": [
+              {
+                "id": "90000000-0000-4000-8000-000000000100",
+                "source": "charging",
+                "source_record_id": "90000000-0000-4000-8000-000000000200",
+                "source_version": "1",
+                "observed_at": "2026-10-02T06:30:00Z",
+                "fetched_at": "2026-10-02T06:30:00Z",
+                "value": 100000,
+                "unit": "LKR_MINOR",
+                "source_payload": {
+                  "posting_seq": 1,
+                  "amount_minor": 100000,
+                  "currency": "LKR"
+                }
+              },
+              {
+                "id": "90000000-0000-4000-8000-000000000101",
+                "source": "charging",
+                "source_record_id": "90000000-0000-4000-8000-000000000201",
+                "source_version": "1",
+                "observed_at": "2026-10-02T06:30:00Z",
+                "fetched_at": "2026-10-02T06:30:00Z",
+                "value": -49900,
+                "unit": "LKR_MINOR",
+                "source_payload": {
+                  "posting_seq": 2,
+                  "amount_minor": -49900,
+                  "currency": "LKR"
+                }
+              },
+              {
+                "id": "90000000-0000-4000-8000-000000000102",
+                "source": "charging",
+                "source_record_id": "90000000-0000-4000-8000-000000000202",
+                "source_version": "1",
+                "observed_at": "2026-10-02T06:30:00Z",
+                "fetched_at": "2026-10-02T06:30:00Z",
+                "value": -6000,
+                "unit": "LKR_MINOR",
+                "source_payload": {
+                  "posting_seq": 3,
+                  "amount_minor": -6000,
+                  "currency": "LKR"
+                }
+              },
+              {
+                "id": "90000000-0000-4000-8000-000000000103",
+                "source": "charging",
+                "source_record_id": "90000000-0000-4000-8000-000000000203",
+                "source_version": "1",
+                "observed_at": "2026-10-02T06:30:00Z",
+                "fetched_at": "2026-10-02T06:30:00Z",
+                "value": -2100,
+                "unit": "LKR_MINOR",
+                "source_payload": {
+                  "posting_seq": 4,
+                  "amount_minor": -2100,
+                  "currency": "LKR"
+                }
+              }
+            ],
+            "source_status": [
+              {
+                "source": "charging",
+                "fetched_at": "2026-10-02T06:30:00Z",
+                "as_of": "2026-10-02T06:30:00Z",
+                "complete_through": "2026-10-02T06:30:00Z",
+                "source_version": "fixture-v2:4",
+                "complete": true,
+                "next_cursor": null,
+                "warnings": []
+              }
+            ],
+            "missing": [],
+            "conflicts": [],
+            "eligible_actions": [
+              {
+                "action_type": "DEACTIVATE_VAS",
+                "target_id": "90000000-0000-4000-8000-000000000020",
+                "target_label": "Synthetic video alerts"
+              }
+            ],
+            "review_reasons": [
+              "A past-charge dispute is separate from future renewal."
+            ],
+            "created_at": "2026-10-02T06:30:00Z",
+            "simulation": true
+          }
+        ],
+        "proposals": [
+          {
+            "id": "90000000-0000-4000-8000-000000000005",
+            "case_id": "90000000-0000-4000-8000-000000000003",
+            "investigation_id": "90000000-0000-4000-8000-000000000004",
+            "action_type": "DEACTIVATE_VAS",
+            "target_id": "90000000-0000-4000-8000-000000000020",
+            "target_version": 1,
+            "target_label": "Synthetic video alerts",
+            "consequences": "Stop future renewal in simulation. Past charges are not refunded or adjudicated.",
+            "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "expires_at": "2026-10-02T06:35:00Z",
+            "simulation": true
+          }
+        ],
+        "confirmations": [
+          {
+            "id": "90000000-0000-4000-8000-000000000007",
+            "proposal_id": "90000000-0000-4000-8000-000000000005",
+            "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "decision": "ACCEPT",
+            "channel": "TEXT",
+            "client_turn_id": "90000000-0000-4000-8000-000000000008",
+            "created_at": "2026-10-02T06:30:00Z",
+            "operation_id": "90000000-0000-4000-8000-000000000006"
+          }
+        ],
+        "operations": [
+          {
+            "id": "90000000-0000-4000-8000-000000000006",
+            "case_id": "90000000-0000-4000-8000-000000000003",
+            "proposal_id": "90000000-0000-4000-8000-000000000005",
+            "action_type": "DEACTIVATE_VAS",
+            "status": "PENDING",
+            "created_at": "2026-10-02T06:30:00Z",
+            "updated_at": "2026-10-02T06:30:00Z",
+            "provider_operation_id": null,
+            "outcome": {
+              "code": null,
+              "message": null,
+              "actual_target_status": null,
+              "provider_ticket_id": null
+            },
+            "next_step": "Wait for confirmed provider readback.",
+            "simulation": true
+          }
+        ],
+        "receipts": [],
+        "handoff": null,
+        "review_notes": [],
+        "audit_events": []
+      }
+    },
+    "error_session_expired": {
+      "schema": "Error",
+      "value": {
+        "error": {
+          "code": "SESSION_EXPIRED",
+          "message": "Synthetic example: session expired.",
+          "retryable": false,
+          "request_id": "90000000-0000-4000-8000-000000000060",
+          "details": {}
+        }
+      },
+      "note": "HTTP 401"
+    },
+    "error_role_forbidden": {
+      "schema": "Error",
+      "value": {
+        "error": {
+          "code": "ROLE_FORBIDDEN",
+          "message": "Synthetic example: role forbidden.",
+          "retryable": false,
+          "request_id": "90000000-0000-4000-8000-000000000060",
+          "details": {}
+        }
+      },
+      "note": "HTTP 403"
+    },
+    "error_resource_not_found": {
+      "schema": "Error",
+      "value": {
+        "error": {
+          "code": "RESOURCE_NOT_FOUND",
+          "message": "Synthetic example: resource not found.",
+          "retryable": false,
+          "request_id": "90000000-0000-4000-8000-000000000060",
+          "details": {}
+        }
+      },
+      "note": "HTTP 404"
+    },
+    "error_stale_version": {
+      "schema": "Error",
+      "value": {
+        "error": {
+          "code": "STALE_VERSION",
+          "message": "Synthetic example: stale version.",
+          "retryable": false,
+          "request_id": "90000000-0000-4000-8000-000000000060",
+          "details": {
+            "current_version": 3
+          }
+        }
+      },
+      "note": "HTTP 409"
+    },
+    "error_idempotency_conflict": {
+      "schema": "Error",
+      "value": {
+        "error": {
+          "code": "IDEMPOTENCY_CONFLICT",
+          "message": "Synthetic example: idempotency conflict.",
+          "retryable": false,
+          "request_id": "90000000-0000-4000-8000-000000000060",
+          "details": {}
+        }
+      },
+      "note": "HTTP 409"
+    },
+    "error_turn_in_progress": {
+      "schema": "Error",
+      "value": {
+        "error": {
+          "code": "TURN_IN_PROGRESS",
+          "message": "Synthetic example: turn in progress.",
+          "retryable": true,
+          "request_id": "90000000-0000-4000-8000-000000000060",
+          "details": {}
+        }
+      },
+      "note": "HTTP 409"
+    },
+    "error_proposal_expired": {
+      "schema": "Error",
+      "value": {
+        "error": {
+          "code": "PROPOSAL_EXPIRED",
+          "message": "Synthetic example: proposal expired.",
+          "retryable": false,
+          "request_id": "90000000-0000-4000-8000-000000000060",
+          "details": {}
+        }
+      },
+      "note": "HTTP 422"
+    },
+    "error_dependency_unavailable": {
+      "schema": "Error",
+      "value": {
+        "error": {
+          "code": "DEPENDENCY_UNAVAILABLE",
+          "message": "Synthetic example: dependency unavailable.",
+          "retryable": true,
+          "request_id": "90000000-0000-4000-8000-000000000060",
+          "details": {}
+        }
+      },
+      "note": "HTTP 503"
+    },
+    "voice_turn": {
+      "schema": "VoiceTurnRequest",
+      "value": {
+        "binding_id": "90000000-0000-4000-8000-000000000070",
+        "voice_session_id": "90000000-0000-4000-8000-000000000071",
+        "event_id": "90000000-0000-4000-8000-000000000072",
+        "turn_id": "90000000-0000-4000-8000-000000000073",
+        "transcript": "Why is my balance lower?",
+        "language": "en",
+        "is_final": true,
+        "presented_proposal_id": null,
+        "presented_proposal_hash": null
+      }
+    },
+    "voice_response": {
+      "schema": "VoiceTurnResponse",
+      "value": {
+        "response_id": "90000000-0000-4000-8000-000000000074",
+        "case_id": "90000000-0000-4000-8000-000000000003",
+        "reply_text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+        "speech_text": "The posted recharge and subsequent deductions reconcile to LKR 420.",
+        "pending_question": null,
+        "proposal": {
+          "id": "90000000-0000-4000-8000-000000000005",
+          "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "action_type": "DEACTIVATE_VAS",
+          "target_label": "Synthetic video alerts",
+          "consequences": "Stop future renewal in simulation. Past charges are not refunded or adjudicated.",
+          "expires_at": "2026-10-02T06:35:00Z"
+        },
+        "operation_status": null,
+        "end_session": false
+      }
+    },
+    "voice_event": {
+      "schema": "VoiceEventRequest",
+      "value": {
+        "binding_id": "90000000-0000-4000-8000-000000000070",
+        "voice_session_id": "90000000-0000-4000-8000-000000000071",
+        "event_id": "90000000-0000-4000-8000-000000000075",
+        "event_type": "disconnected",
+        "details": {
+          "ended_at": 1790922600
+        }
+      }
+    },
+    "voice_event_ack": {
+      "schema": "VoiceEventAck",
+      "value": {
+        "accepted": true,
+        "event_id": "90000000-0000-4000-8000-000000000075"
+      }
+    },
+    "voice_grant": {
+      "schema": "VoiceSessionGrant",
+      "value": {
+        "binding_id": "90000000-0000-4000-8000-000000000070",
+        "voice_session_id": "90000000-0000-4000-8000-000000000071",
+        "browser_grant": "EXAMPLE_ONLY_NOT_A_VALID_GRANT",
+        "websocket_path": "/ws/hutch/90000000-0000-4000-8000-000000000071",
+        "websocket_url": "ws://localhost:8088/ws/hutch/90000000-0000-4000-8000-000000000071",
+        "expires_at": 1790922660,
+        "input_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate": 16000,
+          "channels": 1
+        },
+        "output_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate": 24000,
+          "channels": 1
+        }
+      }
+    },
+    "internal_operation_event": {
+      "schema": "DomainEvent",
+      "value": {
+        "event_id": "90000000-0000-4000-8000-000000000080",
+        "event_type": "operation.changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T06:30:00Z",
+        "request_id": "90000000-0000-4000-8000-000000000060",
+        "conversation_id": "90000000-0000-4000-8000-000000000002",
+        "case_id": "90000000-0000-4000-8000-000000000003",
+        "investigation_id": "90000000-0000-4000-8000-000000000004",
+        "operation_id": "90000000-0000-4000-8000-000000000006",
+        "payload": {
+          "operation_id": "90000000-0000-4000-8000-000000000006",
+          "previous_status": "RUNNING",
+          "status": "SUCCEEDED"
+        }
+      }
+    },
+    "voice_interrupted": {
+      "schema": "VoiceServerControl",
+      "value": {
+        "type": "interrupted",
+        "response_id": null
+      },
+      "note": "Proposed browser event; not implemented at baseline."
+    },
+    "voice_presentation": {
+      "schema": "VoiceClientControl",
+      "value": {
+        "type": "proposal_presented",
+        "proposal_id": "90000000-0000-4000-8000-000000000005",
+        "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  }
+}

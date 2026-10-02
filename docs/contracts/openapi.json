@@ -1,0 +1,7415 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "HUTCH Resolve planned API",
+    "version": "1.0.0",
+    "description": "Design contract only. No Resolve endpoints implemented at baseline 8df74d7. Existing Voice strict models imported without runtime changes. See docs/contracts.md for scope, confirmation and error rules."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080/api/v1",
+      "description": "Proposed local Resolve runtime"
+    }
+  ],
+  "paths": {
+    "/sessions/anonymous": {
+      "post": {
+        "operationId": "create_guest_session",
+        "summary": "create guest session",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Empty"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/demo/sessions": {
+      "post": {
+        "operationId": "login_customer",
+        "summary": "login customer",
+        "description": "Exact Origin required. CSRF additionally required for guest-session upgrade; rotates credential. Never accepts role/account IDs.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session": {
+      "get": {
+        "operationId": "get_customer_session",
+        "summary": "get customer session",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "logout_customer",
+        "summary": "logout customer",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ]
+      }
+    },
+    "/agent/sessions": {
+      "post": {
+        "operationId": "login_agent",
+        "summary": "login agent",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/session": {
+      "get": {
+        "operationId": "get_agent_session",
+        "summary": "get agent session",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Agent"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "AgentSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "logout_agent",
+        "summary": "logout agent",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Agent"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "AgentSession": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success",
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ]
+      }
+    },
+    "/conversations": {
+      "post": {
+        "operationId": "create_conversation",
+        "summary": "create conversation",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Conversation"
+        ],
+        "x-owner": "Tevin",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations/{id}": {
+      "get": {
+        "operationId": "get_conversation",
+        "summary": "get conversation",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Conversation"
+        ],
+        "x-owner": "Tevin",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/conversations/{id}/messages": {
+      "post": {
+        "operationId": "submit_message",
+        "summary": "submit message",
+        "description": "Deduplicated by conversation/client_turn_id and input fingerprint. Domain PARTIAL/CONFLICTING is a valid result.",
+        "tags": [
+          "Conversation"
+        ],
+        "x-owner": "Tevin",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnResult"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/account": {
+      "get": {
+        "operationId": "get_account",
+        "summary": "get account",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cases/{id}": {
+      "get": {
+        "operationId": "get_case",
+        "summary": "get case",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/cases/{id}/investigations": {
+      "post": {
+        "operationId": "investigate_case",
+        "summary": "investigate case",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvestigationResult"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestigationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cases/{id}/action-proposals": {
+      "post": {
+        "operationId": "propose_action",
+        "summary": "propose action",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposalRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action-proposals/{id}/confirmations": {
+      "post": {
+        "operationId": "confirm_or_decline",
+        "summary": "confirm or decline",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Durably accepted; not completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmationResult"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Decline persisted; operation is null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmationResult"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/{id}": {
+      "get": {
+        "operationId": "get_operation",
+        "summary": "get operation",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/cases/{id}/escalations": {
+      "post": {
+        "operationId": "prepare_escalation",
+        "summary": "prepare escalation",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EscalationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cases/{id}/receipt": {
+      "get": {
+        "operationId": "get_receipt",
+        "summary": "get receipt",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptView"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      }
+    },
+    "/conversations/{id}/voice-sessions": {
+      "post": {
+        "operationId": "create_voice_binding",
+        "summary": "create voice binding",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceSessionGrant"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Empty"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/integrations/voice/turns": {
+      "post": {
+        "operationId": "receive_voice_turn",
+        "summary": "receive voice turn",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Voice integration"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "VoiceSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTurnResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Voice-Timestamp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$"
+            }
+          },
+          {
+            "name": "X-Voice-Event-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Voice-Body-Sha256",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceTurnRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/integrations/voice/events": {
+      "post": {
+        "operationId": "receive_voice_event",
+        "summary": "receive voice event",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Voice integration"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "VoiceSignature": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceEventAck"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Voice-Timestamp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$"
+            }
+          },
+          {
+            "name": "X-Voice-Event-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Voice-Body-Sha256",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceEventRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/cases": {
+      "get": {
+        "operationId": "list_agent_cases",
+        "summary": "list agent cases",
+        "description": "Review queue: REVIEW_REQUIRED case, accepted escalation, or existing agent review history. Run-scoped. Sort updated_at DESC then ID DESC.",
+        "tags": [
+          "Agent"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "AgentSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseQueue"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "review_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ReviewStatus"
+            }
+          },
+          {
+            "name": "complaint_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ComplaintType"
+            }
+          },
+          {
+            "name": "evidence_state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/EvidenceState"
+            }
+          },
+          {
+            "name": "delivery_state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DeliveryState"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ]
+      }
+    },
+    "/agent/cases/{id}": {
+      "get": {
+        "operationId": "get_agent_case",
+        "summary": "get agent case",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Agent"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "AgentSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCaseDetail"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/agent/cases/{id}/review": {
+      "patch": {
+        "operationId": "update_review",
+        "summary": "update review",
+        "description": "Versioned append-only note/status history. Close requires disposition/note; reopen requires reason. No account mutation permission.",
+        "tags": [
+          "Agent"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "AgentSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewResult"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "health",
+        "summary": "health",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "readiness",
+        "summary": "readiness",
+        "description": "Proposed interface; not implemented at documentation baseline.",
+        "tags": [
+          "Resolve"
+        ],
+        "x-owner": "Harry",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "Correlation ID"
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "CustomerSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "resolve_customer_session"
+      },
+      "AgentSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "resolve_agent_session"
+      },
+      "VoiceSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Voice-Signature",
+        "description": "HMAC SHA256 of timestamp.event_id.body_sha256; all companion headers mandatory; 60-second skew."
+      }
+    },
+    "schemas": {
+      "Language": {
+        "type": "string",
+        "enum": [
+          "en",
+          "si",
+          "ta"
+        ]
+      },
+      "ComplaintType": {
+        "type": "string",
+        "enum": [
+          "BALANCE_RECHARGE",
+          "DATA_DEPLETION",
+          "CONNECTIVITY",
+          "VAS_DISPUTE"
+        ]
+      },
+      "EvidenceState": {
+        "type": "string",
+        "enum": [
+          "SUFFICIENT",
+          "PARTIAL",
+          "CONFLICTING"
+        ]
+      },
+      "ActionType": {
+        "type": "string",
+        "enum": [
+          "DEACTIVATE_VAS",
+          "SEND_SETTINGS_INSTRUCTIONS",
+          "CREATE_REVIEW_TICKET"
+        ]
+      },
+      "OperationStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "RUNNING",
+          "SUCCEEDED",
+          "FAILED",
+          "UNKNOWN",
+          "REVIEW_REQUIRED"
+        ]
+      },
+      "ReviewStatus": {
+        "type": "string",
+        "enum": [
+          "NEW",
+          "IN_REVIEW",
+          "CLOSED"
+        ]
+      },
+      "DeliveryState": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "DELIVERED",
+          "FAILED",
+          "REVIEW_REQUIRED"
+        ]
+      },
+      "Decision": {
+        "type": "string",
+        "enum": [
+          "ACCEPT",
+          "DECLINE"
+        ]
+      },
+      "Empty": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "request_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "retryable",
+              "request_id",
+              "details"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "LoginRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "demo_identity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "credential": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "demo_identity",
+          "credential"
+        ]
+      },
+      "SessionView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "GUEST",
+              "CUSTOMER"
+            ]
+          },
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sandbox_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "csrf_token": {
+            "type": "string"
+          },
+          "simulation": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "account_id",
+          "sandbox_id",
+          "expires_at",
+          "csrf_token",
+          "simulation"
+        ]
+      },
+      "AgentSessionView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "AGENT"
+            ]
+          },
+          "account_id": {
+            "type": "null"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "csrf_token": {
+            "type": "string"
+          },
+          "simulation": {
+            "type": "boolean",
+            "const": true
+          },
+          "principal_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "account_id",
+          "sandbox_id",
+          "expires_at",
+          "csrf_token",
+          "simulation",
+          "principal_id"
+        ]
+      },
+      "CreateConversation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "language": {
+            "$ref": "#/components/schemas/Language"
+          }
+        },
+        "required": [
+          "language"
+        ]
+      },
+      "ReportedFacts": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "recharge_reference": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "required": []
+      },
+      "TextInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "text",
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ]
+      },
+      "CategoryInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "category_selection",
+            "type": "string"
+          },
+          "complaint_type": {
+            "$ref": "#/components/schemas/ComplaintType"
+          }
+        },
+        "required": [
+          "type",
+          "complaint_type"
+        ]
+      },
+      "DetailsInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "complaint_details",
+            "type": "string"
+          },
+          "complaint_type": {
+            "$ref": "#/components/schemas/ComplaintType"
+          },
+          "window_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reported_facts": {
+            "$ref": "#/components/schemas/ReportedFacts"
+          }
+        },
+        "required": [
+          "type",
+          "complaint_type",
+          "window_start",
+          "window_end",
+          "reported_facts"
+        ]
+      },
+      "DecisionInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "action_decision",
+            "type": "string"
+          },
+          "proposal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "proposal_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          }
+        },
+        "required": [
+          "type",
+          "proposal_id",
+          "proposal_hash",
+          "decision"
+        ]
+      },
+      "CaseSelectionInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "case_selection",
+            "type": "string"
+          },
+          "case_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "type",
+          "case_id"
+        ]
+      },
+      "TurnInput": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TextInput"
+          },
+          {
+            "$ref": "#/components/schemas/CategoryInput"
+          },
+          {
+            "$ref": "#/components/schemas/DetailsInput"
+          },
+          {
+            "$ref": "#/components/schemas/DecisionInput"
+          },
+          {
+            "$ref": "#/components/schemas/CaseSelectionInput"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
+      "MessageRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "client_turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "language": {
+            "$ref": "#/components/schemas/Language"
+          },
+          "input": {
+            "$ref": "#/components/schemas/TurnInput"
+          }
+        },
+        "required": [
+          "client_turn_id",
+          "expected_version",
+          "language",
+          "input"
+        ]
+      },
+      "PendingQuestion": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "allowed_input_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "category_selection",
+                "complaint_details",
+                "action_decision",
+                "case_selection"
+              ]
+            }
+          }
+        },
+        "required": [
+          "code",
+          "text",
+          "allowed_input_types"
+        ]
+      },
+      "Citation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "article_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "reviewed_at": {
+            "type": "string",
+            "format": "date"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "PUBLIC",
+              "SYNTHETIC"
+            ]
+          }
+        },
+        "required": [
+          "article_id",
+          "title",
+          "url",
+          "reviewed_at",
+          "version",
+          "scope"
+        ]
+      },
+      "SourceStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "complete_through": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "source",
+          "fetched_at",
+          "as_of",
+          "complete_through",
+          "source_version",
+          "complete",
+          "next_cursor",
+          "warnings"
+        ]
+      },
+      "EvidenceItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_record_id": {
+            "type": "string"
+          },
+          "source_version": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value": {
+            "type": [
+              "string",
+              "integer",
+              "boolean",
+              "null"
+            ]
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "source_record_id",
+          "source_version",
+          "observed_at",
+          "fetched_at",
+          "value",
+          "unit",
+          "source_payload"
+        ]
+      },
+      "Finding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "text",
+          "evidence_ids"
+        ]
+      },
+      "CalculationTerm": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "evidence_id",
+          "label",
+          "value"
+        ]
+      },
+      "Calculation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "opening": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "terms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalculationTerm"
+            }
+          },
+          "expected": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "observed": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "unit",
+          "opening",
+          "terms",
+          "expected",
+          "observed",
+          "delta",
+          "evidence_ids"
+        ]
+      },
+      "EligibleAction": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action_type": {
+            "$ref": "#/components/schemas/ActionType"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action_type",
+          "target_id",
+          "target_label"
+        ]
+      },
+      "InvestigationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "complaint_type": {
+            "$ref": "#/components/schemas/ComplaintType"
+          },
+          "window_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reported_facts": {
+            "$ref": "#/components/schemas/ReportedFacts"
+          }
+        },
+        "required": [
+          "expected_version",
+          "complaint_type",
+          "window_start",
+          "window_end",
+          "reported_facts"
+        ]
+      },
+      "InvestigationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "case_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "complaint_type": {
+            "$ref": "#/components/schemas/ComplaintType"
+          },
+          "window_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence_state": {
+            "$ref": "#/components/schemas/EvidenceState"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            }
+          },
+          "calculations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Calculation"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceItem"
+            }
+          },
+          "source_status": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceStatus"
+            }
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "eligible_actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EligibleAction"
+            }
+          },
+          "review_reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "simulation": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "id",
+          "case_id",
+          "revision",
+          "complaint_type",
+          "window_start",
+          "window_end",
+          "evidence_state",
+          "findings",
+          "calculations",
+          "evidence",
+          "source_status",
+          "missing",
+          "conflicts",
+          "eligible_actions",
+          "review_reasons",
+          "created_at",
+          "simulation"
+        ]
+      },
+      "Balance": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "wallet": {
+            "type": "string"
+          },
+          "amount_minor": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "LKR"
+            ]
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "wallet",
+          "amount_minor",
+          "currency",
+          "as_of"
+        ]
+      },
+      "SubscriptionSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "PACKAGE",
+              "VAS"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "remaining_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "renewal": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "status",
+          "version",
+          "remaining_bytes",
+          "expires_at",
+          "renewal"
+        ]
+      },
+      "AccountView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "line_alias": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "CLOSED"
+            ]
+          },
+          "balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Balance"
+            }
+          },
+          "subscriptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionSummary"
+            }
+          },
+          "source_status": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceStatus"
+            }
+          },
+          "simulation": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "id",
+          "line_alias",
+          "display_name",
+          "region",
+          "status",
+          "balances",
+          "subscriptions",
+          "source_status",
+          "simulation"
+        ]
+      },
+      "ProposalRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "investigation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action_type": {
+            "$ref": "#/components/schemas/ActionType"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "expected_version",
+          "investigation_id",
+          "action_type",
+          "target_id"
+        ]
+      },
+      "ProposalView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "case_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "investigation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action_type": {
+            "$ref": "#/components/schemas/ActionType"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_label": {
+            "type": "string"
+          },
+          "consequences": {
+            "type": "string"
+          },
+          "proposal_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "simulation": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "id",
+          "case_id",
+          "investigation_id",
+          "action_type",
+          "target_id",
+          "target_version",
+          "target_label",
+          "consequences",
+          "proposal_hash",
+          "expires_at",
+          "simulation"
+        ]
+      },
+      "ConfirmationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "proposal_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          },
+          "client_turn_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "proposal_hash",
+          "decision",
+          "client_turn_id"
+        ]
+      },
+      "ConfirmationView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "proposal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "proposal_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "TEXT",
+              "VOICE"
+            ]
+          },
+          "client_turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "proposal_id",
+          "proposal_hash",
+          "decision",
+          "channel",
+          "client_turn_id",
+          "created_at",
+          "operation_id"
+        ]
+      },
+      "OperationOutcome": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actual_target_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider_ticket_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "actual_target_status",
+          "provider_ticket_id"
+        ]
+      },
+      "OperationView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "case_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "proposal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action_type": {
+            "$ref": "#/components/schemas/ActionType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OperationStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "provider_operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/OperationOutcome"
+          },
+          "next_step": {
+            "type": "string"
+          },
+          "simulation": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "id",
+          "case_id",
+          "proposal_id",
+          "action_type",
+          "status",
+          "created_at",
+          "updated_at",
+          "provider_operation_id",
+          "outcome",
+          "next_step",
+          "simulation"
+        ]
+      },
+      "ConfirmationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "confirmation": {
+            "$ref": "#/components/schemas/ConfirmationView"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "confirmation",
+          "operation"
+        ]
+      },
+      "EscalationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "investigation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "expected_version",
+          "investigation_id",
+          "reason"
+        ]
+      },
+      "Handoff": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reference": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "queue": {
+            "type": "string",
+            "enum": [
+              "BILLING_REVIEW",
+              "TECHNICAL_SUPPORT"
+            ]
+          },
+          "delivery_state": {
+            "$ref": "#/components/schemas/DeliveryState"
+          },
+          "provider_ticket_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_sync_state": {
+            "type": "string",
+            "enum": [
+              "NOT_APPLICABLE",
+              "PENDING",
+              "SYNCED",
+              "FAILED"
+            ]
+          },
+          "next_step": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reference",
+          "queue",
+          "delivery_state",
+          "provider_ticket_id",
+          "review_sync_state",
+          "next_step"
+        ]
+      },
+      "ReceiptAction": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "proposal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action_type": {
+            "$ref": "#/components/schemas/ActionType"
+          },
+          "requested": {
+            "type": "boolean"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "proposal_id",
+          "action_type",
+          "requested",
+          "decision",
+          "operation_id",
+          "operation_status",
+          "completed"
+        ]
+      },
+      "EvidenceReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_record_id": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "source_record_id",
+          "observed_at"
+        ]
+      },
+      "ReceiptView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "case_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "issue": {
+            "type": "string"
+          },
+          "window": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "start": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "start",
+              "end"
+            ]
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            }
+          },
+          "calculations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Calculation"
+            }
+          },
+          "evidence_references": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            }
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAction"
+            }
+          },
+          "handoff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Handoff"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_step": {
+            "type": "string"
+          },
+          "simulation": {
+            "type": "boolean",
+            "const": true
+          },
+          "digest_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "id",
+          "case_id",
+          "revision",
+          "issued_at",
+          "issue",
+          "window",
+          "findings",
+          "calculations",
+          "evidence_references",
+          "missing",
+          "conflicts",
+          "actions",
+          "handoff",
+          "next_step",
+          "simulation",
+          "digest_sha256"
+        ]
+      },
+      "ReceiptReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "revision"
+        ]
+      },
+      "CaseView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "complaint_type": {
+            "$ref": "#/components/schemas/ComplaintType"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "AWAITING_CUSTOMER",
+              "ACTION_PENDING",
+              "REVIEW_REQUIRED",
+              "RESOLVED"
+            ]
+          },
+          "review_status": {
+            "$ref": "#/components/schemas/ReviewStatus"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "investigation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvestigationResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "simulation": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "account_id",
+          "complaint_type",
+          "status",
+          "review_status",
+          "version",
+          "created_at",
+          "updated_at",
+          "investigation",
+          "operation_ids",
+          "receipt",
+          "simulation"
+        ]
+      },
+      "CaseSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "complaint_type": {
+            "$ref": "#/components/schemas/ComplaintType"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "complaint_type",
+          "status"
+        ]
+      },
+      "TimelineItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "label": {
+            "type": "string"
+          },
+          "amount_minor": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "evidence_id",
+          "occurred_at",
+          "recorded_at",
+          "label",
+          "amount_minor",
+          "bytes"
+        ]
+      },
+      "AccountCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "account"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AccountView"
+          }
+        },
+        "required": [
+          "type",
+          "data"
+        ]
+      },
+      "TimelineCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "timeline"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TimelineItem"
+                }
+              }
+            },
+            "required": [
+              "items"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "data"
+        ]
+      },
+      "CalculationCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "calculation"
+          },
+          "data": {
+            "$ref": "#/components/schemas/Calculation"
+          }
+        },
+        "required": [
+          "type",
+          "data"
+        ]
+      },
+      "FindingCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "finding"
+          },
+          "data": {
+            "$ref": "#/components/schemas/Finding"
+          }
+        },
+        "required": [
+          "type",
+          "data"
+        ]
+      },
+      "ConfirmationCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "confirmation"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ProposalView"
+          }
+        },
+        "required": [
+          "type",
+          "data"
+        ]
+      },
+      "TicketCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "ticket"
+          },
+          "data": {
+            "$ref": "#/components/schemas/Handoff"
+          }
+        },
+        "required": [
+          "type",
+          "data"
+        ]
+      },
+      "ReceiptCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "receipt"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "case_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "receipt_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "case_id",
+              "receipt_id",
+              "revision"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "data"
+        ]
+      },
+      "Card": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AccountCard"
+          },
+          {
+            "$ref": "#/components/schemas/TimelineCard"
+          },
+          {
+            "$ref": "#/components/schemas/CalculationCard"
+          },
+          {
+            "$ref": "#/components/schemas/FindingCard"
+          },
+          {
+            "$ref": "#/components/schemas/ConfirmationCard"
+          },
+          {
+            "$ref": "#/components/schemas/TicketCard"
+          },
+          {
+            "$ref": "#/components/schemas/ReceiptCard"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
+      "TurnResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "case_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reply_text": {
+            "type": "string"
+          },
+          "cards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Card"
+            }
+          },
+          "citations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            }
+          },
+          "pending_question": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PendingQuestion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "simulation": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "message_id",
+          "conversation_id",
+          "conversation_version",
+          "case_id",
+          "reply_text",
+          "cards",
+          "citations",
+          "pending_question",
+          "operation_ids",
+          "simulation"
+        ]
+      },
+      "MessageView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "client_turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "speaker": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "ASSISTANT"
+            ]
+          },
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "client_turn_id",
+          "speaker",
+          "body",
+          "created_at",
+          "result"
+        ]
+      },
+      "ConversationView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "language": {
+            "$ref": "#/components/schemas/Language"
+          },
+          "active_case_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageView"
+            }
+          },
+          "cases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaseSummary"
+            }
+          },
+          "pending_question": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PendingQuestion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pending_proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProposalView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "language",
+          "active_case_id",
+          "expires_at",
+          "messages",
+          "cases",
+          "pending_question",
+          "pending_proposal",
+          "operation_ids"
+        ]
+      },
+      "ReviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "review_status": {
+            "$ref": "#/components/schemas/ReviewStatus"
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "REVIEW_COMPLETE",
+              "NEEDS_OPERATOR_FOLLOWUP",
+              "CUSTOMER_WITHDREW"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "reopen_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "note"
+            ]
+          },
+          {
+            "required": [
+              "review_status"
+            ]
+          }
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_status": {
+                  "const": "CLOSED"
+                }
+              },
+              "required": [
+                "review_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "disposition",
+                "note"
+              ]
+            }
+          }
+        ]
+      },
+      "ReviewNote": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor_id": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "INTERNAL"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "actor_id",
+          "note",
+          "created_at",
+          "visibility"
+        ]
+      },
+      "ReviewResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "review_status": {
+            "$ref": "#/components/schemas/ReviewStatus"
+          },
+          "disposition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewNote"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_sync_state": {
+            "type": "string",
+            "enum": [
+              "NOT_APPLICABLE",
+              "PENDING",
+              "SYNCED",
+              "FAILED"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "case_id",
+          "version",
+          "review_status",
+          "disposition",
+          "note",
+          "review_sync_state",
+          "updated_at"
+        ]
+      },
+      "CaseQueueRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "line_alias": {
+            "type": "string"
+          },
+          "complaint_type": {
+            "$ref": "#/components/schemas/ComplaintType"
+          },
+          "evidence_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_status": {
+            "$ref": "#/components/schemas/ReviewStatus"
+          },
+          "delivery_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "case_id",
+          "line_alias",
+          "complaint_type",
+          "evidence_state",
+          "review_status",
+          "delivery_state",
+          "updated_at",
+          "version"
+        ]
+      },
+      "CaseQueue": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaseQueueRow"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "AuditEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "id",
+          "event_type",
+          "actor_id",
+          "created_at",
+          "details"
+        ]
+      },
+      "AgentCaseDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "case": {
+            "$ref": "#/components/schemas/CaseView"
+          },
+          "account": {
+            "$ref": "#/components/schemas/AccountView"
+          },
+          "conversation": {
+            "$ref": "#/components/schemas/ConversationView"
+          },
+          "investigations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvestigationResult"
+            }
+          },
+          "proposals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProposalView"
+            }
+          },
+          "confirmations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfirmationView"
+            }
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperationView"
+            }
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceiptView"
+            }
+          },
+          "handoff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Handoff"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewNote"
+            }
+          },
+          "audit_events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditEvent"
+            }
+          }
+        },
+        "required": [
+          "case",
+          "account",
+          "conversation",
+          "investigations",
+          "proposals",
+          "confirmations",
+          "operations",
+          "receipts",
+          "handoff",
+          "review_notes",
+          "audit_events"
+        ]
+      },
+      "AudioFormat": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "pcm_s16le"
+            ]
+          },
+          "sample_rate": {
+            "type": "integer",
+            "enum": [
+              16000,
+              24000
+            ]
+          },
+          "channels": {
+            "type": "integer",
+            "const": 1
+          }
+        },
+        "required": [
+          "encoding",
+          "sample_rate",
+          "channels"
+        ]
+      },
+      "VoiceSessionGrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "binding_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "voice_session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "browser_grant": {
+            "type": "string"
+          },
+          "websocket_path": {
+            "type": "string"
+          },
+          "websocket_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expires_at": {
+            "type": "integer"
+          },
+          "input_format": {
+            "$ref": "#/components/schemas/AudioFormat"
+          },
+          "output_format": {
+            "$ref": "#/components/schemas/AudioFormat"
+          }
+        },
+        "required": [
+          "binding_id",
+          "voice_session_id",
+          "browser_grant",
+          "websocket_path",
+          "websocket_url",
+          "expires_at",
+          "input_format",
+          "output_format"
+        ]
+      },
+      "VoiceTurnRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_id": {
+            "title": "Binding Id",
+            "type": "string"
+          },
+          "voice_session_id": {
+            "title": "Voice Session Id",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "transcript": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Transcript",
+            "type": "string"
+          },
+          "language": {
+            "enum": [
+              "en",
+              "si",
+              "ta"
+            ],
+            "title": "Language",
+            "type": "string"
+          },
+          "is_final": {
+            "const": true,
+            "title": "Is Final",
+            "type": "boolean"
+          },
+          "presented_proposal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Presented Proposal Id"
+          },
+          "presented_proposal_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Presented Proposal Hash"
+          }
+        },
+        "required": [
+          "binding_id",
+          "voice_session_id",
+          "event_id",
+          "turn_id",
+          "transcript",
+          "language",
+          "is_final"
+        ],
+        "title": "VoiceTurnRequest",
+        "type": "object"
+      },
+      "Proposal": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "proposal_hash": {
+            "title": "Proposal Hash",
+            "type": "string"
+          },
+          "action_type": {
+            "enum": [
+              "DEACTIVATE_VAS",
+              "SEND_SETTINGS_INSTRUCTIONS",
+              "CREATE_REVIEW_TICKET"
+            ],
+            "title": "Action Type",
+            "type": "string"
+          },
+          "target_label": {
+            "title": "Target Label",
+            "type": "string"
+          },
+          "consequences": {
+            "title": "Consequences",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "proposal_hash",
+          "action_type",
+          "target_label",
+          "consequences",
+          "expires_at"
+        ],
+        "title": "Proposal",
+        "type": "object"
+      },
+      "VoiceTurnResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "response_id": {
+            "title": "Response Id",
+            "type": "string"
+          },
+          "case_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Case Id"
+          },
+          "reply_text": {
+            "title": "Reply Text",
+            "type": "string"
+          },
+          "speech_text": {
+            "title": "Speech Text",
+            "type": "string"
+          },
+          "pending_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pending Question"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Proposal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "operation_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operation Status"
+          },
+          "end_session": {
+            "default": false,
+            "title": "End Session",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "response_id",
+          "reply_text",
+          "speech_text"
+        ],
+        "title": "VoiceTurnResponse",
+        "type": "object"
+      },
+      "VoiceEventRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_id": {
+            "title": "Binding Id",
+            "type": "string"
+          },
+          "voice_session_id": {
+            "title": "Voice Session Id",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "enum": [
+              "connected",
+              "disconnected",
+              "error",
+              "usage"
+            ],
+            "title": "Event Type",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          }
+        },
+        "required": [
+          "binding_id",
+          "voice_session_id",
+          "event_id",
+          "event_type"
+        ],
+        "title": "VoiceEventRequest",
+        "type": "object"
+      },
+      "SessionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Binding Id",
+            "type": "string"
+          },
+          "conversation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "voice_session_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Voice Session Id",
+            "type": "string"
+          },
+          "account_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Account Id",
+            "type": "string"
+          },
+          "origin": {
+            "maxLength": 255,
+            "minLength": 8,
+            "title": "Origin",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "binding_id",
+          "conversation_id",
+          "voice_session_id",
+          "account_id",
+          "origin",
+          "expires_at"
+        ],
+        "title": "SessionRequest",
+        "type": "object"
+      },
+      "VoiceEventAck": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "const": true
+          },
+          "event_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accepted",
+          "event_id"
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "ready"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "InvestigationCompleted": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string",
+            "const": "investigation.completed"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "case_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "investigation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "investigation_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "evidence_state": {
+                "$ref": "#/components/schemas/EvidenceState"
+              }
+            },
+            "required": [
+              "investigation_id",
+              "revision",
+              "evidence_state"
+            ]
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "schema_version",
+          "occurred_at",
+          "request_id",
+          "conversation_id",
+          "case_id",
+          "investigation_id",
+          "operation_id",
+          "payload"
+        ]
+      },
+      "ProposalCreated": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string",
+            "const": "proposal.created"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "case_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "investigation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "proposal_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "action_type": {
+                "$ref": "#/components/schemas/ActionType"
+              }
+            },
+            "required": [
+              "proposal_id",
+              "action_type"
+            ]
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "schema_version",
+          "occurred_at",
+          "request_id",
+          "conversation_id",
+          "case_id",
+          "investigation_id",
+          "operation_id",
+          "payload"
+        ]
+      },
+      "ConfirmationRecorded": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string",
+            "const": "confirmation.recorded"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "case_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "investigation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "confirmation_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "proposal_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "decision": {
+                "$ref": "#/components/schemas/Decision"
+              }
+            },
+            "required": [
+              "confirmation_id",
+              "proposal_id",
+              "decision"
+            ]
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "schema_version",
+          "occurred_at",
+          "request_id",
+          "conversation_id",
+          "case_id",
+          "investigation_id",
+          "operation_id",
+          "payload"
+        ]
+      },
+      "OperationChanged": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string",
+            "const": "operation.changed"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "case_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "investigation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "operation_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "previous_status": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/OperationStatus"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "$ref": "#/components/schemas/OperationStatus"
+              }
+            },
+            "required": [
+              "operation_id",
+              "previous_status",
+              "status"
+            ]
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "schema_version",
+          "occurred_at",
+          "request_id",
+          "conversation_id",
+          "case_id",
+          "investigation_id",
+          "operation_id",
+          "payload"
+        ]
+      },
+      "EscalationChanged": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string",
+            "const": "escalation.delivery_changed"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "case_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "investigation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "reference": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "delivery_state": {
+                "$ref": "#/components/schemas/DeliveryState"
+              }
+            },
+            "required": [
+              "reference",
+              "delivery_state"
+            ]
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "schema_version",
+          "occurred_at",
+          "request_id",
+          "conversation_id",
+          "case_id",
+          "investigation_id",
+          "operation_id",
+          "payload"
+        ]
+      },
+      "ReviewUpdated": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string",
+            "const": "review.updated"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "case_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "investigation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "case_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "review_status": {
+                "$ref": "#/components/schemas/ReviewStatus"
+              }
+            },
+            "required": [
+              "case_id",
+              "version",
+              "review_status"
+            ]
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "schema_version",
+          "occurred_at",
+          "request_id",
+          "conversation_id",
+          "case_id",
+          "investigation_id",
+          "operation_id",
+          "payload"
+        ]
+      },
+      "DomainEvent": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/InvestigationCompleted"
+          },
+          {
+            "$ref": "#/components/schemas/ProposalCreated"
+          },
+          {
+            "$ref": "#/components/schemas/ConfirmationRecorded"
+          },
+          {
+            "$ref": "#/components/schemas/OperationChanged"
+          },
+          {
+            "$ref": "#/components/schemas/EscalationChanged"
+          },
+          {
+            "$ref": "#/components/schemas/ReviewUpdated"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "event_type"
+        }
+      },
+      "VoiceReady": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "ready"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "const": "gemini_live"
+          },
+          "model": {
+            "type": "string"
+          },
+          "live_profile": {
+            "type": "string"
+          },
+          "features": {
+            "type": "object",
+            "properties": {
+              "full_duplex": {
+                "type": "boolean"
+              },
+              "context_compression": {
+                "type": "boolean"
+              },
+              "protocol_version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "full_duplex",
+              "context_compression",
+              "protocol_version"
+            ],
+            "additionalProperties": false
+          },
+          "input_format": {
+            "type": "object",
+            "properties": {
+              "encoding": {
+                "const": "pcm_s16le"
+              },
+              "sample_rate": {
+                "const": 16000
+              }
+            },
+            "required": [
+              "encoding",
+              "sample_rate"
+            ],
+            "additionalProperties": false
+          },
+          "output_format": {
+            "type": "object",
+            "properties": {
+              "encoding": {
+                "const": "pcm_s16le"
+              },
+              "sample_rate": {
+                "const": 24000
+              }
+            },
+            "required": [
+              "encoding",
+              "sample_rate"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "session_id",
+          "provider",
+          "model",
+          "live_profile",
+          "features",
+          "input_format",
+          "output_format"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceGreeting": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "greeting"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceTranscript": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "transcript"
+          },
+          "speaker": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "final": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "speaker",
+          "text",
+          "final"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceResolveResult": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "resolve_result"
+          },
+          "response_id": {
+            "type": "string"
+          },
+          "case_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reply_text": {
+            "type": "string"
+          },
+          "pending_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Proposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "end_session": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "response_id",
+          "case_id",
+          "reply_text",
+          "pending_question",
+          "proposal",
+          "operation_status",
+          "end_session"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceProposalAck": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "proposal_ack"
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceError": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "error"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceEnded": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "ended"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceInterrupted": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "interrupted"
+          },
+          "response_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "response_id"
+        ],
+        "additionalProperties": false,
+        "description": "Proposed additive event, not implemented at baseline. Clear queued audio and proposal presentation eligibility."
+      },
+      "VoicePresentation": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "proposal_presented"
+          },
+          "proposal_id": {
+            "type": "string"
+          },
+          "proposal_hash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "proposal_id",
+          "proposal_hash"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceServerControl": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VoiceReady"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceGreeting"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceTranscript"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceResolveResult"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceProposalAck"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceError"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceEnded"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceInterrupted"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
+      "VoiceClientControl": {
+        "$ref": "#/components/schemas/VoicePresentation"
+      }
+    }
+  }
+}

@@ -1,5 +1,9 @@
 # Mock HUTCH environment
 
+## Current qualification note (2026-10-02)
+
+The running database is healthy, but this document's original fixture/readiness descriptions are intended outcomes, not a complete validation record. The [team context](../context.md) records confirmed B debit-sign and E duplicate-opening defects, other fixture inconsistencies, and readiness/reset lifecycle work under H-01. Fault profiles configure future behavior; no simulator runtime currently executes them. Use the [current shared contracts](contracts.md) for implementation.
+
 ## Deployment
 
 ```mermaid

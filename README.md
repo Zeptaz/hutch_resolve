@@ -2,6 +2,10 @@
 
 This repository currently prepares the synthetic telecom environment for the HUTCH Resolve hackathon entry. It intentionally contains no Resolve web app, API implementation, diagnosis logic, action executor, or customer UI.
 
+## Team implementation plan
+
+Start with [context.md](context.md), the agent-maintained source of truth, and the owner plans for [Harry](docs/plans/harry.md), [Jayith](docs/plans/jayith.md), and [Tevin](docs/plans/tevin.md). [Shared contracts](docs/contracts.md) describe upcoming application work; they are not deployed APIs. The plan records known fixture corrections and incomplete Voice qualification.
+
 ## Start and inspect
 
 1. Copy `.env.example` to `.env` and change the local development passwords if desired.
