@@ -42,6 +42,22 @@ export type CaseView = Schemas['CaseView']
 export type CaseQueue = Schemas['CaseQueue']
 export type CaseQueueRow = Schemas['CaseQueueRow']
 export type AgentCaseDetail = Schemas['AgentCaseDetail']
+export type ReviewNote = Schemas['ReviewNote']
+export type ReviewResult = Schemas['ReviewResult']
+export type ReviewSyncState = ReviewResult['review_sync_state']
+export type AuditEvent = Schemas['AuditEvent']
+export type ConfirmationView = Schemas['ConfirmationView']
+export type SourceStatus = Schemas['SourceStatus']
+export type Disposition = 'REVIEW_COMPLETE' | 'NEEDS_OPERATOR_FOLLOWUP' | 'CUSTOMER_WITHDREW'
+
+/** PATCH /agent/cases/{id}/review. The generated union is unusable, so it is spelled out here. */
+export type ReviewRequest = {
+  expected_version: number
+  review_status?: ReviewStatus
+  disposition?: Disposition
+  note?: string
+  reopen_reason?: string
+}
 
 export type QueueFilters = {
   review_status?: ReviewStatus

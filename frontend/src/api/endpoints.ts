@@ -12,6 +12,8 @@ import type {
   OperationView,
   ProposalView,
   QueueFilters,
+  ReviewRequest,
+  ReviewResult,
   ReceiptView,
   SessionView,
   TurnResult,
@@ -50,4 +52,7 @@ export const agentApi = {
     request<CaseQueue>('agent', 'GET', '/agent/cases', { query: filters, signal }),
   getCase: (id: string, signal?: AbortSignal) =>
     request<AgentCaseDetail>('agent', 'GET', `/agent/cases/${id}`, { signal }),
+  /** Reuse the same key when retrying the same update; a new draft gets a new key. */
+  updateReview: (id: string, body: ReviewRequest, idempotencyKey: string) =>
+    request<ReviewResult>('agent', 'PATCH', `/agent/cases/${id}/review`, { body, idempotencyKey }),
 }

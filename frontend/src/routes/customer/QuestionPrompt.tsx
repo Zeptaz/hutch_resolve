@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useI18n } from '@/i18n/context'
-import { CardFrame } from './cards/ChatCards'
+import { CardFrame } from '@/components/CardFrame'
 
 const COMPLAINTS: ComplaintType[] = ['BALANCE_RECHARGE', 'DATA_DEPLETION', 'CONNECTIVITY', 'VAS_DISPUTE']
 

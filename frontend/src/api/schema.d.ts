@@ -343,7 +343,7 @@ export interface paths {
         put?: never;
         /**
          * create voice binding
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Implemented: customer session, exact Origin and CSRF required; binding is scoped to the session, account, conversation, active sandbox run, origin and short expiry. Requires configured Voice service.
          */
         post: operations["create_voice_binding"];
         delete?: never;
@@ -363,7 +363,7 @@ export interface paths {
         put?: never;
         /**
          * receive voice turn
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Implemented signed callback. Signature, active binding scope, and event/turn idempotency are checked before an injected ConversationService handles the finalized turn. A missing conversation service returns 503.
          */
         post: operations["receive_voice_turn"];
         delete?: never;
@@ -383,7 +383,7 @@ export interface paths {
         put?: never;
         /**
          * receive voice event
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Implemented signed lifecycle callback. Signature and active binding scope are checked before durable event replay/acknowledgement.
          */
         post: operations["receive_voice_event"];
         delete?: never;
@@ -1415,11 +1415,14 @@ export interface components {
             proposal: components["schemas"]["Proposal"] | null;
             operation_status: string | null;
             end_session: boolean;
+            speech_text: string;
+            sensitive_audio: boolean;
         };
         VoiceProposalAck: {
             /** @constant */
             type: "proposal_ack";
             accepted: boolean;
+            response_id: string;
         };
         VoiceError: {
             /** @constant */
@@ -1432,7 +1435,7 @@ export interface components {
             type: "ended";
             reason: string;
         };
-        /** @description Proposed additive event, not implemented at baseline. Clear queued audio and proposal presentation eligibility. */
+        /** @description Implemented v2 event: discard queued audio and pending proposal acknowledgement. */
         VoiceInterrupted: {
             /** @constant */
             type: "interrupted";
@@ -1443,9 +1446,38 @@ export interface components {
             type: "proposal_presented";
             proposal_id: string;
             proposal_hash: string;
+            response_id: string;
         };
-        VoiceServerControl: components["schemas"]["VoiceReady"] | components["schemas"]["VoiceGreeting"] | components["schemas"]["VoiceTranscript"] | components["schemas"]["VoiceResolveResult"] | components["schemas"]["VoiceProposalAck"] | components["schemas"]["VoiceError"] | components["schemas"]["VoiceEnded"] | components["schemas"]["VoiceInterrupted"];
-        VoiceClientControl: components["schemas"]["VoicePresentation"];
+        VoiceServerControl: components["schemas"]["VoiceReady"] | components["schemas"]["VoiceGreeting"] | components["schemas"]["VoiceTranscript"] | components["schemas"]["VoiceResolveResult"] | components["schemas"]["VoiceProposalAck"] | components["schemas"]["VoiceError"] | components["schemas"]["VoiceEnded"] | components["schemas"]["VoiceInterrupted"] | components["schemas"]["VoiceAudioStart"] | components["schemas"]["VoiceAudioEnd"] | components["schemas"]["VoiceAudioFallback"] | components["schemas"]["VoicePlaybackAck"];
+        VoiceClientControl: components["schemas"]["VoicePlaybackComplete"] | components["schemas"]["VoicePresentation"];
+        VoiceAudioStart: {
+            /** @constant */
+            type: "audio_start";
+            response_id: string;
+        };
+        VoiceAudioEnd: {
+            /** @constant */
+            type: "audio_end";
+            response_id: string;
+        };
+        VoiceAudioFallback: {
+            /** @constant */
+            type: "audio_fallback";
+            response_id: string;
+            text: string;
+            reason: string;
+        };
+        VoicePlaybackAck: {
+            /** @constant */
+            type: "playback_ack";
+            response_id: string;
+            accepted: boolean;
+        };
+        VoicePlaybackComplete: {
+            /** @constant */
+            type: "playback_complete";
+            response_id: string;
+        };
     };
     responses: never;
     parameters: never;
