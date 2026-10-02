@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { ShieldCheck, Timer } from 'lucide-react'
 import type { Decision, ProposalView } from '@/api/types'
-import { StatusBadge } from '@/components/StatusBadge'
+import { StatusBadge, type Tone } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
-import { hasMessage, useI18n } from '@/i18n/context'
+import { hasMessage, useI18n, type Translate } from '@/i18n/context'
 import { formatTime, humanize } from '@/lib/format'
 import { CardFrame } from './ChatCards'
 
@@ -33,6 +33,7 @@ export function ConfirmationCard({
   const remaining = Math.max(0, expiresMs - now)
   const expired = remaining === 0 && (state.kind === 'open' || state.kind === 'submitting')
   const actionable = state.kind === 'open' && !expired
+  const badge = stateBadge(t, state, expired)
 
   return (
     <CardFrame
@@ -46,8 +47,8 @@ export function ConfirmationCard({
             ? t('confirm.decision')
             : t('confirm.suggested')
       }
-      className={actionable ? 'border-primary/40 ring-1 ring-primary/20' : undefined}
-      aside={<StateBadge state={state} expired={expired} />}
+      tone={badge.tone}
+      aside={<StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>}
     >
       <dl className="flex flex-col gap-2">
         <div>
@@ -88,18 +89,13 @@ export function ConfirmationCard({
   )
 }
 
-function StateBadge({ state, expired }: { state: ProposalState; expired: boolean }) {
-  const { t } = useI18n()
+function stateBadge(t: Translate, state: ProposalState, expired: boolean): { tone: Tone; label: string } {
   if (state.kind === 'decided') {
-    return state.decision === 'ACCEPT' ? (
-      <StatusBadge tone="info">{t('confirm.accepted')}</StatusBadge>
-    ) : (
-      <StatusBadge tone="neutral">{t('confirm.declined')}</StatusBadge>
-    )
+    return state.decision === 'ACCEPT' ? { tone: 'info', label: t('confirm.accepted') } : { tone: 'neutral', label: t('confirm.declined') }
   }
-  if (state.kind === 'closed') return <StatusBadge tone="neutral">{t('confirm.closed')}</StatusBadge>
-  if (expired) return <StatusBadge tone="neutral">{t('confirm.expired')}</StatusBadge>
-  return <StatusBadge tone="warning">{t('confirm.waiting')}</StatusBadge>
+  if (state.kind === 'closed') return { tone: 'neutral', label: t('confirm.closed') }
+  if (expired) return { tone: 'neutral', label: t('confirm.expired') }
+  return { tone: 'warning', label: t('confirm.waiting') }
 }
 
 function formatRemaining(ms: number) {

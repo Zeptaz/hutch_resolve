@@ -6,6 +6,7 @@ import { describeError } from '@/api/errors'
 import type { Card, CardOf, Citation } from '@/api/types'
 import { CalculationTable } from '@/components/evidence/CalculationTable'
 import { DeliveryBadge, StatusBadge } from '@/components/StatusBadge'
+import { deliveryTone, type Tone } from '@/components/tones'
 import { Button } from '@/components/ui/button'
 import { hasMessage, useI18n, type Translate } from '@/i18n/context'
 import { formatDateTime, formatGb, formatLkr, humanize } from '@/lib/format'
@@ -34,22 +35,37 @@ export function ChatCard({ card, renderConfirmation }: { card: Card; renderConfi
   }
 }
 
+// Status cards get an edge in their state colour; neutral states (declined, expired) a quiet grey one.
+const TONE_EDGE: Record<Tone, string> = {
+  neutral: 'border-[1.5px] border-foreground/15',
+  info: 'border-[1.5px] border-info/45',
+  success: 'border-[1.5px] border-success/45',
+  warning: 'border-[1.5px] border-warning/70',
+  danger: 'border-[1.5px] border-destructive/45',
+}
+
+/** Soft panel tile. Pass `tone` only when the card shows a status, so its edge matches the badge. */
 export function CardFrame({
   icon,
   title,
   aside,
+  tone,
   children,
   className,
 }: {
   icon: ReactNode
   title: string
   aside?: ReactNode
+  tone?: Tone
   children: ReactNode
   className?: string
 }) {
   return (
-    <section className={cn('rounded-xl border bg-card text-card-foreground shadow-xs', className)} aria-label={title}>
-      <header className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
+    <section
+      className={cn('rounded-2xl bg-muted/70 text-card-foreground', tone ? TONE_EDGE[tone] : 'border-0', className)}
+      aria-label={title}
+    >
+      <header className="flex items-center justify-between gap-2 px-4 pt-3 pb-1">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <span aria-hidden className="text-muted-foreground [&_svg]:size-4">
             {icon}
@@ -58,7 +74,7 @@ export function CardFrame({
         </h3>
         {aside}
       </header>
-      <div className="px-4 py-3 text-sm">{children}</div>
+      <div className="px-4 pt-2 pb-3.5 text-sm">{children}</div>
     </section>
   )
 }
@@ -156,9 +172,11 @@ function TimelineCard({ data }: { data: CardOf<'timeline'>['data'] }) {
 function CalculationCard({ data }: { data: CardOf<'calculation'>['data'] }) {
   const { t } = useI18n()
   const matched = data.delta === 0
+  const tone: Tone = data.delta == null ? 'warning' : matched ? 'success' : 'danger'
   return (
     <CardFrame
       icon={<Calculator />}
+      tone={tone}
       title={data.unit === 'BYTES' ? t('card.dataCheck') : t('card.balanceCheck')}
       aside={
         data.delta == null ? (
@@ -194,7 +212,12 @@ function FindingCard({ data }: { data: CardOf<'finding'>['data'] }) {
 function TicketCard({ data }: { data: CardOf<'ticket'>['data'] }) {
   const { t } = useI18n()
   return (
-    <CardFrame icon={<Ticket />} title={t('card.reviewRequest')} aside={<DeliveryBadge state={data.delivery_state} />}>
+    <CardFrame
+      icon={<Ticket />}
+      title={t('card.reviewRequest')}
+      tone={data.delivery_state ? deliveryTone[data.delivery_state] : undefined}
+      aside={<DeliveryBadge state={data.delivery_state} />}
+    >
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
         <div>
           <dt className="text-xs text-muted-foreground">{t('card.team')}</dt>

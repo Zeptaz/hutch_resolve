@@ -48,7 +48,7 @@ export function QuestionPrompt({
             variant="outline"
             disabled={disabled}
             onClick={() => onAnswer({ type: 'category_selection', complaint_type: c }, t(`complaint.${c}`))}
-            className="h-auto rounded-full py-1.5 whitespace-normal"
+            className="h-auto rounded-full border-transparent bg-muted/70 py-1.5 whitespace-normal hover:bg-muted"
           >
             <span aria-hidden className="[&_svg]:size-4">
               {COMPLAINT_ICON[c]}
@@ -108,7 +108,7 @@ function DetailsForm({
 
   return (
     <CardFrame icon={<Wallet />} title={t('q.tellMore')}>
-      <form onSubmit={submit} className="flex flex-col gap-3">
+      <form onSubmit={submit} className="flex flex-col gap-3 [&_input]:bg-card [&_textarea]:bg-card [&_[data-slot=select-trigger]]:bg-card">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="q-type">{t('q.about')}</Label>
           <Select value={type} onValueChange={(v) => setType(v as ComplaintType)}>

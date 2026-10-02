@@ -4,6 +4,7 @@ import { customerApi } from '@/api/endpoints'
 import { describeError } from '@/api/errors'
 import type { OperationView } from '@/api/types'
 import { OperationBadge } from '@/components/StatusBadge'
+import { operationTone } from '@/components/tones'
 import { Button } from '@/components/ui/button'
 import { hasMessage, useI18n } from '@/i18n/context'
 import { formatTime, humanize } from '@/lib/format'
@@ -65,6 +66,7 @@ export function OperationTracker({
     <CardFrame
       icon={<Activity />}
       title={op ? (hasMessage(`op.${op.action_type}`) ? t(`op.${op.action_type}`) : humanize(op.action_type)) : t('op.checking')}
+      tone={op ? operationTone[op.status] : undefined}
       aside={op && <OperationBadge status={op.status} />}
     >
       <div aria-live="polite">

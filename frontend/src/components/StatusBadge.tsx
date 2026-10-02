@@ -2,8 +2,9 @@ import { cn } from '@/lib/utils'
 import { useI18n } from '@/i18n/context'
 import { humanize } from '@/lib/format'
 import type { DeliveryState, EvidenceState, OperationStatus, ReviewStatus } from '@/api/types'
+import { deliveryTone, evidenceTone, operationTone, reviewTone, type Tone } from './tones'
 
-export type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
+export type { Tone }
 
 // Solid warning (dark text) because amber text on white fails contrast; others use AA-safe tinted styles.
 const toneClasses: Record<Tone, string> = {
@@ -26,25 +27,6 @@ export function StatusBadge({ tone, children, className }: { tone: Tone; childre
       {children}
     </span>
   )
-}
-
-// Each state family maps to tones explicitly so "pending" never looks like "success".
-
-const evidenceTone: Record<EvidenceState, Tone> = { SUFFICIENT: 'success', PARTIAL: 'warning', CONFLICTING: 'danger' }
-const reviewTone: Record<ReviewStatus, Tone> = { NEW: 'info', IN_REVIEW: 'warning', CLOSED: 'neutral' }
-const deliveryTone: Record<DeliveryState, Tone> = {
-  PENDING: 'warning',
-  DELIVERED: 'success',
-  FAILED: 'danger',
-  REVIEW_REQUIRED: 'danger',
-}
-const operationTone: Record<OperationStatus, Tone> = {
-  PENDING: 'warning',
-  RUNNING: 'info',
-  SUCCEEDED: 'success',
-  FAILED: 'danger',
-  UNKNOWN: 'warning',
-  REVIEW_REQUIRED: 'danger',
 }
 
 function Missing({ label }: { label: string }) {
