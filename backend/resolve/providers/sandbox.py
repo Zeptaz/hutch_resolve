@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+import json
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -61,6 +62,7 @@ class QuotaUsage:
     charge_entry_id: UUID | None
     interval_start: datetime
     interval_end: datetime
+    unit: str = "BYTES"
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,8 +124,36 @@ class BalanceProvider(Protocol):
 class PostgresSandboxProvider(AccountProvider, BalanceProvider):
     """One PostgreSQL adapter behind distinct in-process provider ports."""
 
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, fault_engine: Engine | None = None) -> None:
         self._engine = engine
+        # Fault profiles are operator/test controls. Consume them only through
+        # the explicitly configured sandbox writer; normal reads stay read-only.
+        self._fault_engine = fault_engine
+
+    def _take_fault(self, sandbox_id: UUID, account_id: UUID, provider: str,
+                    operation: str) -> dict[str, Any] | None:
+        if self._fault_engine is None:
+            return None
+        with self._engine.connect() as connection:
+            alias = connection.execute(text("""
+                SELECT line_alias FROM sandbox.accounts WHERE sandbox_id=:sandbox AND id=:account
+            """), {"sandbox": sandbox_id, "account": account_id}).scalar_one_or_none()
+        account_number = alias.rsplit("-", 1)[-1] if alias else ""
+        account_label = chr(ord("A") + int(account_number) - 1) if account_number.isdigit() and 1 <= int(account_number) <= 26 else ""
+        with self._fault_engine.begin() as connection:
+            row = connection.execute(text("""
+                SELECT id,fault_type,parameters FROM sandbox.fault_profiles
+                WHERE sandbox_id=:sandbox AND provider=:provider AND operation=:operation
+                  AND remaining_uses>0
+                  AND (selector='{}'::jsonb OR selector @> CAST(:selector AS jsonb))
+                ORDER BY (selector='{}'::jsonb),id LIMIT 1 FOR UPDATE SKIP LOCKED
+            """), {"sandbox": sandbox_id, "provider": provider, "operation": operation,
+                "selector": json.dumps({"account": account_label})}).mappings().one_or_none()
+            if row is None:
+                return None
+            connection.execute(text("UPDATE sandbox.fault_profiles SET remaining_uses=remaining_uses-1 WHERE id=:id"),
+                {"id": row["id"]})
+            return {"fault_type": row["fault_type"], "parameters": row["parameters"] or {}}
 
     def get_account(self, sandbox_id: UUID, account_id: UUID) -> dict[str, Any] | None:
         fetched_at = datetime.now(UTC)
@@ -274,10 +304,38 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
                 complete = False
             if _has_snapshot_sequence_conflict(parsed_snapshots):
                 warnings.append("DUPLICATE_SNAPSHOT_SEQUENCE")
+        fault = self._take_fault(sandbox_id, account_id, "charging", "statement")
+        if fault is not None:
+            parameters = fault["parameters"]
+            if fault["fault_type"] == "LATE_POSTING":
+                candidates = [item for item in postings if item.reference == parameters.get("reference")]
+                if not candidates:
+                    candidates = list(postings[-1:])
+                delayed = candidates[-1] if candidates else None
+                if delayed is not None:
+                    postings = tuple(item for item in postings if item.id != delayed.id)
+                    warnings.append("LATE_POSTING_NOT_YET_VISIBLE")
+                    complete = False
+            elif fault["fault_type"] == "DUPLICATE_POSTING":
+                reference = parameters.get("duplicate_reference")
+                original = next((item for item in postings if item.reference == reference), None)
+                if original is not None:
+                    postings = (*postings, replace(original, id=uuid4()))
+                    warnings.append("DUPLICATE_POSTING_OBSERVED")
+            elif fault["fault_type"] == "MISSING_OPENING_SNAPSHOT":
+                opening = None
+                warnings.append("OPENING_SNAPSHOT_MISSING")
+            elif fault["fault_type"] == "REVERSAL_MISMATCH":
+                original = next((item for item in postings if item.reference == parameters.get("original_reference")), None)
+                target = next((item for item in postings if item.posting_seq == parameters.get("posting_seq")), None)
+                if original is not None and target is not None:
+                    postings = tuple(replace(item, amount_minor=parameters["reversal_amount_minor"],
+                        kind="REVERSAL", reversal_of=original.id) if item.id == target.id else item for item in postings)
+                    warnings.append("SIMULATED_REVERSAL_MISMATCH")
         version = f"fixture-v{run}"
         if closing is not None:
             version += f":snapshot-seq-{closing.last_posting_seq}"
-        return LedgerStatement(opening, closing, postings, complete, tuple(warnings), version, fetched_at)
+        return LedgerStatement(opening, closing, postings, complete, tuple(dict.fromkeys(warnings)), version, fetched_at)
 
     def get_quota_statements(self, sandbox_id: UUID, account_id: UUID, window_start: datetime,
                              window_end: datetime) -> list[tuple[QuotaBucketStatement, tuple[QuotaUsage, ...]]]:
@@ -297,6 +355,7 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
                 bucket_page_complete = False
             else:
                 bucket_page_complete = True
+            usage_fault = self._take_fault(sandbox_id, account_id, "usage", "list_usage") if buckets else None
             output: list[tuple[QuotaBucketStatement, tuple[QuotaUsage, ...]]] = []
             for bucket in buckets:
                 opening = connection.execute(text("""
@@ -337,12 +396,26 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
                     "end": closing["as_of"] if closing else window_end}).mappings().all()
                 complete = bucket_page_complete and len(entries) <= 500 and len(usage_rows) <= 500
                 source_version = f"fixture-v{fixture}:bucket-{bucket['id']}:snapshot-{closing['last_quota_seq'] if closing else 'missing'}"
+                parsed_usage = [QuotaUsage(**row) for row in usage_rows[:500]]
+                if usage_fault is not None:
+                    fault_type = usage_fault["fault_type"]
+                    parameters = usage_fault["parameters"]
+                    if fault_type == "INCOMPLETE_PAGE":
+                        complete = False
+                        source_version += f":usage-incomplete-page-{parameters.get('next_cursor', 'unknown')}"
+                    elif fault_type == "STALE_SOURCE":
+                        complete = False
+                        source_version += f":usage-stale-{parameters.get('age_seconds', 'unknown')}s"
+                    elif fault_type == "WRONG_UNIT":
+                        source_unit = str(parameters.get("source_unit", "UNKNOWN")).upper()
+                        parsed_usage = [replace(record, unit=source_unit) for record in parsed_usage]
+                        source_version += f":usage-unit-{source_unit}-reported-{str(parameters.get('reported_unit', 'UNKNOWN')).upper()}"
                 statement = QuotaBucketStatement(bucket["id"], bucket["bucket_kind"], bucket["valid_from"], bucket["valid_to"],
                     opening["remaining_bytes"] if opening else None, opening["last_quota_seq"] if opening else None,
                     closing["remaining_bytes"] if closing else None, closing["last_quota_seq"] if closing else None,
                     closing["as_of"] if closing else None,
                     tuple(QuotaEntry(**row) for row in entries[:500]), complete, source_version)
-                usages = tuple(QuotaUsage(**row) for row in usage_rows[:500])
+                usages = tuple(parsed_usage)
                 output.append((statement, usages))
         return output
 
@@ -678,6 +751,8 @@ def reconcile_quota(statement: QuotaBucketStatement, usage: tuple[QuotaUsage, ..
         if record.usage_kind != "IN_BUNDLE":
             conflicts.append("UNKNOWN_USAGE_KIND")
             continue
+        if record.unit != "BYTES":
+            conflicts.append("USAGE_UNIT_MISMATCH")
         if record.bucket_id != statement.bucket_id:
             conflicts.append("USAGE_BUCKET_MISMATCH")
             continue
@@ -685,9 +760,10 @@ def reconcile_quota(statement: QuotaBucketStatement, usage: tuple[QuotaUsage, ..
             conflicts.append("DUPLICATE_USAGE_RECORD")
         usage_by_id[record.id] = record
         observed_usage += record.bytes
-        evidence_id = add_evidence(record.id, record.interval_end, record.bytes, "BYTES",
+        evidence_id = add_evidence(record.id, record.interval_end, record.bytes, record.unit,
             {"usage_kind": record.usage_kind, "interval_start": record.interval_start.isoformat(),
-             "interval_end": record.interval_end.isoformat(), "bucket_id": str(record.bucket_id)})
+             "interval_end": record.interval_end.isoformat(), "bucket_id": str(record.bucket_id),
+             "reported_unit": "BYTES", "unit_matches_contract": record.unit == "BYTES"})
         usage_terms.append({"evidence_id": evidence_id, "label": "IN_BUNDLE_USAGE", "value": record.bytes})
     for entry in entries:
         if entry.entry_kind != "CONSUME" or entry.usage_record_id is None:

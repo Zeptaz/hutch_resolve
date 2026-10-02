@@ -10,7 +10,9 @@ dummy   All Resolve answers come from tests/conversation/fakes.py: contract exam
         stand-ins for B/C/E/F, simulated operation success and receipts.
 hybrid  Harry's real ResolveFacade (adapter) for all four complaint types (his H-06 landed in
         ResolveDev 9ab23d9), offers, confirmations, operations (his OperationRunner) and receipts;
-        only turn storage and sign-in are still dev stand-ins. Needs a migrated database:
+        only turn storage and sign-in are still dev stand-ins. RESOLVE_DEV_FAULTS=1 enables Harry's
+        seeded single-use fault profiles exactly as his app does (first A/D reads etc. show faults);
+        off by default so demos are predictable. Needs a migrated database:
         RESOLVE_DEV_DATABASE_URL / RESOLVE_DEV_SANDBOX_URL (use a throwaway one).
 real    Not available until Harry ships turn storage and the conversation routes.
 
@@ -246,6 +248,7 @@ if MODE == "hybrid":
     from sqlalchemy import create_engine, text
 
     from backend.resolve.app.auth_store import AuthStore
+    from backend.resolve.providers.sandbox import PostgresSandboxProvider
     from backend.resolve.services.facade import ResolveFacade
     from backend.resolve.services.operations import OperationRunner
     from resolve.conversation.resolve_adapter import ResolveFacadeAdapter
@@ -254,7 +257,9 @@ if MODE == "hybrid":
     if not (db_url and sandbox_url):
         sys.exit("hybrid needs RESOLVE_DEV_DATABASE_URL and RESOLVE_DEV_SANDBOX_URL (a throwaway migrated database)")
     app_engine, sandbox_engine = create_engine(db_url), create_engine(sandbox_url)
-    harry_facade = ResolveFacade(app_engine, cursor_secret=os.urandom(32))  # Harry's app wiring (9ab23d9)
+    faults = os.environ.get("RESOLVE_DEV_FAULTS", "0") == "1"
+    provider = PostgresSandboxProvider(app_engine, sandbox_engine if faults else None)  # main.py passes the sandbox engine
+    harry_facade = ResolveFacade(app_engine, provider, cursor_secret=os.urandom(32))
     harry_store = AuthStore(app_engine)
     runner = OperationRunner(app_engine, sandbox_engine)
     facade = HybridFacade(ResolveFacadeAdapter(harry_facade), dummy)
@@ -382,7 +387,8 @@ async def dev_home(request: Request):
         for k, (alias, about) in LINES.items()
     )
     model = client.model_name if client else "none: free text falls back to forms"
-    source = ("All complaints use <b>Harry's real facade</b> (his records, offers, runner and receipts)."
+    faults = " Seeded faults are <b>on</b> (as in Harry's app)." if os.environ.get("RESOLVE_DEV_FAULTS") == "1" else ""
+    source = ("All complaints use <b>Harry's real facade</b> (his records, offers, runner and receipts)." + faults
               if MODE == "hybrid" else "All Resolve answers are dummy stand-ins.")
     demo = ('<p><a href="/api/v1/dev/line/DEMO"><b>Demo customer</b></a> (default): one customer whose records hold '
             'every problem; just describe yours in any language.</p><p>Or test one specific line:</p>'

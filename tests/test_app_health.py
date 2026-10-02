@@ -1,3 +1,6 @@
+import json
+import logging
+
 from fastapi.testclient import TestClient
 
 from backend.resolve.app.main import create_app
@@ -48,3 +51,20 @@ def test_readiness_reports_database_exceptions_without_leaking_details():
     assert response.status_code == 503
     assert response.json() == {"status": "unavailable"}
     assert "database-password" not in response.text
+
+
+def test_resolve_http_logs_template_and_safe_error_code_without_query_data(caplog):
+    logger_name = "hutch_resolve.http"
+    caplog.set_level(logging.INFO, logger=logger_name)
+    with TestClient(create_app(database=Probe(result=True))) as client:
+        response = client.get("/api/v1/account?token=do-not-log-this")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHENTICATED"
+    assert response.headers["X-Request-Id"] == response.json()["error"]["request_id"]
+    record = next(record for record in caplog.records if record.name == logger_name)
+    event = json.loads(record.message)
+    assert event["route"] == "/api/v1/account"
+    assert event["error_code"] == "UNAUTHENTICATED"
+    assert "do-not-log-this" not in record.message
+    assert "token" not in record.message

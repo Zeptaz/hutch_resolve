@@ -222,3 +222,43 @@ def test_secondary_cases_answer_safely_from_records(harry, account, complaint) -
         kept = {c.action_type.value for c in repo.conversations[conv].state.pending_choices}
         assert result.pending_question.code == "CONFIRM_ACTION" and len(offered) == 1
         assert offered | kept >= {"DEACTIVATE_VAS", "CREATE_REVIEW_TICKET"}
+
+
+@pytest.mark.skipif(not (DB_URL and SANDBOX_URL), reason="needs an isolated migrated Resolve database")
+def test_seeded_faults_as_in_harrys_app_are_reported_safely() -> None:
+    """Harry's app (main.py) enables seeded, single-use fault profiles (consumed in id order).
+
+    First A statement read: LATE_POSTING; first D read: REVERSAL_MISMATCH. The conversation must not
+    claim everything matches, must say D's records conflict, and must never show raw codes. Runs on
+    its own fault-enabled facade so the other journeys stay deterministic.
+    """
+    import re
+
+    from sqlalchemy import create_engine
+
+    from backend.resolve.app.auth_store import AuthStore
+    from backend.resolve.providers.sandbox import PostgresSandboxProvider
+    from backend.resolve.services.facade import ResolveFacade
+
+    app_engine, sandbox_engine = create_engine(DB_URL), create_engine(SANDBOX_URL)
+    try:
+        provider = PostgresSandboxProvider(app_engine, sandbox_engine)  # exactly as main.py wires it
+        faulty = (ResolveFacade(app_engine, provider, cursor_secret=b"integration-test-cursor-secret-0123"), AuthStore(app_engine))
+
+        ctx, conv, repo, service, adapter = journey(faulty, ACCOUNT_A)
+        a = send(service, repo, ctx, conv, details())
+        a_inv = asyncio.run(adapter.get_case(ctx, a.case_id)).investigation
+        assert "matches opening plus posted entries" not in a.reply_text  # no false all-clear
+        assert not re.search(r"\b[A-Z]+(?:_[A-Z]+)+\b", a.reply_text)
+
+        ctx_d, conv_d, repo_d, service_d, _ = journey(faulty, ACCOUNT_D)
+        d = send(service_d, repo_d, ctx_d, conv_d, details())
+        assert "don't agree" in d.reply_text  # conflict stated; no account change offered
+        assert all(card.data.action_type == "CREATE_REVIEW_TICKET" for card in d.cards if card.type == "confirmation")
+        assert not re.search(r"\b[A-Z]+(?:_[A-Z]+)+\b", d.reply_text)
+
+        if any(f.code == "LEDGER_PARTIAL" for f in a_inv.findings) and a_inv.evidence_state == "SUFFICIENT":
+            pytest.xfail("Harry finding 12: provisional ledger (LEDGER_PARTIAL) is labelled SUFFICIENT")
+    finally:
+        app_engine.dispose()
+        sandbox_engine.dispose()
