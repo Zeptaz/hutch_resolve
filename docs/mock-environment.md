@@ -44,7 +44,7 @@ Amounts are signed `bigint` minor LKR units (100 = LKR 1.00); usage and quota us
 | E | LKR 500 payment captured, fulfilment pending, no credit entry; balance LKR 100 | Payment is not an account credit. Do not request another payment/recharge. |
 | F | Active recurring VAS, posted charge, no activation evidence | Report missing evidence without asserting consent; confirmed future deactivation does not decide a past dispute. |
 
-Fixtures use non-dialable `SIM-LK-*` aliases, synthetic identities, UTC-aware timestamps and versioned resources. Reset generates a new run and new deterministic row IDs while keeping old runs. Keep the volume out of source control.
+Fixtures use non-dialable `SIM-LK-*` aliases, synthetic identities, UTC-aware timestamps and versioned resources. Reset generates a new active run and new deterministic row IDs in one transaction, retires prior active runs, and revokes all current sessions/Voice bindings. Historical rows remain stored; a failed or duplicate run insert rolls back the retirement/revocation. Keep the volume out of source control.
 
 ## Reconciliation rules for future Resolve code
 
@@ -71,4 +71,4 @@ For C, a fresh account-scoped provisioning check and a matching same-region `MOB
 
 ## Local commands
 
-Fresh volume initialization runs SQL migrations 001, 002 and 003, then baseline fixture version 2 and knowledge cards. Run `python -m alembic upgrade head` after the DB is ready to adopt the existing schemas and apply application revisions 0002+. `scripts/reset.ps1` inserts a new fixture run without dropping history. `database/seed.sql` is the baseline; `scripts/seed_run.py` re-keys it for a requested run UUID using only Python's standard library. Run `Get-Content scripts/check-sandbox.sql | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U hutch_admin -d hutch_resolve` in PowerShell to assert the selected fixture invariants. To discard all history, explicitly remove the Compose volume with `docker compose down -v`.
+Fresh volume initialization runs SQL migrations 001, 002 and 003, then baseline fixture version 2 and knowledge cards. Run `python -m alembic upgrade head` after the DB is ready to adopt the existing schemas and apply application revisions 0002+. `scripts/reset.ps1` requires run-lifecycle columns, then inserts a new fixture run while retiring earlier active runs and revoking sessions/Voice bindings in the same SQL transaction. `database/seed.sql` is the baseline; `scripts/seed_run.py` re-keys it for a requested run UUID using only Python's standard library. Run `Get-Content scripts/check-sandbox.sql | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U hutch_admin -d hutch_resolve` in PowerShell to assert the selected fixture invariants. To discard all history, explicitly remove the Compose volume with `docker compose down -v`.
