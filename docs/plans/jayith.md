@@ -1,6 +1,6 @@
 # Jayith: customer frontend and internal dashboard
 
-Read [context.md](../../context.md) and [contracts](../contracts.md). Update this plan and context after meaningful progress with implementation/test evidence. No frontend currently exists; every task below is pending.
+Read [context.md](../../context.md) and [contracts](../contracts.md). Update this plan and context after meaningful progress with implementation/test evidence. Jayith's `HutchChat` and `VoiceFrontend` branches now contain frontend work; integration into `ResolveDev` is in progress. Task checkboxes remain pending until the combined app is verified.
 
 ## Scope and connections
 
@@ -24,8 +24,8 @@ Agent can append a note, start review, close with disposition/reason, or reopen 
 - Use stable client_turn_id/idempotency key for retries of the same request; generate a new ID for an intentional new turn. On stale conversation version, reload; do not automatically replay a confirmation against changed state.
 - Poll pending operations every second until terminal state or page departure. UNKNOWN remains visible until recovery; REVIEW_REQUIRED is terminal for automatic recovery. Poll dashboard every five seconds only while visible; provide manual refresh.
 - Display exact target, consequences and expiry for confirmation. Confirmation must never be preselected/submitted automatically.
-- Browser grant travels in WebSocket subprotocol `hutch-grant.{token}` with `zeptaz-hutch-v1`, never a URL. A grant is consumed once; reconnect requests a fresh binding from Resolve.
-- Send `proposal_presented` with exact ID/hash only after the complete proposal playback. Clear pending acknowledgement on interruption/disconnect. Handle `proposal_ack`, `resolve_result`, transcript, ready, error and ended events; implement the proposed `interrupted` event by stopping/discarding queued audio and pending acknowledgement. Fetch conversation after call end for canonical state.
+- Browser grant travels in WebSocket subprotocol `hutch-grant.{token}` with `zeptaz-hutch-v2`, never a URL. A grant is consumed once; reconnect requests a fresh binding from Resolve.
+- Drain the scoped audio queue after `audio_end`, send `playback_complete` with the matching response ID, and require accepted `playback_ack` before sending `proposal_presented` with response ID and exact proposal ID/hash. Clear queued audio and pending acknowledgement on interruption/disconnect. Handle `resolve_result`, `audio_fallback`, transcript, ready, error and ended. Fetch the same conversation after call end for canonical state.
 - Microphone permission denial, provider outage and session expiry offer text continuation. Expired authorization requires login; never silently switch to another synthetic account.
 
 ## Acceptance and order
@@ -40,4 +40,6 @@ Dependencies: J-01 can start immediately; J-02 integrates H-04/H-05/T-02; J-03 i
 
 | Date | Task | Evidence | Remaining |
 | --- | --- | --- | --- |
-| 2026-10-02 | Baseline | No frontend code found in either target repository | J-01 through J-04 pending |
+| 2026-10-02 | Baseline | No frontend code found in either target repository at the planning baseline | J-01 through J-04 pending |
+| 2026-10-02 | UI branch intake | Fetched `HutchChat` (`9e7b8b1`) and `VoiceFrontend` (`4349eed`); selective import into the Resolve frontend is in progress | Combined build, live API/chat bridge, v2 browser verification, dashboard review writes and release tests pending |
+| 2026-10-02 | Combined frontend static checkpoint | One React app now includes chat, scoped call panel and dashboard review writes; demo sign-in keeps the guest conversation pointer. Clean npm install, pinned OpenAPI generation, typecheck and production build pass. Lint exits 0 with warnings. No credentials or build artifacts are tracked. | Live Resolve/browser journey, microphone/Voice v2 playback and consent, conflict/retry browser tests and fluent Sinhala/Tamil review remain open; J checkboxes stay pending |

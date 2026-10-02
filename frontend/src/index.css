@@ -1,0 +1,225 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/*
+ * Theme: tweakcn "autoblog" (https://tweakcn.com/themes/cmhxosuz5000804l7gqzefqxg),
+ * adjusted for HUTCH Resolve:
+ *  - primary set to #ec4100 (team choice). White text on it is 3.95:1: meets AA for large text and UI parts, not for small body text
+ *  - destructive moved to a deeper crimson (#b9192e) so errors never read as the brand orange
+ *  - added success / warning / info tokens for operation, evidence and review states
+ *  - base radius reduced from 1.4rem to 0.75rem (chat bubbles use rounded-2xl explicitly)
+ *  - Noto Sans Sinhala / Tamil fallbacks for si/ta language support
+ */
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Plus Jakarta Sans Variable", "Noto Sans Sinhala Variable", "Noto Sans Tamil Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+
+  --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+  --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+  --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+  --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+  --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 2px 4px -1px hsl(0 0% 0% / 0.1);
+  --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 4px 6px -1px hsl(0 0% 0% / 0.1);
+  --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 8px 10px -1px hsl(0 0% 0% / 0.1);
+  --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+}
+
+:root {
+  --radius: 0.75rem;
+
+  --background: oklch(0.994 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(0.9911 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.6243 0.215 35.78);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.954 0.0063 255.48);
+  --secondary-foreground: oklch(0.1344 0 0);
+  --muted: oklch(0.9702 0 0);
+  --muted-foreground: oklch(0.4386 0 0);
+  --accent: oklch(0.9656 0.0176 39.4);
+  --accent-foreground: oklch(0.5 0.17 35.34);
+  --destructive: oklch(0.505 0.19 22);
+  --destructive-foreground: oklch(1 0 0);
+  --success: oklch(0.52 0.13 150);
+  --success-foreground: oklch(1 0 0);
+  --warning: oklch(0.78 0.15 75);
+  --warning-foreground: oklch(0.2 0 0);
+  --info: oklch(0.52 0.16 255);
+  --info-foreground: oklch(1 0 0);
+  --border: oklch(0.93 0.0094 286.22);
+  --input: oklch(0.9 0 0);
+  --ring: oklch(0.6243 0.215 35.78);
+  --chart-1: oklch(0.6404 0.2153 35.9);
+  --chart-2: oklch(0.8231 0.0995 30.75);
+  --chart-3: oklch(0.7336 0.1758 50.55);
+  --chart-4: oklch(0.5828 0.1809 259.73);
+  --chart-5: oklch(0.886 0.123 84.75);
+  --sidebar: oklch(0.9777 0.0051 247.88);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.6243 0.215 35.78);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.9563 0.0228 41.41);
+  --sidebar-accent-foreground: oklch(0.145 0 0);
+  --sidebar-border: oklch(0.9401 0 0);
+  --sidebar-ring: oklch(0.6243 0.215 35.78);
+}
+
+.dark {
+  --background: oklch(0.1448 0 0);
+  --foreground: oklch(0.9551 0 0);
+  --card: oklch(0.1822 0 0);
+  --card-foreground: oklch(0.9551 0 0);
+  --popover: oklch(0.2138 0.0019 286.23);
+  --popover-foreground: oklch(0.9551 0 0);
+  --primary: oklch(0.6243 0.215 35.78);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.257 0.0037 286.14);
+  --secondary-foreground: oklch(0.9551 0 0);
+  --muted: oklch(0.257 0.0037 286.14);
+  --muted-foreground: oklch(0.6731 0 0);
+  --accent: oklch(0.3 0.08 36.38);
+  --accent-foreground: oklch(0.82 0.1 40);
+  --destructive: oklch(0.505 0.19 22);
+  --destructive-foreground: oklch(1 0 0);
+  --success: oklch(0.52 0.13 150);
+  --success-foreground: oklch(1 0 0);
+  --warning: oklch(0.78 0.15 75);
+  --warning-foreground: oklch(0.2 0 0);
+  --info: oklch(0.52 0.16 255);
+  --info-foreground: oklch(1 0 0);
+  --border: oklch(0.2393 0 0);
+  --input: oklch(0.3523 0 0);
+  --ring: oklch(0.68 0.19 38);
+  --chart-1: oklch(0.6404 0.2153 35.9);
+  --chart-2: oklch(0.8565 0.1745 94.91);
+  --chart-3: oklch(0.8077 0.1035 19.57);
+  --chart-4: oklch(0.6691 0.1569 260.11);
+  --chart-5: oklch(0.886 0.123 84.75);
+  --sidebar: oklch(0.1822 0 0);
+  --sidebar-foreground: oklch(0.9551 0 0);
+  --sidebar-primary: oklch(0.6243 0.215 35.78);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.2562 0.0765 39.79);
+  --sidebar-accent-foreground: oklch(0.82 0.1 40);
+  --sidebar-border: oklch(0.3289 0.0092 268.38);
+  --sidebar-ring: oklch(0.68 0.19 38);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* Chat motion. New replies rise in from their corner; the thinking indicator breathes. Off for reduced motion. */
+@layer utilities {
+  .animate-bubble-in {
+    animation: bubble-in 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .animate-typing-dot {
+    animation: typing-dot 1.2s ease-in-out infinite;
+  }
+  .animate-thinking-ring {
+    animation: thinking-ring 1.6s ease-out infinite;
+  }
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+}
+
+@keyframes typing-dot {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@keyframes thinking-ring {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 45%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 8px color-mix(in oklch, var(--primary) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-bubble-in,
+  .animate-typing-dot,
+  .animate-thinking-ring {
+    animation: none;
+  }
+}

@@ -2,6 +2,12 @@
 
 Updated: 2026-10-02. Planning baseline: two remaining build days; Harry, Jayith and Tevin. The Resolve backend and mock sandbox are implemented through the current owner tasks; conversation, frontend and end-to-end release work remain open. Checkboxes describe implementation status, not approval of a design.
 
+## UI branch integration in progress
+
+On 2026-10-02 the clean `ResolveDev` tip `02ce2f6` fetched Jayith's `HutchChat` tip `9e7b8b1` from this repository and `VoiceFrontend` tip `4349eed` from `hutch_zeptazvoice`. The `HutchChat` frontend is being selectively imported into `ResolveDev`; the Voice frontend's reusable call controls are being ported into that same app. The source branches and Voice runtime branch are not being rewritten. Voice uses browser protocol `zeptaz-hutch-v2`. Do not mark J-01/J-03 or live integration complete until build and browser/backend checks pass. Tevin's conversation module is being reconciled with Resolve's existing turn claims and consent gate before mounting it.
+
+Frontend integration checkpoint: the combined React app reuses one customer session and conversation across chat and call, adds an explicit demo customer sign-in, v2 response-scoped playback, and agent review controls. `VITE_API_MODE=live` is the default; scripted mock mode is visibly synthetic. A clean `npm ci`, local pinned OpenAPI type generation, TypeScript check and production build passed; lint exits 0 with warnings. No browser or live Voice call has been verified yet. Tevin's real PostgreSQL conversation path is still in integration testing.
+
 ## Read first
 
 Agents must read this file, the relevant [owner plan](docs/plans/harry.md), and the [shared contracts](docs/contracts.md) before working. After meaningful progress, update this file **and the relevant owner plan** with task IDs, changes, verification command/result, remaining work and blockers. Mark `[x]` only after implementation and verification. A proposed interface, mock test or passing unit suite is not proof of a working live integration. Label verification as static, unit, integration, browser or live. Record the implementation commit when available; never invent a hash for an uncommitted change.
