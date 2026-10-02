@@ -27,6 +27,7 @@ class LedgerPosting:
     occurred_at: datetime
     posted_at: datetime
     reversal_of: UUID | None
+    reference: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,7 +239,7 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
             ).mappings().all()
             rows = connection.execute(
                 text("""
-                    SELECT id,posting_seq,amount_minor,currency,kind,occurred_at,posted_at,reversal_of
+                    SELECT id,posting_seq,amount_minor,currency,kind,occurred_at,posted_at,reversal_of,reference
                     FROM sandbox.money_entries
                     WHERE sandbox_id=:sandbox_id AND account_id=:account_id AND wallet_kind=:wallet
                     ORDER BY posting_seq LIMIT 501
@@ -259,11 +260,12 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
             warnings.append("OPENING_SNAPSHOT_MISSING")
         if closing is None:
             warnings.append("CLOSING_SNAPSHOT_MISSING")
-        postings = tuple(
-            item for item in parsed_postings
-            if opening is not None and closing is not None
-            and opening.last_posting_seq < item.posting_seq <= closing.last_posting_seq
-        )
+        in_window_ids = {item.id for item in parsed_postings if opening is not None and closing is not None
+                         and opening.last_posting_seq < item.posting_seq <= closing.last_posting_seq}
+        related_original_ids = {item.reversal_of for item in parsed_postings
+                                if item.id in in_window_ids and item.reversal_of is not None}
+        postings = tuple(item for item in parsed_postings
+                         if item.id in in_window_ids or item.id in related_original_ids)
         if opening is not None and closing is not None:
             expected_sequences = set(range(opening.last_posting_seq + 1, closing.last_posting_seq + 1))
             actual_sequences = {item.posting_seq for item in postings}
@@ -473,6 +475,26 @@ def reconcile_statement(statement: LedgerStatement) -> dict[str, Any]:
     if any(abs(value) > safe_limit for value in values):
         raise ValueError("LEDGER_VALUE_OUT_OF_RANGE")
 
+    def in_window(item: LedgerPosting) -> bool:
+        return (statement.opening is None or statement.closing is None or
+                statement.opening.last_posting_seq < item.posting_seq <= statement.closing.last_posting_seq)
+
+    window_postings = [item for item in statement.postings if in_window(item)]
+    postings_by_id = {item.id: item for item in statement.postings}
+    references = [item.reference for item in window_postings if item.reference]
+    duplicate_references = {ref for ref in references if references.count(ref) > 1}
+    conflicts: list[str] = []
+    if duplicate_references:
+        conflicts.append("DUPLICATE_POSTING_REFERENCE")
+    for item in window_postings:
+        if item.reversal_of is None:
+            continue
+        original = postings_by_id.get(item.reversal_of)
+        if original is None:
+            conflicts.append("POSTING_REVERSAL_ORIGINAL_MISSING")
+        elif item.amount_minor != -original.amount_minor or item.currency != original.currency:
+            conflicts.append("POSTING_REVERSAL_MISMATCH")
+
     evidence: list[dict[str, Any]] = []
 
     def add_evidence(
@@ -503,7 +525,6 @@ def reconcile_statement(statement: LedgerStatement) -> dict[str, Any]:
         opening_id = None
     term_ids: list[UUID] = []
     terms: list[dict[str, Any]] = []
-    conflicts: list[str] = []
     missing: list[str] = list(statement.warnings)
     posting_sum = 0
     for item in statement.postings:
@@ -511,12 +532,14 @@ def reconcile_statement(statement: LedgerStatement) -> dict[str, Any]:
             "CHARGING_LEDGER", item.id, item.posted_at, item.amount_minor, "LKR_MINOR",
             {"currency": item.currency, "kind": item.kind, "posting_seq": item.posting_seq,
              "occurred_at": item.occurred_at.isoformat(),
-             "reversal_of": str(item.reversal_of) if item.reversal_of else None},
+             "reversal_of": str(item.reversal_of) if item.reversal_of else None,
+             "reference": item.reference},
         )
-        term_ids.append(evidence_id)
-        terms.append({"evidence_id": evidence_id, "label": item.kind, "value": item.amount_minor})
-        posting_sum += item.amount_minor
-        if statement.opening is not None and item.currency != statement.opening.currency:
+        if in_window(item):
+            term_ids.append(evidence_id)
+            terms.append({"evidence_id": evidence_id, "label": item.kind, "value": item.amount_minor})
+            posting_sum += item.amount_minor
+        if in_window(item) and statement.opening is not None and item.currency != statement.opening.currency:
             conflicts.append("POSTING_CURRENCY_MISMATCH")
     closing_id = None
     if statement.closing is not None:
