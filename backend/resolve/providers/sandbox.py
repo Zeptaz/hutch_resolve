@@ -40,6 +40,43 @@ class LedgerStatement:
     fetched_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class QuotaEntry:
+    id: UUID
+    sequence: int
+    delta_bytes: int
+    entry_kind: str
+    usage_record_id: UUID | None
+    reversal_of: UUID | None
+    occurred_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class QuotaUsage:
+    id: UUID
+    bytes: int
+    usage_kind: str
+    bucket_id: UUID | None
+    charge_entry_id: UUID | None
+    interval_start: datetime
+    interval_end: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class QuotaBucketStatement:
+    bucket_id: UUID
+    bucket_kind: str
+    valid_from: datetime
+    valid_to: datetime | None
+    opening_bytes: int | None
+    opening_sequence: int | None
+    closing_bytes: int | None
+    closing_sequence: int | None
+    entries: tuple[QuotaEntry, ...]
+    complete: bool
+    source_version: str
+
+
 class AccountProvider(Protocol):
     def get_account(self, sandbox_id: UUID, account_id: UUID) -> dict[str, Any] | None: ...
 
@@ -393,3 +430,125 @@ def reconcile_statement(statement: LedgerStatement) -> dict[str, Any]:
         "eligible_actions": [],
         "review_reasons": sorted(set(conflicts + missing)),
     }
+
+
+def reconcile_quota(statement: QuotaBucketStatement, usage: tuple[QuotaUsage, ...], *,
+                    fetched_at: datetime) -> dict[str, Any]:
+    """Reconcile one quota bucket. Monetary out-of-bundle rows never enter byte math."""
+    safe_limit = 9_007_199_254_740_991
+    entries = sorted(statement.entries, key=lambda item: item.sequence)
+    missing: list[str] = []
+    conflicts: list[str] = []
+    if statement.opening_bytes is None or statement.opening_sequence is None:
+        missing.append("QUOTA_OPENING_SNAPSHOT_MISSING")
+    if statement.closing_bytes is None or statement.closing_sequence is None:
+        missing.append("QUOTA_CLOSING_SNAPSHOT_MISSING")
+    values = [entry.delta_bytes for entry in entries]
+    values.extend(value for value in (statement.opening_bytes, statement.closing_bytes) if value is not None)
+    values.extend(record.bytes for record in usage)
+    if any(abs(value) > safe_limit for value in values):
+        raise ValueError("QUOTA_VALUE_OUT_OF_RANGE")
+
+    evidence: list[dict[str, Any]] = []
+
+    def add_evidence(source_id: UUID, observed_at: datetime, value: int, unit: str,
+                     payload: dict[str, Any]) -> UUID:
+        evidence_id = uuid4()
+        evidence.append({"id": evidence_id, "source": "QUOTA_LEDGER" if unit == "BYTES" else "USAGE_RECORDS",
+            "source_record_id": str(source_id), "source_version": statement.source_version,
+            "observed_at": observed_at, "fetched_at": fetched_at, "value": value,
+            "unit": unit, "source_payload": payload})
+        return evidence_id
+
+    opening_id = add_evidence(statement.bucket_id, statement.valid_from, statement.opening_bytes, "BYTES",
+        {"bucket_kind": statement.bucket_kind, "role": "OPENING_SNAPSHOT", "last_sequence": statement.opening_sequence}) if statement.opening_bytes is not None and statement.opening_sequence is not None else None
+    terms: list[dict[str, Any]] = []
+    entry_ids: dict[UUID, UUID] = {}
+    actual_sequences: set[int] = set()
+    for entry in entries:
+        if entry.entry_kind not in {"GRANT", "CONSUME", "EXPIRE", "REVERSE"}:
+            conflicts.append("UNKNOWN_QUOTA_ENTRY_KIND")
+        if entry.sequence in actual_sequences:
+            conflicts.append("DUPLICATE_QUOTA_SEQUENCE")
+        actual_sequences.add(entry.sequence)
+        if (entry.entry_kind in {"CONSUME", "EXPIRE"} and entry.delta_bytes > 0) or (entry.entry_kind == "GRANT" and entry.delta_bytes < 0):
+            conflicts.append("QUOTA_ENTRY_SIGN_MISMATCH")
+        evidence_id = add_evidence(entry.id, entry.occurred_at, entry.delta_bytes, "BYTES",
+            {"entry_kind": entry.entry_kind, "sequence": entry.sequence,
+             "usage_record_id": str(entry.usage_record_id) if entry.usage_record_id else None,
+             "reversal_of": str(entry.reversal_of) if entry.reversal_of else None})
+        entry_ids[entry.id] = evidence_id
+        terms.append({"evidence_id": evidence_id, "label": entry.entry_kind, "value": entry.delta_bytes})
+
+    observed_usage = 0
+    usage_terms: list[dict[str, Any]] = []
+    usage_by_id: dict[UUID, QuotaUsage] = {}
+    for record in usage:
+        if record.usage_kind == "OUT_OF_BUNDLE":
+            continue
+        if record.usage_kind != "IN_BUNDLE":
+            conflicts.append("UNKNOWN_USAGE_KIND")
+            continue
+        if record.bucket_id != statement.bucket_id:
+            conflicts.append("USAGE_BUCKET_MISMATCH")
+            continue
+        if record.id in usage_by_id:
+            conflicts.append("DUPLICATE_USAGE_RECORD")
+        usage_by_id[record.id] = record
+        observed_usage += record.bytes
+        evidence_id = add_evidence(record.id, record.interval_end, record.bytes, "BYTES",
+            {"usage_kind": record.usage_kind, "interval_start": record.interval_start.isoformat(),
+             "interval_end": record.interval_end.isoformat(), "bucket_id": str(record.bucket_id)})
+        usage_terms.append({"evidence_id": evidence_id, "label": "IN_BUNDLE_USAGE", "value": record.bytes})
+    for entry in entries:
+        if entry.entry_kind != "CONSUME" or entry.usage_record_id is None:
+            continue
+        record = usage_by_id.get(entry.usage_record_id)
+        if record is None:
+            conflicts.append("CONSUMPTION_USAGE_RECORD_MISSING")
+        elif entry.delta_bytes != -record.bytes:
+            conflicts.append("CONSUMPTION_USAGE_AMOUNT_MISMATCH")
+    for record in usage_by_id.values():
+        if not any(entry.entry_kind == "CONSUME" and entry.usage_record_id == record.id for entry in entries):
+            conflicts.append("USAGE_CONSUMPTION_ENTRY_MISSING")
+    if abs(observed_usage) > safe_limit:
+        raise ValueError("QUOTA_VALUE_OUT_OF_RANGE")
+
+    if statement.opening_sequence is not None and statement.closing_sequence is not None:
+        expected = set(range(statement.opening_sequence + 1, statement.closing_sequence + 1))
+        within = [entry for entry in entries if statement.opening_sequence < entry.sequence <= statement.closing_sequence]
+        if {entry.sequence for entry in within} != expected:
+            missing.append("QUOTA_SEQUENCE_GAP")
+        expected_remaining = (statement.opening_bytes or 0) + sum(entry.delta_bytes for entry in within)
+        if statement.closing_bytes is not None and expected_remaining != statement.closing_bytes:
+            conflicts.append("QUOTA_SNAPSHOT_DOES_NOT_MATCH_ENTRIES")
+    calculations: list[dict[str, Any]] = []
+    closing_id = add_evidence(statement.bucket_id, statement.valid_to or statement.valid_from,
+        statement.closing_bytes, "BYTES", {"bucket_kind": statement.bucket_kind,
+        "role": "CLOSING_SNAPSHOT", "last_sequence": statement.closing_sequence}) if statement.closing_bytes is not None and statement.closing_sequence is not None else None
+    if statement.opening_bytes is not None and statement.closing_bytes is not None:
+        entry_delta = sum(entry.delta_bytes for entry in entries if statement.opening_sequence is not None
+                          and statement.closing_sequence is not None
+                          and statement.opening_sequence < entry.sequence <= statement.closing_sequence)
+        expected_remaining = statement.opening_bytes + entry_delta
+        calculations.append({"code": "QUOTA_BUCKET_RECONCILIATION", "unit": "BYTES",
+            "opening": statement.opening_bytes, "terms": [*terms, *usage_terms],
+            "expected": expected_remaining, "observed": statement.closing_bytes,
+            "delta": statement.closing_bytes - expected_remaining,
+            "evidence_ids": [item for item in (opening_id, *[t["evidence_id"] for t in terms],
+                *[t["evidence_id"] for t in usage_terms], closing_id) if item is not None]})
+    if not statement.complete:
+        missing.append("QUOTA_SOURCE_INCOMPLETE")
+    if conflicts:
+        state = "CONFLICTING"
+    elif missing or not calculations:
+        state = "PARTIAL"
+    else:
+        state = "SUFFICIENT"
+    findings = [{"code": "QUOTA_RECONCILED" if state == "SUFFICIENT" else "QUOTA_CONFLICT" if state == "CONFLICTING" else "QUOTA_PARTIAL",
+        "text": "Quota snapshots reconcile to sequenced bucket entries; usage is explanatory and out-of-bundle charging is separate." if state == "SUFFICIENT" else "Quota evidence contains a reconciliation conflict." if state == "CONFLICTING" else "Quota reconciliation is provisional because source evidence is incomplete.",
+        "evidence_ids": calculations[0]["evidence_ids"] if calculations else [item["id"] for item in evidence]}]
+    return {"evidence_state": state, "findings": findings, "calculations": calculations,
+        "evidence": evidence, "missing": sorted(set(missing)), "conflicts": sorted(set(conflicts)),
+        "eligible_actions": [], "review_reasons": sorted(set(missing + conflicts)),
+        "usage_bytes": observed_usage}

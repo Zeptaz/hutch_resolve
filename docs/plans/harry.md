@@ -110,6 +110,7 @@ Verification for H-05a: `python -m pytest -q` (18 passed), `python -m compileall
 
 ## H-06: remaining complaint and fault paths
 
+- [x] H-06a Pure quota bucket reconciliation core with sequenced grant/consume/expire/reversal entry model, usage-to-consumption cross-check, snapshot continuity, safe numeric bounds, and a strict split from OUT_OF_BUNDLE charging. Unit cases cover exact depletion, snapshot/usage mismatches and incomplete sources. It is not yet connected to provider reads or the investigation API.
 - [ ] B: quota grant/consume/expire/reverse accounting per bucket; usage explanatory only; out-of-bundle charge is separate and negative.
 - [ ] C: account/package/quota checks, supplied service checks and matching fresh incident; no invented ETA or healthy-service inference from an empty feed.
 - [ ] E: captured/pending fulfilment is not credited money; never suggest another recharge as recovery.
