@@ -227,7 +227,7 @@ class ConversationService:
             # Typed "yes" is never consent: text chat uses the explicit action_decision control.
             return _confirm_prompt(state, turn.channel)
         if intent is Intent.FAQ:
-            return await self._faq(ctx, inp.text, extraction, state)
+            return await self._faq(ctx, turn, inp.text, extraction, state)
         if not _is_customer(ctx):
             if intent is Intent.OTHER:
                 return _ask(state, Q_LOGIN_REQUIRED, t.text("guest_help", state.language), ["text"])
@@ -519,14 +519,14 @@ class ConversationService:
         draft = _offer_draft(proposal, lang, case.id)
         return draft, state.evolve(pending_question=draft.pending_question, pending_proposal=_proposal_ref(proposal, turn))
 
-    async def _faq(self, ctx: AuthContext, text: str, ex: Extraction, state: DialogueState) -> Step:
+    async def _faq(self, ctx: AuthContext, turn: NormalizedTurn, text: str, ex: Extraction, state: DialogueState) -> Step:
         """Reviewed knowledge cards only; guests allowed; never account data."""
         lang = state.language
         cards = await self._knowledge.search(ctx, ex.faq_query or text, lang, limit=3)
         if not cards:
             return TurnDraft(reply_text=t.text("faq_none", lang), case_id=state.active_case_id), state
         if self._answerer is not None and self._remaining() >= MIN_REWRITE_SECONDS:
-            grounded = await self._grounded_answer(ctx, text, cards, state)
+            grounded = await self._grounded_answer(ctx, turn, text, cards, state)
             if grounded is not None:
                 return grounded, state
         card = cards[0]
@@ -536,7 +536,9 @@ class ConversationService:
         reply = card.content if card.scope == "PUBLIC" else f"{t.text('synthetic_policy', lang)} {card.content}"
         return TurnDraft(reply_text=reply, case_id=state.active_case_id, citations=[citation]), state
 
-    async def _grounded_answer(self, ctx: AuthContext, text: str, cards: list, state: DialogueState) -> TurnDraft | None:
+    async def _grounded_answer(
+        self, ctx: AuthContext, turn: NormalizedTurn, text: str, cards: list, state: DialogueState
+    ) -> TurnDraft | None:
         """Model-written answer from the cards only (code-checked); None falls back to the card text."""
         account_fact, extra_cards = None, []
         if _is_customer(ctx) and cards[0].article_key in _BALANCE_TOPICS:
@@ -552,7 +554,7 @@ class ConversationService:
                                               budget_seconds=self._remaining() - 0.5)
         client, reply = self._answerer.client, outcome.reply
         await self._safe_record(ctx, ModelCallRecord(
-            request_id=ctx.request_id, conversation_id=state.active_case_id or ctx.session_id, case_id=state.active_case_id,
+            request_id=ctx.request_id, conversation_id=turn.conversation_id, case_id=state.active_case_id,
             purpose="FAQ_ANSWER", prompt_version=ANSWER_PROMPT_VERSION, attempt=1,
             provider=reply.provider if reply else client.provider, model=reply.model if reply else client.model_name,
             outcome=outcome.failure or "OK", latency_ms=outcome.latency_ms,

@@ -46,6 +46,7 @@ Pending question codes for the UI: `CHOOSE_COMPLAINT_TYPE`, `COMPLAINT_DETAILS`,
 - Declines are always sent to Resolve so they are recorded. `CONFIRMATION_REQUIRED` keeps the offer open and asks again; expired/invalidated/not-allowed clear it.
 - Accepted review tickets report the request ID and the operation state. A ticket number is shown only when the operation outcome or receipt handoff actually carries `provider_ticket_id`; a CRM outage reads as "pending, no ticket number yet".
 - Knowledge replies cite the reviewed card. `SYNTHETIC` cards are prefixed as demo policy, separate from `PUBLIC` HUTCH facts.
+- **How-to answers (`answer.py`):** a request like "I want to reload" or "how do I check my balance" is an FAQ, even after a greeting. With a `GroundedAnswerer`, the model writes a short answer in the customer's language from the top 3 retrieved cards only, with numbered steps for "how do I" requests. A signed-in customer asking about reloads or balance also gets their main balance (one account fact plus the account card). Code then checks the answer: every number (except line-start step markers 1-9), phone number, e-mail address and web domain must appear in the cards or the account fact; no `80k`-style magnitudes; at most 1,500 characters; and the cards it names must be ones it was given. Those cards become the citations. On any failure, timeout or a short turn deadline, the reply is the first card's text. The chat never reloads, buys or pays; it explains how the customer can do it. Telemetry purpose `FAQ_ANSWER`, prompt `answer-v2`.
 
 ## Secondary paths and telemetry (T-04)
 
@@ -61,7 +62,7 @@ The customer never has to pick a language. Each text message's detected language
 
 - Each turn has one deadline shared by all model calls: 15 s for text, **7 s for Voice** (its read timeout is 8 s). Extraction gets at most the remaining time; the reply rewrite is skipped when less than 1.5 s remains.
 - A rewritten reply keeps its English original in `TurnDraft.source_reply_text`. Turn storage must persist it with the assistant message, so history and audit retain Resolve's wording.
-- Reviewed knowledge (FAQ) replies are never machine-rewritten; they stay exactly as reviewed, with their citation.
+- Knowledge (FAQ) replies are never passed through the rewriter. Without an answerer they are the reviewed card text; with one they are the code-checked answer described above, and the cards it used are kept in `source_reply_text`.
 
 ## Fingerprint rule
 
@@ -87,7 +88,7 @@ This starts a **throwaway** PostgreSQL on port 55433 (never the shared container
 | `hybrid` | Harry's real facade (adapter) for all four complaint types, offers, confirmations, his `OperationRunner` and receipts. Only turn storage and sign-in are dev stand-ins. Needs `sh tests/conversation/hybrid_db.sh start` (throwaway DB). Pick a line at `/api/v1/dev`: Harry's fixtures hold one problem per line. `RESOLVE_DEV_FAULTS=1` turns on his seeded single-use faults as his app does |
 | `real` | Not available until Harry ships turn storage and the conversation routes |
 
-Start `dev-backend` and `frontend-live`, then just open **http://localhost:5174** and talk. In dummy mode you are one demo customer whose records hold every problem: an extra deduction gets A's breakdown, a missing reload E, data B, connection C, an unknown service F. This is a simulation shortcut, not evidence. The chat opens with suggestion chips (`opening_question`), and replies follow the language you write in. To test one specific line (e.g. D's conflict), open http://localhost:5174/api/v1/dev. The same journeys run against the dummy and the real facade in `test_resolve_integration.py`; a pass on both is what keeps the dummy honest.
+Start `dev-backend` and `frontend-live`, then just open **http://localhost:5174** and talk. In dummy mode you are one demo customer whose records hold every problem: an extra deduction gets A's breakdown, a missing reload E, data B, connection C, an unknown service F. This is a simulation shortcut, not evidence. The chat opens with suggestion chips (`opening_question`), and replies follow the language you write in. To test one specific line (e.g. D's conflict), open http://localhost:5174/api/v1/dev. The dev backend also loads `knowledge/hutch_public_drafts.json`: 7 draft cards paraphrased from public HUTCH pages (reload, Self-Care app, balance, packages, support contacts, complaints, missing reload), proposed for Harry's `knowledge_seed.sql` and **not reviewed yet**. `DEV_EXTRACT_BUDGET` (seconds, default 6; the launch config uses 10) raises the dev model budgets when the free tier is slow; production keeps 6 s. The same journeys run against the dummy and the real facade in `test_resolve_integration.py`; a pass on both is what keeps the dummy honest.
 
 ## Tests
 

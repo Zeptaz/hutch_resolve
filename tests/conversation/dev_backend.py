@@ -291,7 +291,7 @@ service = ConversationService(facade, repo, SeedKnowledgeRepository(),
                               Extractor(client, budget_seconds=extract_budget) if client else None,
                               simulation_now, telemetry, rewriter,
                               {Channel.TEXT: max(15.0, extract_budget * 2 + 3)},
-                              answerer=GroundedAnswerer(client) if client else None)
+                              answerer=GroundedAnswerer(client, budget_seconds=extract_budget) if client else None)
 sessions: dict[str, tuple[AuthContext, str]] = {}
 COOKIE = "resolve_customer_session"
 
