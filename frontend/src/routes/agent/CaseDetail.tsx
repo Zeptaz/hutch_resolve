@@ -7,10 +7,10 @@ import { EmptyState, ErrorState, LoadingState } from '@/components/states'
 import { DeliveryBadge, EvidenceBadge, ReviewBadge, StatusBadge } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { formatDateTime, formatGb, formatLkr, humanize } from '@/lib/format'
+import { CalculationTable } from '@/components/evidence/CalculationTable'
+import { formatDateTime, formatLkr, humanize } from '@/lib/format'
+import { COMPLAINT_LABEL } from '@/lib/labels'
 
-type Calculation = NonNullable<AgentCaseDetail['case']['investigation']>['calculations'][number]
 
 export function NoCaseSelected() {
   return <EmptyState title="Select a case" description="Choose a case from the queue to see its evidence and history." />
@@ -66,7 +66,7 @@ function CaseDetail({ caseId }: { caseId: string }) {
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="font-mono text-sm text-muted-foreground">{account.line_alias}</p>
-          <h2 className="text-xl font-bold tracking-tight">{humanize(c.complaint_type)}</h2>
+          <h2 className="text-xl font-bold tracking-tight">{COMPLAINT_LABEL[c.complaint_type] ?? humanize(c.complaint_type)}</h2>
           <p className="text-xs text-muted-foreground">
             Case <span className="font-mono">{c.id}</span> · v{c.version} · updated {formatDateTime(c.updated_at)}
           </p>
@@ -104,7 +104,7 @@ function CaseDetail({ caseId }: { caseId: string }) {
             {handoff ? (
               <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                 <Field label="Queue" value={humanize(handoff.queue)} />
-                <Field label="Provider ticket" value={handoff.provider_ticket_id ?? 'Not yet assigned'} mono />
+                <Field label="Provider ticket" value={handoff.provider_ticket_id ?? 'Not yet assigned'} mono={!!handoff.provider_ticket_id} />
                 <div className="col-span-2">
                   <Field label="Next step" value={handoff.next_step} />
                 </div>
@@ -152,7 +152,7 @@ function CaseDetail({ caseId }: { caseId: string }) {
         </CardHeader>
         <CardContent className="text-sm">
           {detail.review_notes.length === 0 ? (
-            <p className="text-muted-foreground">No notes yet. Note-taking and review actions are coming next.</p>
+            <p className="text-muted-foreground">No internal notes yet.</p>
           ) : (
             <ul className="flex flex-col gap-3">
               {detail.review_notes.map((n) => (
@@ -184,58 +184,14 @@ function Notes({ title, items, tone }: { title: string; items: string[]; tone: '
   if (items.length === 0) return null
   return (
     <div className="flex flex-col gap-1.5">
-      <StatusBadge tone={tone}>{title}</StatusBadge>
+      <StatusBadge tone={tone} className="self-start">
+        {title}
+      </StatusBadge>
       <ul className="list-disc pl-5">
         {items.map((t) => (
           <li key={t}>{t}</li>
         ))}
       </ul>
-    </div>
-  )
-}
-
-/** Renders the server's calculation verbatim — expected/observed/delta are never computed here. */
-function CalculationTable({ calc }: { calc: Calculation }) {
-  const fmt = (n: number) => (calc.unit === 'LKR_MINOR' ? formatLkr(n) : calc.unit === 'BYTES' ? formatGb(n) : String(n))
-  return (
-    <div className="flex flex-col gap-2">
-      <h3 className="font-semibold">{humanize(calc.code)}</h3>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Item</TableHead>
-            <TableHead className="text-right">Amount</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow>
-            <TableCell>Opening</TableCell>
-            <TableCell className="text-right font-mono">{fmt(calc.opening)}</TableCell>
-          </TableRow>
-          {calc.terms.map((t) => (
-            <TableRow key={t.evidence_id}>
-              <TableCell>{t.label}</TableCell>
-              <TableCell className="text-right font-mono">{fmt(t.value)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-        <TableFooter>
-          <TableRow>
-            <TableCell>Expected</TableCell>
-            <TableCell className="text-right font-mono">{fmt(calc.expected)}</TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell>Observed</TableCell>
-            <TableCell className="text-right font-mono">{calc.observed == null ? 'Unavailable' : fmt(calc.observed)}</TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell>Difference</TableCell>
-            <TableCell className={`text-right font-mono ${calc.delta ? 'text-destructive' : ''}`}>
-              {calc.delta == null ? 'Unavailable' : fmt(calc.delta)}
-            </TableCell>
-          </TableRow>
-        </TableFooter>
-      </Table>
     </div>
   )
 }

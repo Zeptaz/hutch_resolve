@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatDateTime, humanize } from '@/lib/format'
+import { COMPLAINT_LABEL } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 
 const POLL_MS = 5000
@@ -61,6 +62,12 @@ export function CaseQueue() {
     }
   }, [load])
 
+  const hasFilters = Object.values(filters).some((v) => v !== undefined && v !== '')
+  const clearFilters = () => {
+    setFilters({})
+    setSearchDraft('')
+  }
+
   const setFilter = <K extends keyof QueueFilters>(key: K, value: string) =>
     setFilters((f) => ({ ...f, [key]: value === ALL ? undefined : value }))
 
@@ -104,7 +111,14 @@ export function CaseQueue() {
         ) : !data ? (
           <LoadingState label="Loading queue…" />
         ) : data.items.length === 0 ? (
-          <EmptyState title="No cases match" description="Try clearing filters or search." />
+          <div className="flex flex-col items-center">
+            <EmptyState title="No cases match" description={hasFilters ? 'Try clearing filters or search.' : 'Nothing needs review right now.'} />
+            {hasFilters && (
+              <Button variant="outline" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            )}
+          </div>
         ) : (
           <ul className="divide-y">
             {error != null && (
@@ -127,7 +141,7 @@ export function CaseQueue() {
                     <span className="font-mono text-sm font-medium">{row.line_alias}</span>
                     <time className="text-xs text-muted-foreground">{formatDateTime(row.updated_at)}</time>
                   </div>
-                  <span className="text-sm">{humanize(row.complaint_type)}</span>
+                  <span className="text-sm">{COMPLAINT_LABEL[row.complaint_type] ?? humanize(row.complaint_type)}</span>
                   <div className="flex flex-wrap gap-1.5">
                     <ReviewBadge status={row.review_status} />
                     <EvidenceBadge state={row.evidence_state} />
@@ -157,7 +171,7 @@ function FilterSelect({
   return (
     <Select value={value ?? ALL} onValueChange={onChange}>
       <SelectTrigger size="sm" aria-label={`${label} filter`} className="w-full">
-        <SelectValue />
+        <SelectValue>{value ? `${label}: ${humanize(value)}` : `${label}: all`}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={ALL}>{label}: all</SelectItem>

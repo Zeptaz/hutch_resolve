@@ -3,7 +3,7 @@ import { Bot, SendHorizontal } from 'lucide-react'
 import { newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
-import type { ConversationView, Decision, Language, ProposalView, SessionView, TurnInput } from '@/api/types'
+import type { ConversationView, Decision, Language, OperationView, ProposalView, SessionView, TurnInput } from '@/api/types'
 import { BrandMark } from '@/components/BrandMark'
 import { ErrorState, LoadingState } from '@/components/states'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -153,6 +153,11 @@ export function ChatShell({ session }: { session: SessionView }) {
     void sendTurn(input, label, newId())
   }
 
+  // Accepting is the only way an operation is created, so an operation means its proposal was accepted.
+  const markAcceptedFromOperation = useCallback((op: OperationView) => {
+    setDecisions((d) => (d[op.proposal_id]?.kind === 'decided' ? d : { ...d, [op.proposal_id]: { kind: 'decided', decision: 'ACCEPT' } }))
+  }, [])
+
   const retryFailed = () => {
     if (!failed) return
     void sendTurn(failed.input, failed.label, failed.clientTurnId)
@@ -234,6 +239,7 @@ export function ChatShell({ session }: { session: SessionView }) {
                               <OperationTracker
                                 key={id}
                                 operationId={id}
+                                onUpdate={markAcceptedFromOperation}
                                 onSettled={() => {
                                   setCaseRefresh((n) => n + 1)
                                   void reload(conversation.id)

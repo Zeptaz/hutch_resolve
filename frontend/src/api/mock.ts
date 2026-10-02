@@ -75,7 +75,13 @@ function detailFor(id: string): AgentCaseDetail | null {
       status: 'REVIEW_REQUIRED',
       investigation,
     }
-    d.account = { ...d.account, line_alias: queueD.line_alias, display_name: 'Synthetic customer D' }
+    const observed = investigation.calculations[0]?.observed
+    d.account = {
+      ...d.account,
+      line_alias: queueD.line_alias,
+      display_name: 'Synthetic customer D',
+      balances: d.account.balances.map((b) => (observed == null ? b : { ...b, amount_minor: observed })),
+    }
     d.investigations = [investigation]
     d.proposals = []
     d.confirmations = []

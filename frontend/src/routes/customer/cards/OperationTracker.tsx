@@ -28,13 +28,23 @@ const STATUS_TEXT: Record<OperationView['status'], string> = {
 }
 
 /** Polls an operation every second until it reaches a terminal state or the component unmounts. */
-export function OperationTracker({ operationId, onSettled }: { operationId: string; onSettled?: (op: OperationView) => void }) {
+export function OperationTracker({
+  operationId,
+  onUpdate,
+  onSettled,
+}: {
+  operationId: string
+  onUpdate?: (op: OperationView) => void
+  onSettled?: (op: OperationView) => void
+}) {
   const [op, setOp] = useState<OperationView | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [attempt, setAttempt] = useState(0)
   const onSettledRef = useRef(onSettled)
+  const onUpdateRef = useRef(onUpdate)
   useEffect(() => {
     onSettledRef.current = onSettled
+    onUpdateRef.current = onUpdate
   })
 
   useEffect(() => {
@@ -45,6 +55,7 @@ export function OperationTracker({ operationId, onSettled }: { operationId: stri
         const next = await customerApi.getOperation(operationId, ctrl.signal)
         setOp(next)
         setError(null)
+        onUpdateRef.current?.(next)
         if (TERMINAL.includes(next.status)) {
           onSettledRef.current?.(next)
           return
