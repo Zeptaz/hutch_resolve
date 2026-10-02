@@ -1,6 +1,6 @@
 # Shared implementation contracts v1.0.0
 
-**Mixed implementation status.** Resolve currently implements health/readiness, session lifecycle, customer-scoped account reads, public scoped case reads/investigation routes, and an in-process facade for conversation/case creation and persisted A/D ledger investigations. Customer action proposal/confirmation routes persist immutable decisions and accepted `PENDING` operations; mock-provider execution, operation polling and Trust Receipt reads are implemented; conversation controller and dashboard review APIs remain future work in [OpenAPI 3.1](contracts/openapi.json). Existing external Voice interfaces are implemented but have known streaming failures. [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
+**Mixed implementation status.** Resolve implements health/readiness, session lifecycle, customer-scoped account reads, public scoped case reads/investigation routes, and an in-process facade for conversation/case creation and persisted A/D ledger investigations. Customer action proposal/confirmation routes persist immutable decisions and accepted `PENDING` operations; mock-provider execution, operation polling and Trust Receipt reads are implemented. Agent queue/detail/versioned review APIs are implemented, with local append-only review and audit history. Review status synchronization to a mock ticket provider, the conversation controller and both frontends remain future work. See [OpenAPI 3.1](contracts/openapi.json). Existing external Voice interfaces are implemented but have known streaming failures. [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
 
 ## Ownership and connections
 
@@ -77,9 +77,9 @@ All paths use `/api/v1`; OpenAPI defines exact fields and response models. Sessi
 | GET /cases/{id}/receipt | Customer session or agent run scope, optional revision ->stored ReceiptView |
 | POST /conversations/{id}/voice-sessions | Empty JSON, server-derived scope/origin ->201 VoiceSessionGrant |
 | POST /integrations/voice/turns; /events | Existing signed Voice body ->strict Voice result/ack |
-| GET /agent/cases | Filters/search/cursor ->queue |
-| GET /agent/cases/{id} | Scoped ID ->AgentCaseDetail |
-| PATCH /agent/cases/{id}/review | Versioned review/note ->updated review/version |
+| GET /agent/cases | Implemented: filters, exact case/line alias search, signed cursor -> scoped queue |
+| GET /agent/cases/{id} | Implemented: sandbox-scoped AgentCaseDetail |
+| PATCH /agent/cases/{id}/review | Implemented: versioned/idempotent review and internal note; delivered mock ticket gets a durable sync job |
 | GET /healthz; /readyz | Process/DB-migration readiness |
 
 Case creation is an internal facade operation invoked by conversation intake. Public FAQ cannot create account cases. Health routes are under `/api/v1` in Resolve; Voice retains existing `/healthz`.
@@ -102,7 +102,7 @@ Public confirmation uses an explicit authenticated decision. Internal Voice conf
 
 Operation states: PENDING -> RUNNING -> SUCCEEDED/FAILED/UNKNOWN; UNKNOWN -> SUCCEEDED/FAILED/REVIEW_REQUIRED. Reconcile unknown at0/2/10seconds via provider lookup/readback. Persist lease/retry state, recover after restart, never mint a new provider key. No lock spans external calls; provider writes use a separate transaction.
 
-Forward revisions `0002_domain_lifecycle` through `0004_action_proposals` add scoped lifecycle, investigation and proposal/confirmation persistence after baseline adoption. Revision 0004 binds proposals to sandbox, actor session, case version, evidence revision, request key/hash and target label; confirmation client turns and accepted operations are uniquely scoped. Confirmation rows remain append-only. The runtime PostgreSQL role may append confirmations/review history/investigations but cannot update or delete their records. Accepted operations are durably `PENDING`. A lifespan-managed in-process worker claims them with leases, uses a separate sandbox database role and a stable provider key, records actual mock readback, retries UNKNOWN after 2/10 seconds and appends digest-protected receipts for terminal outcomes. Receipt and operation projections are scoped. Dashboard review lifecycle remains unimplemented.
+Forward revisions `0002_domain_lifecycle` through `0005_review_ticket_sync` add scoped lifecycle, investigation, proposal/confirmation persistence and a review-sync outbox after baseline adoption. Revision 0004 binds proposals to sandbox, actor session, case version, evidence revision, request key/hash and target label; confirmation client turns and accepted operations are uniquely scoped. Confirmation and review history rows remain append-only. The runtime PostgreSQL role may append confirmations/review history/investigations but cannot update or delete their records. Accepted operations are durably `PENDING`. A lifespan-managed in-process worker claims action and review-sync jobs with leases, uses a separate sandbox database role and stable provider keys, records actual mock readback, retries UNKNOWN after 2/10 seconds and appends digest-protected receipts for terminal actions. CRM review sync writes a separate review object/note and does not change the CRM ticket's own status. Receipt, operation and agent review projections are scoped.
 
 ReceiptView: id, case_id, revision, issued_at, issue, window, findings, calculations, evidence_references, missing, conflicts, actions, handoff, next_step, simulation, digest_sha256. Store append-only. Digest is SHA256 over UTF-8 JSON with sorted keys/no whitespace/integer numbers, excluding digest_sha256 itself. It is neither a signature nor proof of source truth. Internal notes are excluded from customer receipts.
 
@@ -111,6 +111,8 @@ Human-review request creates a CREATE_REVIEW_TICKET proposal; normal confirmatio
 ## Dashboard contract
 
 Agent cookie/role/run required. GET queue filters: review_status, complaint_type, evidence_state, delivery_state, search(case UUID or exact synthetic line), cursor, limit. Queue membership is a case with status REVIEW_REQUIRED, an accepted escalation/delivery record, or an existing agent review event; a merely proposed/unconfirmed handoff does not add a case. Sort updated_at DESC then ID DESC. Rows contain case_id,line_alias,complaint_type,evidence_state,review_status,delivery_state,updated_at,version. No analytics/admin scope.
+
+Review updates append local review history and audit first. If a delivered mock ticket is linked, Resolve enqueues one sync job per review event. Sync state is `PENDING`, `UNKNOWN`, `SYNCED`, `FAILED`, or `REVIEW_REQUIRED`; it is separate from the provider ticket's own status. The worker uses the review event ID as its stable provider idempotency key. No linked ticket yields `NOT_APPLICABLE`. The response is never reported as synchronized until the mock provider write is confirmed.
 
 Detail returns case, account, conversation, investigations, proposals, confirmations, operations, receipts, handoff, review_notes and audit_events. Include source freshness and missing evidence. Agent-only source payload detail is not automatically exposed to customer responses.
 

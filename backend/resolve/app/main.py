@@ -15,6 +15,7 @@ from .account_api import build_account_router
 from .action_api import build_action_router
 from .auth import ResolveError, build_auth_router
 from .case_api import build_case_router
+from .review_api import build_review_router
 from .config import Settings
 from .database import Database
 from backend.resolve.services.facade import ResolveFacade
@@ -66,7 +67,7 @@ def create_app(
             logger.warning("Sandbox provider write URL is not configured; accepted operations will remain PENDING")
         sandbox_engine = sandbox_database.engine if sandbox_database is not None else None
         application.state.resolve_facade = resolve_facade or (
-            ResolveFacade(active_database.engine, provider_engine=sandbox_engine) if hasattr(active_database, "engine") else None
+            ResolveFacade(active_database.engine, cursor_secret=active_settings.app_secret_key) if hasattr(active_database, "engine") else None
         )
         application.state.operation_runner = None
         if sandbox_engine is not None and hasattr(active_database, "engine") and resolve_facade is None:
@@ -96,6 +97,7 @@ def create_app(
     application.include_router(build_account_router())
     application.include_router(build_case_router())
     application.include_router(build_action_router())
+    application.include_router(build_review_router())
 
     @application.middleware("http")
     async def request_id_middleware(request: Request, call_next):

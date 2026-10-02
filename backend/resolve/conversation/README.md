@@ -58,7 +58,7 @@ The fingerprint covers channel, language, input and Voice evidence, but **not** 
 
 ## Integration with Harry's facade
 
-`ResolveFacadeAdapter(ResolveFacade(app_engine, provider_engine=sandbox_engine))` is what the conversation service receives in the real app. Known deviations it absorbs or exposes are listed in `docs/plans/tevin.md` ("Integration findings").
+`ResolveFacadeAdapter(ResolveFacade(app_engine, cursor_secret=...))` is what the conversation service receives in the real app. Known deviations it absorbs or exposes are listed in `docs/plans/tevin.md` ("Integration findings").
 
 ```bash
 PYTHON=~/.venvs/hutch/bin/python sh tests/conversation/run_integration.sh

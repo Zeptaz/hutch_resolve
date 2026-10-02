@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -9,7 +10,8 @@ from uuid import UUID, uuid4
 from sqlalchemy import Engine, text
 
 from backend.resolve.app.auth import AuthContext, ResolveError
-from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_statement
+from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_quota, reconcile_recharge_records, reconcile_service_status, reconcile_statement
+from .review import AgentReviewService
 
 ALLOWED_LANGUAGES = {"en", "si", "ta"}
 ALLOWED_COMPLAINTS = {"BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE"}
@@ -49,9 +51,19 @@ class ResolveFacade:
     """Typed in-process boundary consumed by the conversation controller."""
 
     def __init__(self, engine: Engine, provider: BalanceProvider | AccountProvider | None = None,
-                 *, provider_engine: Engine | None = None) -> None:
+                 *, cursor_secret: bytes | None = None) -> None:
         self._engine = engine
-        self._provider = provider or PostgresSandboxProvider(provider_engine or engine)
+        self._provider = provider or PostgresSandboxProvider(engine)
+        self._review = AgentReviewService(engine, self._provider, cursor_secret or secrets.token_bytes(32))
+
+    def list_agent_cases(self, context: AuthContext, **kwargs: Any) -> dict[str, Any]:
+        return self._review.list_cases(context, **kwargs)
+
+    def agent_case_detail(self, context: AuthContext, case_id: UUID) -> dict[str, Any]:
+        return self._review.case_detail(context, case_id)
+
+    def update_review(self, context: AuthContext, **kwargs: Any) -> dict[str, Any]:
+        return self._review.update_review(context, **kwargs)
 
     def create_conversation(self, context: AuthContext, language: str = "en") -> dict[str, Any]:
         if context.role not in {"GUEST", "CUSTOMER"}:
@@ -265,7 +277,7 @@ class ResolveFacade:
     ) -> dict[str, Any]:
         if context.role != "CUSTOMER" or context.account_id is None or context.sandbox_id is None:
             raise ResolveError(403, "ROLE_FORBIDDEN", "A customer account session is required to investigate a case")
-        if complaint_type not in {"BALANCE_RECHARGE", "VAS_DISPUTE"}:
+        if complaint_type not in {"BALANCE_RECHARGE", "VAS_DISPUTE", "DATA_DEPLETION", "CONNECTIVITY"}:
             raise ResolveError(422, "ACTION_NOT_ALLOWED", "This investigation path is not implemented yet")
         if window_start.tzinfo is None or window_end.tzinfo is None or window_end <= window_start or window_end - window_start > timedelta(days=30):
             raise ResolveError(422, "VALIDATION_ERROR", "A valid investigation window of at most 30 days is required")
@@ -293,15 +305,107 @@ class ResolveFacade:
         if case_scope["version"] != expected_version:
             raise ResolveError(409, "STALE_VERSION", "Case changed; reload before investigating")
 
-        statement = self._provider.get_statement(
-            context.sandbox_id, context.account_id, "MAIN", window_start, window_end
-        )
-        try:
-            result = reconcile_statement(statement)
-        except ValueError as exc:
-            if str(exc) == "LEDGER_VALUE_OUT_OF_RANGE":
-                raise ResolveError(422, "VALIDATION_ERROR", "Ledger value exceeds the safe response range") from exc
-            raise
+        additional_source_status: list[dict[str, Any]] = []
+        if complaint_type == "CONNECTIVITY":
+            service_statement = self._provider.get_service_statement(context.sandbox_id, context.account_id)  # type: ignore[attr-defined]
+            if service_statement is None:
+                raise ResolveError(404, "RESOURCE_NOT_FOUND", "Account service evidence was not found")
+            result = reconcile_service_status(service_statement)
+            observed_at = service_statement.simulation_clock
+            alternate_source_status = [
+                {"source": "SERVICE_ASSURANCE", "fetched_at": service_statement.fetched_at,
+                 "as_of": observed_at, "complete_through": observed_at,
+                 "source_version": service_statement.source_version, "complete": service_statement.complete,
+                 "next_cursor": None, "warnings": [] if service_statement.complete else ["PAGE_LIMIT_EXCEEDED"]},
+                {"source": "SERVICE_CHECK", "fetched_at": service_statement.fetched_at,
+                 "as_of": observed_at, "complete_through": observed_at,
+                 "source_version": service_statement.source_version, "complete": service_statement.complete,
+                 "next_cursor": None, "warnings": [] if service_statement.checks else ["NO_CHECK_RECORDS"]},
+                {"source": "PRODUCT_CATALOG", "fetched_at": service_statement.fetched_at,
+                 "as_of": observed_at, "complete_through": observed_at,
+                 "source_version": service_statement.source_version, "complete": True,
+                 "next_cursor": None, "warnings": []},
+            ]
+            statement = None
+        elif complaint_type == "DATA_DEPLETION":
+            quota_sources = self._provider.get_quota_statements(context.sandbox_id, context.account_id, window_start, window_end)  # type: ignore[attr-defined]
+            quota_results = [reconcile_quota(source, usage, fetched_at=datetime.now(UTC)) for source, usage in quota_sources]
+            if quota_results:
+                states = [item["evidence_state"] for item in quota_results]
+                state = "CONFLICTING" if "CONFLICTING" in states else "PARTIAL" if "PARTIAL" in states else "SUFFICIENT"
+                result = {"evidence_state": state,
+                    "findings": [finding for item in quota_results for finding in item["findings"]],
+                    "calculations": [calculation for item in quota_results for calculation in item["calculations"]],
+                    "evidence": [evidence for item in quota_results for evidence in item["evidence"]],
+                    "missing": sorted({value for item in quota_results for value in item["missing"]}),
+                    "conflicts": sorted({value for item in quota_results for value in item["conflicts"]}),
+                    "eligible_actions": [], "review_reasons": sorted({value for item in quota_results for value in item["review_reasons"]})}
+                alternate_source_status = [{"source": "QUOTA_LEDGER", "fetched_at": datetime.now(UTC),
+                    "as_of": source.as_of, "complete_through": source.as_of,
+                    "source_version": source.source_version, "complete": source.complete,
+                    "next_cursor": None, "warnings": [] if source.complete else ["PAGE_LIMIT_EXCEEDED"]}
+                    for source, _ in quota_sources]
+                # Keep the balance-ledger charge in LKR minor units as its own calculation;
+                # it is never added to the byte-denominated quota arithmetic.
+                charge_statement = self._provider.get_statement(context.sandbox_id, context.account_id,
+                    "MAIN", window_start, window_end)
+                charge_result = reconcile_statement(charge_statement)
+                result["findings"].extend(charge_result["findings"])
+                result["calculations"].extend(charge_result["calculations"])
+                result["evidence"].extend(charge_result["evidence"])
+                result["missing"] = sorted(set(result["missing"] + charge_result["missing"]))
+                result["conflicts"] = sorted(set(result["conflicts"] + charge_result["conflicts"]))
+                result["review_reasons"] = sorted(set(result["review_reasons"] + charge_result["review_reasons"]))
+                if "CONFLICTING" in {result["evidence_state"], charge_result["evidence_state"]}:
+                    result["evidence_state"] = "CONFLICTING"
+                elif "PARTIAL" in {result["evidence_state"], charge_result["evidence_state"]}:
+                    result["evidence_state"] = "PARTIAL"
+                alternate_source_status.append({"source": "CHARGING_LEDGER", "fetched_at": charge_statement.fetched_at,
+                    "as_of": charge_statement.closing.as_of if charge_statement.closing else None,
+                    "complete_through": charge_statement.closing.as_of if charge_statement.closing else None,
+                    "source_version": charge_statement.source_version, "complete": charge_statement.complete,
+                    "next_cursor": None, "warnings": list(charge_statement.warnings)})
+            else:
+                result = {"evidence_state": "PARTIAL", "findings": [{"code": "QUOTA_BUCKETS_MISSING",
+                    "text": "No quota bucket evidence is available for the reported period.", "evidence_ids": []}],
+                    "calculations": [], "evidence": [], "missing": ["QUOTA_BUCKETS_MISSING"], "conflicts": [],
+                    "eligible_actions": [], "review_reasons": ["QUOTA_BUCKETS_MISSING"]}
+                alternate_source_status = [{"source": "QUOTA_LEDGER", "fetched_at": datetime.now(UTC),
+                    "as_of": None, "complete_through": None, "source_version": None,
+                    "complete": False, "next_cursor": None, "warnings": ["NO_BUCKETS"]}]
+            statement = None
+        else:
+            statement = self._provider.get_statement(
+                context.sandbox_id, context.account_id, "MAIN", window_start, window_end
+            )
+            try:
+                result = reconcile_statement(statement)
+            except ValueError as exc:
+                if str(exc) == "LEDGER_VALUE_OUT_OF_RANGE":
+                    raise ResolveError(422, "VALIDATION_ERROR", "Ledger value exceeds the safe response range") from exc
+                raise
+            if complaint_type == "BALANCE_RECHARGE":
+                recharge_reference = facts.get("recharge_reference")
+                recharge_records, recharge_complete, recharge_version = self._provider.get_recharge_records(
+                    context.sandbox_id, context.account_id, window_start, window_end, recharge_reference)  # type: ignore[attr-defined]
+                recharge_result = reconcile_recharge_records(recharge_records, fetched_at=datetime.now(UTC),
+                    source_version=recharge_version, complete=recharge_complete, expected_reference=recharge_reference)
+                result["findings"].extend(recharge_result["findings"])
+                result["evidence"].extend(recharge_result["evidence"])
+                result["missing"] = sorted(set(result["missing"] + recharge_result["missing"]))
+                result["conflicts"] = sorted(set(result["conflicts"] + recharge_result["conflicts"]))
+                result["review_reasons"] = sorted(set(result["review_reasons"] + recharge_result["review_reasons"]))
+                if "CONFLICTING" in {result["evidence_state"], recharge_result["evidence_state"]}:
+                    result["evidence_state"] = "CONFLICTING"
+                elif recharge_result["evidence_state"] == "SUFFICIENT":
+                    result["evidence_state"] = "SUFFICIENT"
+                elif "PARTIAL" in {result["evidence_state"], recharge_result["evidence_state"]}:
+                    result["evidence_state"] = "PARTIAL"
+                additional_source_status.append({"source": "RECHARGE_FULFILMENT", "fetched_at": datetime.now(UTC),
+                    "as_of": max((item.created_at for item in recharge_records), default=None),
+                    "complete_through": max((item.created_at for item in recharge_records), default=None),
+                    "source_version": recharge_version, "complete": recharge_complete,
+                    "next_cursor": None, "warnings": [] if recharge_complete else ["PAGE_LIMIT_EXCEEDED"]})
         account_target = self._provider.get_action_target(context.sandbox_id, context.account_id,
                                                          "CREATE_REVIEW_TICKET", context.account_id)  # type: ignore[attr-defined]
         if account_target:
@@ -309,7 +413,7 @@ class ResolveFacade:
                                                 "target_id": context.account_id,
                                                 "target_label": account_target["label"]})
         vas_targets: list[dict[str, Any]] = []
-        if complaint_type == "VAS_DISPUTE" and result["evidence_state"] == "SUFFICIENT":
+        if complaint_type == "VAS_DISPUTE" and result["evidence_state"] in {"SUFFICIENT", "PARTIAL"}:
             vas_targets = self._provider.eligible_vas_targets(context.sandbox_id, context.account_id)  # type: ignore[attr-defined]
             reported_subscription = facts.get("subscription_id")
             for target in vas_targets:
@@ -319,22 +423,29 @@ class ResolveFacade:
                     "observed_at": target["as_of"], "fetched_at": datetime.now(UTC), "value": target["status"],
                     "unit": None, "source_payload": {"offer_name": target["target_label"], "offer_kind": target["offer_kind"],
                         "recurring": target["recurring"], "renew_enabled": target["renew_enabled"],
-                        "target_version": target["target_version"], "starts_at": target["starts_at"], "expires_at": target["expires_at"]}})
+                        "target_version": target["target_version"], "starts_at": target["starts_at"],
+                        "expires_at": target["expires_at"],
+                        "activation_evidence_ref": target["activation_evidence_ref"]}})
+                if target["activation_evidence_ref"] is None:
+                    result["missing"].append("VAS_ACTIVATION_EVIDENCE_MISSING")
+                    result["review_reasons"].append("VAS_ACTIVATION_EVIDENCE_MISSING")
+                    result["findings"].append({"code": "VAS_ACTIVATION_UNVERIFIED",
+                        "text": "The available records do not contain activation evidence. This does not establish customer consent or decide the past-charge dispute; future renewal deactivation is a separate action.",
+                        "evidence_ids": [evidence_id]})
+                    result["evidence_state"] = "PARTIAL"
                 if reported_subscription is None or reported_subscription == str(target["target_id"]):
                     result["eligible_actions"].append({"action_type": "DEACTIVATE_VAS", "target_id": target["target_id"],
                                                         "target_label": target["target_label"]})
         investigation_id = uuid4()
         created_at = datetime.now(UTC)
-        source_status = [{
-            "source": "CHARGING_LEDGER",
-            "fetched_at": statement.fetched_at,
+        source_status = alternate_source_status if statement is None else [{
+            "source": "CHARGING_LEDGER", "fetched_at": statement.fetched_at,
             "as_of": statement.closing.as_of if statement.closing else None,
             "complete_through": statement.closing.as_of if statement.closing else None,
-            "source_version": statement.source_version,
-            "complete": statement.complete,
-            "next_cursor": None,
-            "warnings": list(statement.warnings),
+            "source_version": statement.source_version, "complete": statement.complete,
+            "next_cursor": None, "warnings": list(statement.warnings),
         }]
+        source_status.extend(additional_source_status)
         if vas_targets:
             source_status.append({"source": "PRODUCT_VAS", "fetched_at": datetime.now(UTC),
                 "as_of": vas_targets[0]["as_of"], "complete_through": vas_targets[0]["as_of"],

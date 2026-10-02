@@ -77,7 +77,20 @@
    "opening_balance": "ආරම්භක බැලන්ස් එක",
    "closing_balance": "නවතම බැලන්ස් එක",
    "activation_evidence": "සේවාව සක්‍රිය කළ බවට සාක්ෂි",
-   "usage_category": "භාවිතයේ වර්ගය"
+   "usage_category": "භාවිතයේ වර්ගය",
+   "OPENING_SNAPSHOT_MISSING": "ආරම්භක බැලන්ස් එක",
+   "CLOSING_SNAPSHOT_MISSING": "නවතම බැලන්ස් එක",
+   "QUOTA_OPENING_SNAPSHOT_MISSING": "ආරම්භක ඩේටා ශේෂය",
+   "QUOTA_CLOSING_SNAPSHOT_MISSING": "නවතම ඩේටා ශේෂය",
+   "QUOTA_BUCKETS_MISSING": "ඔබේ ඩේටා පැකේජ වාර්තා",
+   "CONSUMPTION_USAGE_RECORD_MISSING": "සමහර ඩේටා භාවිත වාර්තා",
+   "USAGE_CONSUMPTION_ENTRY_MISSING": "සමහර ඩේටා භාවිත වාර්තා",
+   "FRESH_SERVICE_CHECK_MISSING": "ඔබේ ලයින් එකේ මෑත ජාල පරීක්ෂාවක්",
+   "RECHARGE_RECORD_MISSING": "රීචාජ් වාර්තාව",
+   "VAS_ACTIVATION_EVIDENCE_MISSING": "සේවාව සක්‍රිය කළ බවට සාක්ෂි",
+   "POSTING_REVERSAL_ORIGINAL_MISSING": "ආපසු හැරවූ ගාස්තුවක මුල් වාර්තාව",
+   "QUOTA_REVERSAL_ORIGINAL_MISSING": "ආපසු හැරවූ ඩේටා සටහනක මුල් වාර්තාව",
+   "unknown": "සමහර වාර්තා"
   },
   "delivery": {
    "PENDING": "සමාලෝචන කණ්ඩායමට යොමු කිරීම තවම පොරොත්තුවෙන්; ටිකට් අංකයක් තවම නිකුත් කර නැත.",

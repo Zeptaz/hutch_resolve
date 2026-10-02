@@ -14,6 +14,7 @@ the structured forms remain fully usable.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
@@ -83,6 +84,7 @@ from .ports import (
 from .state import ActionChoice, Candidate, DialogueState, PendingProposalRef
 
 MAX_WINDOW = timedelta(days=30)
+_CODE = re.compile(r"[A-Z0-9_]+")
 
 # Pending question codes shared with the frontend.
 Q_CHOOSE_COMPLAINT = "CHOOSE_COMPLAINT_TYPE"
@@ -695,11 +697,13 @@ def _investigation_draft(inv: InvestigationResult, proposal: ProposalView | None
     """Reply strictly from Resolve's findings; no number is computed or rephrased here."""
     parts = [finding.text for finding in inv.findings] or [t.text("no_findings", lang)]
     if inv.evidence_state is EvidenceState.PARTIAL:
-        missing = ", ".join(t.missing_label(code, lang) for code in inv.missing) or "—"
+        missing = ", ".join(dict.fromkeys(t.missing_label(code, lang) for code in inv.missing)) or t.missing_label("unknown", lang)
         parts.append(t.text("evidence_partial", lang, missing=missing))
     elif inv.evidence_state is EvidenceState.CONFLICTING:
         parts.append(t.text("evidence_conflicting", lang))
-    parts += inv.review_reasons  # Resolve's customer-facing limits, e.g. future renewal vs past dispute
+    # Resolve's customer-facing limits (e.g. future renewal vs past dispute). Code-style reasons such as
+    # OPENING_SNAPSHOT_MISSING are already explained by the missing-records sentence and never shown raw.
+    parts += [reason for reason in inv.review_reasons if not _CODE.fullmatch(reason)]
 
     cards: list = [CalculationCard(data=calc) for calc in inv.calculations]
     cards += [FindingCard(data=finding) for finding in inv.findings]

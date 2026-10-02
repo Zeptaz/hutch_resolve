@@ -355,7 +355,7 @@ class Handoff(Strict):
     queue: Literal["BILLING_REVIEW", "TECHNICAL_SUPPORT"]
     delivery_state: DeliveryState
     provider_ticket_id: str | None
-    review_sync_state: Literal["NOT_APPLICABLE", "PENDING", "SYNCED", "FAILED"]
+    review_sync_state: Literal["NOT_APPLICABLE", "PENDING", "SYNCED", "FAILED", "UNKNOWN", "REVIEW_REQUIRED"]
     next_step: str
 
 

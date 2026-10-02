@@ -95,6 +95,20 @@ _MISSING_LABELS_EN: dict[str, str] = {
     "closing_balance": "the latest balance",
     "activation_evidence": "proof the service was activated",
     "usage_category": "the type of usage",
+    # Codes sent by Harry's investigations (ResolveDev 9ab23d9); unknown codes use "unknown".
+    "OPENING_SNAPSHOT_MISSING": "the starting balance",
+    "CLOSING_SNAPSHOT_MISSING": "the latest balance",
+    "QUOTA_OPENING_SNAPSHOT_MISSING": "the starting data balance",
+    "QUOTA_CLOSING_SNAPSHOT_MISSING": "the latest data balance",
+    "QUOTA_BUCKETS_MISSING": "your data bundle records",
+    "CONSUMPTION_USAGE_RECORD_MISSING": "some data usage records",
+    "USAGE_CONSUMPTION_ENTRY_MISSING": "some data usage records",
+    "FRESH_SERVICE_CHECK_MISSING": "a recent network check for your line",
+    "RECHARGE_RECORD_MISSING": "the recharge record",
+    "VAS_ACTIVATION_EVIDENCE_MISSING": "proof the service was activated",
+    "POSTING_REVERSAL_ORIGINAL_MISSING": "the original of a reversed charge",
+    "QUOTA_REVERSAL_ORIGINAL_MISSING": "the original of a reversed data entry",
+    "unknown": "some records",
 }
 
 _DELIVERY_EN: dict[DeliveryState, str] = {
@@ -201,6 +215,5 @@ def format_window(start: datetime, end: datetime) -> str:
 
 
 def missing_label(code: str, language: Language) -> str:
-    if code in ENGLISH["missing_labels"]:
-        return _get("missing_labels", code, language)
-    return code.replace("_", " ")
+    """Plain words for a missing-evidence code; never shows a raw code to the customer."""
+    return _get("missing_labels", code if code in ENGLISH["missing_labels"] else "unknown", language)

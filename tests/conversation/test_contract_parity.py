@@ -42,6 +42,50 @@ def test_fields_and_required_match_openapi(name: str) -> None:
     assert model.model_config.get("extra") == "forbid"
 
 
+def _allowed_values(prop: dict):
+    """Enum values of a property schema, looking through anyOf/nullable wrappers; None if unconstrained."""
+    if "enum" in prop:
+        return set(prop["enum"])
+    if "const" in prop:
+        return {prop["const"]}
+    for option in prop.get("anyOf", []):
+        values = _allowed_values(option)
+        if values is not None:
+            return values | ({None} if any(o.get("type") == "null" for o in prop["anyOf"]) else set())
+    return None
+
+
+def _model_values(annotation):
+    """Allowed values of a Literal/StrEnum annotation (incl. Optional); None if unconstrained."""
+    import enum
+    import typing
+
+    origin, args = typing.get_origin(annotation), typing.get_args(annotation)
+    if origin is typing.Literal:
+        return set(args)
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        return {m.value for m in annotation}
+    if origin in (typing.Union, getattr(__import__("types"), "UnionType", None)):
+        found = [_model_values(a) for a in args if a is not type(None)]
+        found = [f for f in found if f is not None]
+        if len(found) == 1:
+            return found[0] | ({None} if type(None) in args else set())
+    return None
+
+
+@pytest.mark.parametrize("name", sorted(MIRRORS))
+def test_property_enum_values_match_openapi(name: str) -> None:
+    schema, model = SCHEMAS[name], MIRRORS[name]
+    for field, prop in schema["properties"].items():
+        if "$ref" in prop:
+            continue  # referenced enums are covered by test_enums_match_openapi
+        expected = _allowed_values(prop)
+        if expected is None:
+            continue
+        actual = _model_values(model.model_fields[field].annotation)
+        assert actual == expected, f"{name}.{field}: model {actual} != contract {expected}"
+
+
 @pytest.mark.parametrize("name", ENUMS)
 def test_enums_match_openapi(name: str) -> None:
     assert {member.value for member in getattr(dto, name)} == set(SCHEMAS[name]["enum"])
