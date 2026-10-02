@@ -106,12 +106,13 @@ Acceptance: decline/expiry/stale target/stale investigation write nothing; concu
 
 Acceptance: customer/guest denied; wrong run denied; stale PATCH returns 409; simultaneous agents do not overwrite notes; review history survives restart; dashboard shows a pending handoff without needing CRM availability. No analytics/admin portal beyond this scope.
 
-Verification for H-05a: `python -m pytest -q` (18 passed), `python -m compileall -q backend`, `git diff --check`, and runtime OpenAPI generation show all three `/api/v1/agent/cases` routes. Isolated PostgreSQL service-level checks previously exercised queue pagination/tamper rejection, detail reads, review replay/conflict, close/reopen rules and audit persistence. The container engine is inaccessible in the current shell, so the post-typing-change detail response was not rechecked against a live PostgreSQL fixture in this turn. Ticket review synchronization remains unimplemented; do not mark H-05 complete yet.
+Verification for H-05a: `python -m pytest -q` (19 passed), `python -m compileall -q backend`, `git diff --check`, and runtime OpenAPI generation show all three `/api/v1/agent/cases` routes. Isolated PostgreSQL service-level checks previously exercised queue pagination/tamper rejection, detail reads, review replay/conflict, close/reopen rules and audit persistence. Ticket review synchronization remains unimplemented; do not mark H-05 complete yet.
 
 ## H-06: remaining complaint and fault paths
 
-- [x] H-06a Pure quota bucket reconciliation core with sequenced grant/consume/expire/reversal entry model, usage-to-consumption cross-check, snapshot continuity, safe numeric bounds, and a strict split from OUT_OF_BUNDLE charging. Unit cases cover exact depletion, snapshot/usage mismatches and incomplete sources. It is not yet connected to provider reads or the investigation API.
-- [ ] B: quota grant/consume/expire/reverse accounting per bucket; usage explanatory only; out-of-bundle charge is separate and negative.
+- [x] H-06a Pure quota bucket reconciliation core with sequenced grant/consume/expire/reversal entry model, usage-to-consumption cross-check, snapshot continuity, safe numeric bounds, and a strict split from OUT_OF_BUNDLE charging. Unit cases cover exact depletion, snapshot/usage mismatches, reversal integrity and incomplete sources.
+- [x] H-06b DATA_DEPLETION provider and persisted investigation path. Reads account-scoped bucket ledgers, selected snapshots and usage, cross-checks in-bundle consumption, and includes the separate LKR balance ledger calculation. The synthetic fixture now has an opening bucket snapshot. Opt-in isolated PostgreSQL test verifies 20 GB depletion and the independent -LKR 80 posting with 2,000 minor units closing balance; runtime investigation response validates.
+- [ ] B extension: consume all seeded late/duplicate/reversal fault profiles through provider reads and ensure each presents correct delayed/duplicate treatment. Missing/incomplete source stays PARTIAL.
 - [ ] C: account/package/quota checks, supplied service checks and matching fresh incident; no invented ETA or healthy-service inference from an empty feed.
 - [ ] E: captured/pending fulfilment is not credited money; never suggest another recharge as recovery.
 - [ ] F: activation evidence missing; future deactivation and past dispute have separate outcomes.

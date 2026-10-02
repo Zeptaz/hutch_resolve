@@ -13,7 +13,7 @@ ENTRY_2 = UUID("82000000-0000-0000-0000-000000000002")
 
 
 def statement(*, closing: int = 0, complete: bool = True) -> QuotaBucketStatement:
-    return QuotaBucketStatement(BUCKET, "DATA", NOW - timedelta(days=1), None, 15_000, 1, closing, 3,
+    return QuotaBucketStatement(BUCKET, "DATA", NOW - timedelta(days=1), None, 15_000, 1, closing, 3, NOW,
         (QuotaEntry(ENTRY_1, 2, -10_000, "CONSUME", USAGE_1, None, NOW - timedelta(hours=3)),
          QuotaEntry(ENTRY_2, 3, -5_000, "CONSUME", USAGE_2, None, NOW - timedelta(hours=2))),
         complete, "fixture-v2:quota-3")
@@ -47,3 +47,21 @@ def test_incomplete_quota_source_is_partial_not_sufficient():
     result = reconcile_quota(statement(complete=False), usage(), fetched_at=NOW)
     assert result["evidence_state"] == "PARTIAL"
     assert "QUOTA_SOURCE_INCOMPLETE" in result["missing"]
+
+
+def test_reversal_must_reference_and_exactly_reverse_original_entry():
+    reversed_entry = QuotaEntry(UUID("82000000-0000-0000-0000-000000000003"), 3, 10_000,
+        "REVERSE", None, ENTRY_1, NOW)
+    source = QuotaBucketStatement(BUCKET, "DATA", NOW - timedelta(days=1), None, 15_000, 1,
+        15_000, 3, NOW, (QuotaEntry(ENTRY_1, 2, -10_000, "CONSUME", USAGE_1, None, NOW),
+        reversed_entry), True, "fixture-v2:quota-reversed")
+    result = reconcile_quota(source, (usage()[0],), fetched_at=NOW)
+    assert result["evidence_state"] == "SUFFICIENT"
+
+    invalid_source = QuotaBucketStatement(BUCKET, "DATA", NOW - timedelta(days=1), None, 15_000, 1,
+        14_999, 3, NOW, (QuotaEntry(ENTRY_1, 2, -10_000, "CONSUME", USAGE_1, None, NOW),
+        QuotaEntry(reversed_entry.id, 3, 9_999, "REVERSE", None, ENTRY_1, NOW)), True,
+        "fixture-v2:quota-reversal-conflict")
+    invalid = reconcile_quota(invalid_source, (usage()[0],), fetched_at=NOW)
+    assert invalid["evidence_state"] == "CONFLICTING"
+    assert "QUOTA_REVERSAL_AMOUNT_MISMATCH" in invalid["conflicts"]

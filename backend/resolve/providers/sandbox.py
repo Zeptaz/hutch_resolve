@@ -72,6 +72,7 @@ class QuotaBucketStatement:
     opening_sequence: int | None
     closing_bytes: int | None
     closing_sequence: int | None
+    as_of: datetime | None
     entries: tuple[QuotaEntry, ...]
     complete: bool
     source_version: str
@@ -85,6 +86,9 @@ class BalanceProvider(Protocol):
     def get_statement(
         self, sandbox_id: UUID, account_id: UUID, wallet: str, window_start: datetime, window_end: datetime
     ) -> LedgerStatement: ...
+
+    def get_quota_statements(self, sandbox_id: UUID, account_id: UUID, window_start: datetime,
+                             window_end: datetime) -> list[tuple[QuotaBucketStatement, tuple[QuotaUsage, ...]]]: ...
 
 
 class PostgresSandboxProvider(AccountProvider, BalanceProvider):
@@ -246,6 +250,73 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
         if closing is not None:
             version += f":snapshot-seq-{closing.last_posting_seq}"
         return LedgerStatement(opening, closing, postings, complete, tuple(warnings), version, fetched_at)
+
+    def get_quota_statements(self, sandbox_id: UUID, account_id: UUID, window_start: datetime,
+                             window_end: datetime) -> list[tuple[QuotaBucketStatement, tuple[QuotaUsage, ...]]]:
+        fetched_at = datetime.now(UTC)
+        with self._engine.connect() as connection:
+            fixture = connection.execute(text("SELECT fixture_version FROM sandbox.sandbox_runs WHERE id=:sandbox AND run_status='ACTIVE'"),
+                {"sandbox": sandbox_id}).scalar_one_or_none()
+            if fixture is None:
+                return []
+            buckets = connection.execute(text("""
+                SELECT id,bucket_kind,valid_from,valid_to FROM sandbox.quota_buckets
+                WHERE sandbox_id=:sandbox AND account_id=:account AND valid_from<:end
+                  AND (valid_to IS NULL OR valid_to>:start) ORDER BY valid_from,id LIMIT 501
+            """), {"sandbox": sandbox_id, "account": account_id, "start": window_start, "end": window_end}).mappings().all()
+            if len(buckets) > 500:
+                buckets = buckets[:500]
+                bucket_page_complete = False
+            else:
+                bucket_page_complete = True
+            output: list[tuple[QuotaBucketStatement, tuple[QuotaUsage, ...]]] = []
+            for bucket in buckets:
+                opening = connection.execute(text("""
+                    SELECT remaining_bytes,last_quota_seq,as_of FROM sandbox.quota_snapshots
+                    WHERE sandbox_id=:sandbox AND bucket_id=:bucket AND as_of<=:start
+                    ORDER BY as_of DESC,last_quota_seq DESC,id LIMIT 1
+                """), {"sandbox": sandbox_id, "bucket": bucket["id"], "start": window_start}).mappings().one_or_none()
+                closing = connection.execute(text("""
+                    SELECT remaining_bytes,last_quota_seq,as_of FROM sandbox.quota_snapshots
+                    WHERE sandbox_id=:sandbox AND bucket_id=:bucket AND as_of>=:end
+                    ORDER BY as_of,last_quota_seq DESC,id LIMIT 1
+                """), {"sandbox": sandbox_id, "bucket": bucket["id"], "end": window_end}).mappings().one_or_none()
+                if opening is not None and closing is not None:
+                    entries = connection.execute(text("""
+                        SELECT id,sequence,delta_bytes,entry_kind,usage_record_id,reversal_of,occurred_at
+                        FROM sandbox.quota_entries WHERE sandbox_id=:sandbox AND bucket_id=:bucket
+                          AND (sequence>:opening AND sequence<=:closing OR id IN (
+                            SELECT reversal_of FROM sandbox.quota_entries
+                            WHERE sandbox_id=:sandbox AND bucket_id=:bucket AND sequence>:opening AND sequence<=:closing
+                              AND reversal_of IS NOT NULL))
+                        ORDER BY sequence LIMIT 501
+                    """), {"sandbox": sandbox_id, "bucket": bucket["id"],
+                        "opening": opening["last_quota_seq"], "closing": closing["last_quota_seq"]}).mappings().all()
+                else:
+                    entries = connection.execute(text("""
+                        SELECT id,sequence,delta_bytes,entry_kind,usage_record_id,reversal_of,occurred_at
+                        FROM sandbox.quota_entries WHERE sandbox_id=:sandbox AND bucket_id=:bucket
+                          AND occurred_at>=:start AND occurred_at<:end ORDER BY sequence LIMIT 501
+                    """), {"sandbox": sandbox_id, "bucket": bucket["id"], "start": window_start, "end": window_end}).mappings().all()
+                usage_rows = connection.execute(text("""
+                    SELECT id,bytes,usage_kind,bucket_id,charge_entry_id,interval_start,interval_end
+                    FROM sandbox.usage_records WHERE sandbox_id=:sandbox AND account_id=:account
+                      AND interval_start<:end AND interval_end>=:start
+                      AND (bucket_id=:bucket OR usage_kind='OUT_OF_BUNDLE')
+                    ORDER BY interval_start,id LIMIT 501
+                """), {"sandbox": sandbox_id, "account": account_id, "bucket": bucket["id"],
+                    "start": opening["as_of"] if opening else window_start,
+                    "end": closing["as_of"] if closing else window_end}).mappings().all()
+                complete = bucket_page_complete and len(entries) <= 500 and len(usage_rows) <= 500
+                source_version = f"fixture-v{fixture}:bucket-{bucket['id']}:snapshot-{closing['last_quota_seq'] if closing else 'missing'}"
+                statement = QuotaBucketStatement(bucket["id"], bucket["bucket_kind"], bucket["valid_from"], bucket["valid_to"],
+                    opening["remaining_bytes"] if opening else None, opening["last_quota_seq"] if opening else None,
+                    closing["remaining_bytes"] if closing else None, closing["last_quota_seq"] if closing else None,
+                    closing["as_of"] if closing else None,
+                    tuple(QuotaEntry(**row) for row in entries[:500]), complete, source_version)
+                usages = tuple(QuotaUsage(**row) for row in usage_rows[:500])
+                output.append((statement, usages))
+        return output
 
     def get_action_target(
         self, sandbox_id: UUID, account_id: UUID, action_type: str, target_id: UUID
@@ -463,7 +534,6 @@ def reconcile_quota(statement: QuotaBucketStatement, usage: tuple[QuotaUsage, ..
     opening_id = add_evidence(statement.bucket_id, statement.valid_from, statement.opening_bytes, "BYTES",
         {"bucket_kind": statement.bucket_kind, "role": "OPENING_SNAPSHOT", "last_sequence": statement.opening_sequence}) if statement.opening_bytes is not None and statement.opening_sequence is not None else None
     terms: list[dict[str, Any]] = []
-    entry_ids: dict[UUID, UUID] = {}
     actual_sequences: set[int] = set()
     for entry in entries:
         if entry.entry_kind not in {"GRANT", "CONSUME", "EXPIRE", "REVERSE"}:
@@ -477,8 +547,16 @@ def reconcile_quota(statement: QuotaBucketStatement, usage: tuple[QuotaUsage, ..
             {"entry_kind": entry.entry_kind, "sequence": entry.sequence,
              "usage_record_id": str(entry.usage_record_id) if entry.usage_record_id else None,
              "reversal_of": str(entry.reversal_of) if entry.reversal_of else None})
-        entry_ids[entry.id] = evidence_id
         terms.append({"evidence_id": evidence_id, "label": entry.entry_kind, "value": entry.delta_bytes})
+    entries_by_id = {entry.id: entry for entry in entries}
+    for entry in entries:
+        if entry.entry_kind != "REVERSE":
+            continue
+        original = entries_by_id.get(entry.reversal_of) if entry.reversal_of is not None else None
+        if original is None:
+            conflicts.append("QUOTA_REVERSAL_ORIGINAL_MISSING")
+        elif entry.delta_bytes != -original.delta_bytes:
+            conflicts.append("QUOTA_REVERSAL_AMOUNT_MISMATCH")
 
     observed_usage = 0
     usage_terms: list[dict[str, Any]] = []
@@ -532,7 +610,7 @@ def reconcile_quota(statement: QuotaBucketStatement, usage: tuple[QuotaUsage, ..
                           and statement.opening_sequence < entry.sequence <= statement.closing_sequence)
         expected_remaining = statement.opening_bytes + entry_delta
         calculations.append({"code": "QUOTA_BUCKET_RECONCILIATION", "unit": "BYTES",
-            "opening": statement.opening_bytes, "terms": [*terms, *usage_terms],
+            "opening": statement.opening_bytes, "terms": terms,
             "expected": expected_remaining, "observed": statement.closing_bytes,
             "delta": statement.closing_bytes - expected_remaining,
             "evidence_ids": [item for item in (opening_id, *[t["evidence_id"] for t in terms],

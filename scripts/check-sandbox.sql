@@ -16,9 +16,13 @@ FROM active r
 JOIN sandbox.accounts a ON a.sandbox_id=r.id
 JOIN sandbox.quota_buckets qb ON qb.sandbox_id=a.sandbox_id AND qb.account_id=a.id
 JOIN sandbox.quota_entries qe ON qe.sandbox_id=qb.sandbox_id AND qe.bucket_id=qb.id
-JOIN sandbox.quota_snapshots qs ON qs.sandbox_id=qb.sandbox_id AND qs.bucket_id=qb.id
+JOIN LATERAL (
+  SELECT remaining_bytes FROM sandbox.quota_snapshots qs
+  WHERE qs.sandbox_id=qb.sandbox_id AND qs.bucket_id=qb.id
+  ORDER BY qs.as_of DESC,qs.last_quota_seq DESC,qs.id LIMIT 1
+) qs ON true
 WHERE a.line_alias IN ('SIM-LK-0002','SIM-LK-0003')
-GROUP BY a.line_alias ORDER BY a.line_alias;
+GROUP BY a.line_alias,qs.remaining_bytes ORDER BY a.line_alias;
 
 WITH active AS (SELECT id FROM sandbox.sandbox_runs ORDER BY created_at DESC LIMIT 1)
 SELECT count(*) AS customers,

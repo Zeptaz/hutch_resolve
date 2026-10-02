@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import Engine, text
 
 from backend.resolve.app.auth import AuthContext, ResolveError
-from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_statement
+from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_quota, reconcile_statement
 from .review import AgentReviewService
 
 ALLOWED_LANGUAGES = {"en", "si", "ta"}
@@ -277,7 +277,7 @@ class ResolveFacade:
     ) -> dict[str, Any]:
         if context.role != "CUSTOMER" or context.account_id is None or context.sandbox_id is None:
             raise ResolveError(403, "ROLE_FORBIDDEN", "A customer account session is required to investigate a case")
-        if complaint_type not in {"BALANCE_RECHARGE", "VAS_DISPUTE"}:
+        if complaint_type not in {"BALANCE_RECHARGE", "VAS_DISPUTE", "DATA_DEPLETION"}:
             raise ResolveError(422, "ACTION_NOT_ALLOWED", "This investigation path is not implemented yet")
         if window_start.tzinfo is None or window_end.tzinfo is None or window_end <= window_start or window_end - window_start > timedelta(days=30):
             raise ResolveError(422, "VALIDATION_ERROR", "A valid investigation window of at most 30 days is required")
@@ -305,15 +305,63 @@ class ResolveFacade:
         if case_scope["version"] != expected_version:
             raise ResolveError(409, "STALE_VERSION", "Case changed; reload before investigating")
 
-        statement = self._provider.get_statement(
-            context.sandbox_id, context.account_id, "MAIN", window_start, window_end
-        )
-        try:
-            result = reconcile_statement(statement)
-        except ValueError as exc:
-            if str(exc) == "LEDGER_VALUE_OUT_OF_RANGE":
-                raise ResolveError(422, "VALIDATION_ERROR", "Ledger value exceeds the safe response range") from exc
-            raise
+        if complaint_type == "DATA_DEPLETION":
+            quota_sources = self._provider.get_quota_statements(context.sandbox_id, context.account_id, window_start, window_end)  # type: ignore[attr-defined]
+            quota_results = [reconcile_quota(source, usage, fetched_at=datetime.now(UTC)) for source, usage in quota_sources]
+            if quota_results:
+                states = [item["evidence_state"] for item in quota_results]
+                state = "CONFLICTING" if "CONFLICTING" in states else "PARTIAL" if "PARTIAL" in states else "SUFFICIENT"
+                result = {"evidence_state": state,
+                    "findings": [finding for item in quota_results for finding in item["findings"]],
+                    "calculations": [calculation for item in quota_results for calculation in item["calculations"]],
+                    "evidence": [evidence for item in quota_results for evidence in item["evidence"]],
+                    "missing": sorted({value for item in quota_results for value in item["missing"]}),
+                    "conflicts": sorted({value for item in quota_results for value in item["conflicts"]}),
+                    "eligible_actions": [], "review_reasons": sorted({value for item in quota_results for value in item["review_reasons"]})}
+                quota_source_status = [{"source": "QUOTA_LEDGER", "fetched_at": datetime.now(UTC),
+                    "as_of": source.as_of, "complete_through": source.as_of,
+                    "source_version": source.source_version, "complete": source.complete,
+                    "next_cursor": None, "warnings": [] if source.complete else ["PAGE_LIMIT_EXCEEDED"]}
+                    for source, _ in quota_sources]
+                # Keep the balance-ledger charge in LKR minor units as its own calculation;
+                # it is never added to the byte-denominated quota arithmetic.
+                charge_statement = self._provider.get_statement(context.sandbox_id, context.account_id,
+                    "MAIN", window_start, window_end)
+                charge_result = reconcile_statement(charge_statement)
+                result["findings"].extend(charge_result["findings"])
+                result["calculations"].extend(charge_result["calculations"])
+                result["evidence"].extend(charge_result["evidence"])
+                result["missing"] = sorted(set(result["missing"] + charge_result["missing"]))
+                result["conflicts"] = sorted(set(result["conflicts"] + charge_result["conflicts"]))
+                result["review_reasons"] = sorted(set(result["review_reasons"] + charge_result["review_reasons"]))
+                if "CONFLICTING" in {result["evidence_state"], charge_result["evidence_state"]}:
+                    result["evidence_state"] = "CONFLICTING"
+                elif "PARTIAL" in {result["evidence_state"], charge_result["evidence_state"]}:
+                    result["evidence_state"] = "PARTIAL"
+                quota_source_status.append({"source": "CHARGING_LEDGER", "fetched_at": charge_statement.fetched_at,
+                    "as_of": charge_statement.closing.as_of if charge_statement.closing else None,
+                    "complete_through": charge_statement.closing.as_of if charge_statement.closing else None,
+                    "source_version": charge_statement.source_version, "complete": charge_statement.complete,
+                    "next_cursor": None, "warnings": list(charge_statement.warnings)})
+            else:
+                result = {"evidence_state": "PARTIAL", "findings": [{"code": "QUOTA_BUCKETS_MISSING",
+                    "text": "No quota bucket evidence is available for the reported period.", "evidence_ids": []}],
+                    "calculations": [], "evidence": [], "missing": ["QUOTA_BUCKETS_MISSING"], "conflicts": [],
+                    "eligible_actions": [], "review_reasons": ["QUOTA_BUCKETS_MISSING"]}
+                quota_source_status = [{"source": "QUOTA_LEDGER", "fetched_at": datetime.now(UTC),
+                    "as_of": None, "complete_through": None, "source_version": None,
+                    "complete": False, "next_cursor": None, "warnings": ["NO_BUCKETS"]}]
+            statement = None
+        else:
+            statement = self._provider.get_statement(
+                context.sandbox_id, context.account_id, "MAIN", window_start, window_end
+            )
+            try:
+                result = reconcile_statement(statement)
+            except ValueError as exc:
+                if str(exc) == "LEDGER_VALUE_OUT_OF_RANGE":
+                    raise ResolveError(422, "VALIDATION_ERROR", "Ledger value exceeds the safe response range") from exc
+                raise
         account_target = self._provider.get_action_target(context.sandbox_id, context.account_id,
                                                          "CREATE_REVIEW_TICKET", context.account_id)  # type: ignore[attr-defined]
         if account_target:
@@ -337,15 +385,12 @@ class ResolveFacade:
                                                         "target_label": target["target_label"]})
         investigation_id = uuid4()
         created_at = datetime.now(UTC)
-        source_status = [{
-            "source": "CHARGING_LEDGER",
-            "fetched_at": statement.fetched_at,
+        source_status = quota_source_status if statement is None else [{
+            "source": "CHARGING_LEDGER", "fetched_at": statement.fetched_at,
             "as_of": statement.closing.as_of if statement.closing else None,
             "complete_through": statement.closing.as_of if statement.closing else None,
-            "source_version": statement.source_version,
-            "complete": statement.complete,
-            "next_cursor": None,
-            "warnings": list(statement.warnings),
+            "source_version": statement.source_version, "complete": statement.complete,
+            "next_cursor": None, "warnings": list(statement.warnings),
         }]
         if vas_targets:
             source_status.append({"source": "PRODUCT_VAS", "fetched_at": datetime.now(UTC),
