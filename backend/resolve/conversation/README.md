@@ -35,7 +35,7 @@ Gemini classifies a message into one intent (`FAQ`, `ACCOUNT_ENQUIRY`, `NEW_COMP
 - never treats a typed or spoken "yes" as consent; the explicit `action_decision` control is required;
 - answers FAQs only from reviewed knowledge cards with citations; guests get FAQs only.
 
-Pending question codes for the UI: `CHOOSE_COMPLAINT_TYPE`, `COMPLAINT_DETAILS`, `CONFIRM_ACTION`, `CHOOSE_ACTION`, `LOGIN_REQUIRED`, and the four `CLARIFY_*` codes. The UI should choose forms from `allowed_input_types`; `CLARIFY_*` and `CHOOSE_ACTION` are text-only.
+Pending question codes for the UI: `CHOOSE_COMPLAINT_TYPE`, `COMPLAINT_DETAILS`, `DESCRIBE_COMPLAINT`, `CONFIRM_ACTION`, `LOGIN_REQUIRED`, and the four `CLARIFY_*` codes. The UI should choose forms from `allowed_input_types`; `DESCRIBE_COMPLAINT` and `CLARIFY_*` are text-only and appear only when a model can read the answer.
 
 **Needed from Harry:** `ConversationService(..., simulation_now=...)` must receive an async function returning the scoped run's `simulation_clock`. It is not in the facade contract yet.
 
@@ -50,12 +50,18 @@ Pending question codes for the UI: `CHOOSE_COMPLAINT_TYPE`, `COMPLAINT_DETAILS`,
 ## Secondary paths and telemetry (T-04)
 
 - B/C/E/F run through the same paths. Resolve's `review_reasons` are added to the reply (e.g. future renewal vs past charge).
-- When Resolve makes **several** actions eligible, the reply lists them with pending question `CHOOSE_ACTION` (text only). A choice must match an action Resolve listed for the active case, and only requests a proposal; consent still needs the Accept control.
+- When Resolve makes **several** actions eligible, the first is offered as a normal Accept/Decline card and the rest are mentioned. Declining or accepting offers the next one, so **buttons alone reach every option** (works with no model). With a model, the customer can name another listed option to switch; the model can only pick an action Resolve listed for the active case, and choosing never confirms.
 - Each model attempt produces a `ModelCallRecord` (request/conversation/case IDs, purpose, prompt version, attempt, provider, model, outcome, latency, provider-reported tokens, error class). It has no field for prompt, transcript or output. **Harry:** implement `ModelTelemetry.record_model_call` into `resolve.model_calls`; telemetry failures are logged and never fail a turn.
 
 ## Language
 
 The customer never has to pick a language. Each text message's detected language and script (from extraction) become the conversation language; button clicks keep it, and a bare "ok" does not switch back to English. The UI's `language` field is only used before anything was detected. With a `ReplyRewriter`, non-English replies are machine-written from the English source and fact-checked by code. They are **not reviewed by a fluent speaker**, so label them that way in demos and documents. Reviewed `locales/*.json` wording remains the path to reviewed native-language replies.
+
+## Time budget and audit
+
+- Each turn has one deadline shared by all model calls: 15 s for text, **7 s for Voice** (its read timeout is 8 s). Extraction gets at most the remaining time; the reply rewrite is skipped when less than 1.5 s remains.
+- A rewritten reply keeps its English original in `TurnDraft.source_reply_text`. Turn storage must persist it with the assistant message, so history and audit retain Resolve's wording.
+- Reviewed knowledge (FAQ) replies are never machine-rewritten; they stay exactly as reviewed, with their citation.
 
 ## Fingerprint rule
 

@@ -290,3 +290,21 @@ def test_opening_question_offers_chips_and_free_text() -> None:
     question = opening_question("en")
     assert question.code == "CHOOSE_COMPLAINT_TYPE"
     assert question.allowed_input_types == ["category_selection", "text"]
+
+
+def test_faq_answers_never_reveal_another_conversation(hm: Harness) -> None:
+    """FAQ replies come only from reviewed knowledge cards: no case, account or other-conversation data."""
+    hm.model.on("how do I activate a package", extraction(intent="FAQ", faq_query="package activation"))
+    other = customer(ACCOUNT_D)
+    other_conv = hm.open(other)
+    secret = hm.send(other, hm.turn(other_conv, details()))  # D's conflict finding lives in another conversation
+    calls_before = sum(hm.facade.calls.values())
+
+    ctx = guest()
+    conv = hm.open(ctx)
+    result = hm.send(ctx, hm.turn(conv, text("how do I activate a package")))
+    assert sum(hm.facade.calls.values()) == calls_before  # FAQ never touches Resolve
+    assert hm.knowledge.queries[-1] == "package activation"  # only the topic reaches the lookup
+    assert "LKR" not in result.reply_text and "differs" not in result.reply_text
+    assert result.case_id is None and result.cards == []
+    assert secret.case_id not in {result.case_id}

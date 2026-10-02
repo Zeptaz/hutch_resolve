@@ -131,3 +131,53 @@ def test_tamil_script_targets_tamil_script() -> None:
     conv = h.open(ctx)
     h.send(ctx, h.turn(conv, text("என் பேலன்ஸ் குறைந்துவிட்டது")))
     assert model.styles == ["Tamil in Tamil script"]
+
+
+def test_english_original_is_kept_with_the_rewritten_reply() -> None:
+    h, _ = harness()
+    h.model.on("mage balance eka adu wela", SINGLISH)
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela")))
+    original = h.repo.source_texts[result.message_id]
+    assert result.reply_text == f"[si] {original}"
+    assert "reconcile to LKR 420" in original  # Resolve's exact wording survives for audit
+
+
+def test_reviewed_faq_text_is_never_machine_rewritten() -> None:
+    h, model = harness()
+    h.model.on("package eka activate karanne kohomada", extraction(intent="FAQ", detected_language="si", script="LATIN", faq_query="package activation"))
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    result = h.send(ctx, h.turn(conv, text("package eka activate karanne kohomada")))
+    assert result.reply_text.startswith("HUTCH self-care publicly lists plan activation.")
+    assert result.citations and model.sources == []
+
+
+def test_voice_turn_skips_rewrite_when_the_deadline_is_near() -> None:
+    from resolve.conversation.dto import Channel
+
+    h, model = harness()
+    h.service._budgets[Channel.VOICE] = 1.0  # less than MIN_REWRITE_SECONDS left after extraction
+    h.model.on("mage balance eka adu wela", SINGLISH)
+    ctx = customer(ACCOUNT_A, Channel.VOICE)
+    conv = h.open(ctx)
+    result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela"), channel=Channel.VOICE))
+    assert not result.reply_text.startswith("[si]") and model.sources == []
+    assert "reconcile to LKR 420" in result.reply_text
+
+
+def test_extraction_is_cut_to_the_remaining_turn_budget() -> None:
+    import time
+
+    model = FakeModel()
+    model.delay = 2.0
+    h = Harness(model=model)  # extractor's own budget is 6 s
+    h.service._budgets[__import__("resolve.conversation.dto", fromlist=["Channel"]).Channel.TEXT] = 0.2
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    started = time.monotonic()
+    result = h.send(ctx, h.turn(conv, text("slow model")))
+    assert time.monotonic() - started < 1.0  # stopped at the turn deadline, not the 6 s extractor budget
+    assert result.pending_question.code == "CHOOSE_COMPLAINT_TYPE"  # structured fallback
+    assert [r.outcome for r in h.telemetry.records] == ["TIMEOUT"]

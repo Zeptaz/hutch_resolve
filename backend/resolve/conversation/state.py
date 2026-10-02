@@ -45,6 +45,10 @@ class PendingProposalRef(BaseModel):
     action_type: ActionType
     expires_at: AwareDatetime
     presented_turn_id: UUID
+    # Enough to offer this action again if the customer switches to another option first.
+    investigation_id: UUID | None = None
+    target_id: UUID | None = None
+    target_label: str | None = None
 
     def is_expired(self, now: datetime) -> bool:
         return now >= self.expires_at

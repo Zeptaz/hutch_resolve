@@ -79,6 +79,7 @@ class FakeConversationRepository:
         self._lease = lease
         self.conversations: dict[UUID, _Conversation] = {}
         self.calls: Counter[str] = Counter()
+        self.source_texts: dict[UUID, str] = {}  # assistant message id -> English original of a rewritten reply
 
     def create(self, ctx: AuthContext) -> UUID:
         conversation_id = uuid4()
@@ -153,6 +154,8 @@ class FakeConversationRepository:
             )
         )
         conv.completed[claim.turn_id] = (claim.fingerprint, result)
+        if draft.source_reply_text is not None:
+            self.source_texts[result.message_id] = draft.source_reply_text
         conv.state = state
         conv.claim = None
         return result

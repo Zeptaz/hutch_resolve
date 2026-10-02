@@ -171,14 +171,16 @@ def test_replayed_turn_does_not_reach_resolve_twice(harry) -> None:
 
 
 def test_vas_dispute_offers_resolve_listed_choices(harry) -> None:
-    ctx, conv, repo, service, _ = journey(harry, ACCOUNT_A)
+    """Exactly what Resolve made eligible is reachable: one offered now, the rest kept for next."""
+    ctx, conv, repo, service, adapter = journey(harry, ACCOUNT_A)
     result = send(service, repo, ctx, conv, details("VAS_DISPUTE"))
-    state = repo.conversations[conv].state
-    listed = {(c.action_type.value, str(c.target_id)) for c in state.pending_choices}
+    eligible = {(a.action_type.value, str(a.target_id))
+                for a in asyncio.run(adapter.get_case(ctx, result.case_id)).investigation.eligible_actions}
     offered = {(card.data.action_type.value, str(card.data.target_id)) for card in result.cards if card.type == "confirmation"}
-    assert listed or offered  # whatever Harry made eligible, and nothing else
-    if listed:
-        assert result.pending_question.code == "CHOOSE_ACTION"
+    kept = {(c.action_type.value, str(c.target_id)) for c in repo.conversations[conv].state.pending_choices}
+    assert offered | kept == eligible and len(offered) == (1 if eligible else 0)
+    if eligible:
+        assert result.pending_question.code == "CONFIRM_ACTION"
 
 
 def test_data_complaint_on_a_line_without_data_issue(harry) -> None:
@@ -215,5 +217,8 @@ def test_secondary_cases_answer_safely_from_records(harry, account, complaint) -
     if complaint == "BALANCE_RECHARGE":
         assert "another payment" in reply or "pay again" in reply  # payment is not credit (E)
     if complaint == "VAS_DISPUTE":
-        choices = {c.action_type.value for c in repo.conversations[conv].state.pending_choices}
-        assert result.pending_question.code == "CHOOSE_ACTION" and "DEACTIVATE_VAS" in choices
+        # Both listed options are reachable by buttons: one offered now, the other kept for next.
+        offered = {card.data.action_type.value for card in result.cards if card.type == "confirmation"}
+        kept = {c.action_type.value for c in repo.conversations[conv].state.pending_choices}
+        assert result.pending_question.code == "CONFIRM_ACTION" and len(offered) == 1
+        assert offered | kept >= {"DEACTIVATE_VAS", "CREATE_REVIEW_TICKET"}

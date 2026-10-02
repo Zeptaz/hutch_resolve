@@ -107,7 +107,9 @@ class ReplyRewriter:
         default = Script.SINHALA if language is Language.SI else Script.TAMIL
         return STYLE.get((language, script or default))
 
-    async def rewrite(self, english: str, language: Language, script: Script | None) -> RewriteOutcome:
+    async def rewrite(
+        self, english: str, language: Language, script: Script | None, budget_seconds: float | None = None
+    ) -> RewriteOutcome:
         style = self.style_for(language, script)
         started = time.monotonic()
 
@@ -120,7 +122,7 @@ class ReplyRewriter:
         try:
             reply = await asyncio.wait_for(
                 self.client.generate_json(system=SYSTEM_INSTRUCTION, prompt=prompt, schema=RESPONSE_SCHEMA),
-                timeout=self._budget,
+                timeout=self._budget if budget_seconds is None else max(0.0, min(self._budget, budget_seconds)),
             )
         except (asyncio.TimeoutError, TimeoutError):
             return done(None, "TIMEOUT")

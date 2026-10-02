@@ -25,7 +25,7 @@ def offered(result):
         (ACCOUNT_C, "CONNECTIVITY", ["SEND_SETTINGS_INSTRUCTIONS"], "CONFIRM_ACTION"),
         (ACCOUNT_D, "BALANCE_RECHARGE", ["CREATE_REVIEW_TICKET"], "CONFIRM_ACTION"),
         (ACCOUNT_E, "BALANCE_RECHARGE", ["CREATE_REVIEW_TICKET"], "CONFIRM_ACTION"),
-        (ACCOUNT_F, "VAS_DISPUTE", [], "CHOOSE_ACTION"),
+        (ACCOUNT_F, "VAS_DISPUTE", ["DEACTIVATE_VAS"], "CONFIRM_ACTION"),  # review kept as the next option
     ],
 )
 def test_each_scenario_offers_only_what_resolve_made_eligible(h: Harness, account, complaint, expected_offer, question) -> None:
@@ -71,21 +71,19 @@ def test_e_payment_is_not_credit_and_never_asks_to_pay_again(h: Harness) -> None
 
 
 def test_f_separates_future_renewal_from_past_dispute_and_lets_customer_choose(hm: Harness) -> None:
-    hm.model.on("stop the renewal please", extraction(intent="ACTION_DECISION", action_choice="DEACTIVATE_VAS"))
+    hm.model.on("I want the old charge checked", extraction(intent="ACTION_DECISION", action_choice="CREATE_REVIEW_TICKET"))
     ctx = customer(ACCOUNT_F)
     conv = hm.open(ctx)
     first = hm.send(ctx, hm.turn(conv, details("VAS_DISPUTE")))
     assert "does not decide the past charge" in first.reply_text
     assert "proof the service was activated" in first.reply_text
-    assert first.pending_question.allowed_input_types == ["text"]
-    assert len(hm.state(conv).pending_choices) == 2
-    assert hm.facade.calls["propose_action"] == 0
+    assert offered(first) == ["DEACTIVATE_VAS"] and "I can also send this to our review team" in first.reply_text
+    assert [c.action_type for c in hm.state(conv).pending_choices] == ["CREATE_REVIEW_TICKET"]
 
-    chosen = hm.send(ctx, hm.turn(conv, text("stop the renewal please")))
-    assert offered(chosen) == ["DEACTIVATE_VAS"]
-    assert chosen.pending_question.code == "CONFIRM_ACTION"
+    switched = hm.send(ctx, hm.turn(conv, text("I want the old charge checked")))
+    assert offered(switched) == ["CREATE_REVIEW_TICKET"]
     assert hm.facade.calls["confirm_action"] == 0  # choosing is not consent
-    assert hm.state(conv).pending_choices == []
+    assert [c.action_type for c in hm.state(conv).pending_choices] == ["DEACTIVATE_VAS"]  # earlier offer kept
 
 
 def test_f_model_cannot_choose_an_action_resolve_did_not_offer(hm: Harness) -> None:
@@ -95,7 +93,36 @@ def test_f_model_cannot_choose_an_action_resolve_did_not_offer(hm: Harness) -> N
     hm.send(ctx, hm.turn(conv, details("VAS_DISPUTE")))
     result = hm.send(ctx, hm.turn(conv, text("send me settings")))
     assert offered(result) == []
-    assert hm.facade.calls["propose_action"] == 0
+    assert hm.facade.calls["propose_action"] == 1  # only the first listed option was ever proposed
+
+
+def decide(h: Harness, ctx, conv, result, value: str):
+    card = next(c for c in result.cards if c.type == "confirmation").data
+    return h.send(ctx, h.turn(conv, {"type": "action_decision", "proposal_id": str(card.id),
+                                      "proposal_hash": card.proposal_hash, "decision": value}))
+
+
+def test_f_every_option_reachable_with_buttons_only_after_decline(h: Harness) -> None:
+    """No model at all: declining the first offer brings the next listed option."""
+    ctx = customer(ACCOUNT_F)
+    conv = h.open(ctx)
+    first = h.send(ctx, h.turn(conv, details("VAS_DISPUTE")))
+    second = decide(h, ctx, conv, first, "DECLINE")
+    assert second.reply_text.startswith("Okay, I won't make that change.")
+    assert offered(second) == ["CREATE_REVIEW_TICKET"] and second.pending_question.code == "CONFIRM_ACTION"
+    done = decide(h, ctx, conv, second, "ACCEPT")
+    assert len(done.operation_ids) == 1 and offered(done) == []
+    assert h.state(conv).pending_choices == [] and h.state(conv).pending_proposal is None
+
+
+def test_f_after_accepting_the_other_option_is_still_offered(h: Harness) -> None:
+    """Stopping renewal and reviewing the past charge can both be wanted."""
+    ctx = customer(ACCOUNT_F)
+    conv = h.open(ctx)
+    first = h.send(ctx, h.turn(conv, details("VAS_DISPUTE")))
+    after = decide(h, ctx, conv, first, "ACCEPT")
+    assert len(after.operation_ids) == 1 and "not been completed yet" in after.reply_text
+    assert offered(after) == ["CREATE_REVIEW_TICKET"]
 
 
 def test_f_review_choice_proposes_review_ticket(hm: Harness) -> None:

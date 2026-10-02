@@ -27,7 +27,7 @@ _EN: dict[str, str] = {
     "evidence_conflicting": "The records don't agree with each other, so I can't give a final answer or change your account. A person needs to review this.",
     "no_findings": "I checked the available records but found nothing to report for that time window.",
     "offer_action": "I can {action} for {target}. {consequences} Shall I go ahead?",
-    "multiple_actions": "I can help in more than one way here: {options}. Which would you like?",
+    "other_options": "If you'd rather, I can also {options}. Just tell me, or answer this offer first and I'll suggest that next.",
     "confirm_prompt": "Please answer using the buttons on the offer above.",
     "confirm_prompt_voice": "Please say clearly whether you want me to go ahead: yes or no.",
     "declined": "Okay, I won't make that change. Nothing on your account was changed.",

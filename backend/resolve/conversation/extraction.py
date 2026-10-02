@@ -272,9 +272,10 @@ class Extractor:
         self._budget = budget_seconds
         self._monotonic = monotonic
 
-    async def extract(self, text: str, context: ExtractionContext) -> ExtractionOutcome:
+    async def extract(self, text: str, context: ExtractionContext, budget_seconds: float | None = None) -> ExtractionOutcome:
+        """`budget_seconds` (the turn's remaining time) can only shorten the extractor's own budget."""
         started = self._monotonic()
-        deadline = started + self._budget
+        deadline = started + (self._budget if budget_seconds is None else min(self._budget, budget_seconds))
         attempts: list[ModelAttempt] = []
         prompt = build_prompt(text, context)
 

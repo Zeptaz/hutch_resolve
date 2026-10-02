@@ -124,6 +124,9 @@ class TurnDraft:
     citations: list[Citation] = field(default_factory=list)
     pending_question: PendingQuestion | None = None
     operation_ids: list[UUID] = field(default_factory=list)
+    # The deterministic English reply when reply_text was rewritten into the customer's language.
+    # Storage must keep it with the assistant message so history and audit retain Resolve's wording.
+    source_reply_text: str | None = None
 
 
 class ConversationRepository(Protocol):
@@ -159,6 +162,7 @@ class ConversationRepository(Protocol):
     ) -> TurnResult:
         """Atomically store user+assistant messages, the result, the new state and
         `active_case_id`; advance conversation.version exactly once; release the claim.
+        When `draft.source_reply_text` is set, persist it with the assistant message (audit).
         Raises CONVERSATION_BUSY if the claim was lost to another worker."""
         ...
 
