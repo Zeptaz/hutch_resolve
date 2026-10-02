@@ -301,6 +301,11 @@ export function CaseQueue() {
   )
 }
 
+const TINT = {
+  danger: { rest: 'bg-destructive/[0.06] hover:bg-destructive/10', selected: 'bg-destructive/[0.12] ring-1 ring-destructive/35' },
+  warning: { rest: 'bg-warning/[0.12] hover:bg-warning/20', selected: 'bg-warning/25 ring-1 ring-warning/60' },
+}
+
 function QueueRow({ row, selected, onStep }: { row: CaseQueueRow; selected: boolean; onStep: (step: 1 | -1) => void }) {
   const flag = attention(row)
   return (
@@ -320,12 +325,14 @@ function QueueRow({ row, selected, onStep }: { row: CaseQueueRow; selected: bool
         }}
         className={cn(
           'relative flex flex-col gap-2 overflow-hidden rounded-xl px-4 py-3 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
-          selected ? 'bg-muted ring-1 ring-foreground/15' : 'hover:bg-muted/60',
+          // Rows that need attention carry a light wash of their status colour instead of a side bar.
+          flag
+            ? TINT[flag.tone][selected ? 'selected' : 'rest']
+            : selected
+              ? 'bg-muted ring-1 ring-foreground/15'
+              : 'hover:bg-muted/60',
         )}
       >
-        {flag && (
-          <span aria-hidden className={cn('absolute inset-y-2 left-0 w-1 rounded-r-full', flag.tone === 'danger' ? 'bg-destructive' : 'bg-warning')} />
-        )}
         <div className="flex items-baseline justify-between gap-2">
           <span className="font-mono text-sm font-semibold">{row.line_alias}</span>
           <time dateTime={row.updated_at} title={formatDateTime(row.updated_at)} className="text-xs text-muted-foreground">
