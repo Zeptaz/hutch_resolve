@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .dto import ActionType, ComplaintType, Language, MAX_TEXT_CHARS
 from .model import ModelClient, ModelError, ModelReply
 
-PROMPT_VERSION = "extract-v3"
+PROMPT_VERSION = "extract-v4"
 TOTAL_BUDGET_SECONDS = 6.0
 MAX_WINDOW = timedelta(days=30)
 # Sri Lanka observes no DST; a fixed offset avoids a tzdata dependency.
@@ -165,7 +165,9 @@ intent:
 - FOLLOW_UP: a question about findings already given for the active case.
 - CORRECTION: the customer changes facts (time, amount, which service) of the active case.
 - ACCOUNT_ENQUIRY: asks for their own balance, packages or account state without reporting a problem.
-- FAQ: a general question about services or how something works, not about their own records.
+- FAQ: a general question about services, OR the customer wants to do something themselves and needs to know how:
+  reload/recharge/top up, activate a package or data plan, use the app, check balance in general, contact support or
+  register a complaint. A greeting before the request ("hi, ...") does not change this. Set faq_query.
 - ACTION_DECISION: answers yes/no to an action offered by the assistant.
 - STATUS: asks whether a request/action/ticket is done, or asks for a receipt.
 - HUMAN_REQUEST: wants a person, agent or review.
@@ -188,7 +190,8 @@ Extract only what the customer actually said. Never guess numbers or dates.
 - amount_lkr: an amount the customer stated, in rupees (e.g. "Rs.500", "500 rupees", "panseeya" = 500). null if none.
 - time_reference: relative to the provided current local date. TODAY, YESTERDAY, LAST_N_HOURS/LAST_N_DAYS with count,
   DATE with start_date, DATE_RANGE with start_date and end_date (YYYY-MM-DD). NONE if no time was mentioned.
-- faq_query: for FAQ only, a few English keywords for the topic. Otherwise null.
+- faq_query: for FAQ only, a few English keywords for the topic (e.g. "how to reload", "activate data package",
+  "contact support"). Otherwise null.
 - summary: one neutral English sentence describing the complaint, without names or numbers not in the message. null if not a complaint.
 - ambiguities: list a field only when the customer seems to mean something specific but it is genuinely unclear
   (e.g. "last time I recharged" -> TIME_WINDOW; "that service" with several possibilities -> TARGET; unclear "not"/"didn't" -> NEGATION).
@@ -203,6 +206,12 @@ Examples (message -> key fields):
 "Why am I charged for video alerts? I never subscribed" -> NEW_COMPLAINT, en, LATIN, VAS_DISPUTE
 "what is my balance" -> ACCOUNT_ENQUIRY
 "how do I activate a package" -> FAQ, faq_query "package activation"
+"hi mata reload ekak danna one" -> FAQ, si, faq_query "how to reload"
+"reload karanne kohomada" -> FAQ, si, faq_query "how to reload"
+"mata data package ekak activate karanna one" -> FAQ, si, faq_query "activate data package"
+"customer care ekata call karanna number eka mokakda" -> FAQ, si, faq_query "contact support"
+"reload pannanum eppadi" -> FAQ, ta, faq_query "how to reload"
+"how can I check my balance" -> FAQ, faq_query "check balance"
 "actually it was yesterday" -> CORRECTION, time YESTERDAY
 "mata manusayekuta katha karanna ona" -> HUMAN_REQUEST, si
 "ow, eka nawattanna" (offer open) -> ACTION_DECISION, decision ACCEPT, si

@@ -26,6 +26,7 @@ customer's records adapt to the complaint (a simulation shortcut, not evidence).
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import sys
@@ -47,6 +48,7 @@ import conftest  # noqa: E402  (fixture account IDs and clock)
 from fakes import FakeConversationRepository, FakeResolveFacade, RecordingTelemetry  # noqa: E402
 from resolve.conversation import ConversationService, opening_question  # noqa: E402
 from resolve.conversation.rewrite import ReplyRewriter  # noqa: E402
+from resolve.conversation.answer import GroundedAnswerer  # noqa: E402
 from resolve.conversation.dto import (  # noqa: E402
     AuthContext,
     Channel,
@@ -128,6 +130,13 @@ def load_knowledge() -> list[tuple[KnowledgeCard, set[str]]]:
                              url=v[6], reviewed_at=v[7], version=int(v[8]), scope=v[9])
         aliases = {a.strip('"').lower() for a in v[5].strip("{}").split(",") if a}
         cards.append((card, aliases | set(re.findall(r"[a-z]+", (v[3] + " " + v[1]).lower()))))
+    drafts = json.loads((REPO / "backend/resolve/conversation/knowledge/hutch_public_drafts.json").read_text(encoding="utf-8"))
+    for i, d in enumerate(drafts["cards"]):  # proposed additions for Harry's seed; dev only
+        card = KnowledgeCard(article_id=UUID(int=0x91000000_0000_4000_8000_000000000100 + i), article_key=d["article_key"],
+                             language="en", title=d["title"], content=d["content"], url=d["url"],
+                             reviewed_at=drafts["fetched_at"], version=1, scope="PUBLIC")
+        terms = {w for a in d["aliases"] for w in re.findall(r"[a-z]+", a.lower())} | set(re.findall(r"[a-z]+", d["title"].lower()))
+        cards.append((card, terms))
     return cards
 
 
@@ -276,8 +285,13 @@ async def simulation_now(ctx: AuthContext) -> datetime:
 
 
 rewriter = ReplyRewriter(client) if client and os.environ.get("DEV_REPLY_REWRITE", "1") != "0" else None
-service = ConversationService(facade, repo, SeedKnowledgeRepository(), Extractor(client) if client else None,
-                              simulation_now, telemetry, rewriter)
+# Dev only: the free tier is currently slower than the 6 s contract budget; production keeps 6 s.
+extract_budget = float(os.environ.get("DEV_EXTRACT_BUDGET", "6"))
+service = ConversationService(facade, repo, SeedKnowledgeRepository(),
+                              Extractor(client, budget_seconds=extract_budget) if client else None,
+                              simulation_now, telemetry, rewriter,
+                              {Channel.TEXT: max(15.0, extract_budget * 2 + 3)},
+                              answerer=GroundedAnswerer(client) if client else None)
 sessions: dict[str, tuple[AuthContext, str]] = {}
 COOKIE = "resolve_customer_session"
 

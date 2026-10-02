@@ -73,6 +73,7 @@ from .extraction import (
     resolve_window,
 )
 from .identity import command_key, turn_fingerprint
+from .answer import ANSWER_PROMPT_VERSION, GroundedAnswerer
 from .rewrite import REWRITE_PROMPT_VERSION, ReplyRewriter
 from .ports import (
     ConversationRepository,
@@ -91,6 +92,8 @@ MAX_WINDOW = timedelta(days=30)
 TURN_BUDGET_SECONDS = {Channel.TEXT: 15.0, Channel.VOICE: 7.0}
 MIN_REWRITE_SECONDS = 1.5  # below this, keep the English reply rather than risk the deadline
 _DEADLINE: ContextVar[float | None] = ContextVar("turn_deadline", default=None)
+# Knowledge topics where a signed-in customer's current balance is useful context.
+_BALANCE_TOPICS = {"how-to-reload", "check-balance-how", "reload-not-received", "prepaid-recharge"}
 _CODE = re.compile(r"[A-Z0-9_]+")
 
 # Pending question codes shared with the frontend.
@@ -142,6 +145,7 @@ class ConversationService:
         telemetry: ModelTelemetry | None = None,
         rewriter: ReplyRewriter | None = None,
         turn_budgets: dict[Channel, float] | None = None,
+        answerer: GroundedAnswerer | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         """`simulation_now` returns the scoped run's simulation clock (Harry); business
@@ -154,6 +158,7 @@ class ConversationService:
         self._telemetry = telemetry or NullTelemetry()
         self._rewriter = rewriter  # replies in the customer's language/style (machine-written; see rewrite.py)
         self._budgets = {**TURN_BUDGET_SECONDS, **(turn_budgets or {})}
+        self._answerer = answerer  # grounded how-to answers from knowledge cards (answer.py)
         self._monotonic = monotonic
 
     async def handle_turn(self, ctx: AuthContext, turn: NormalizedTurn) -> TurnResult:
@@ -517,15 +522,49 @@ class ConversationService:
     async def _faq(self, ctx: AuthContext, text: str, ex: Extraction, state: DialogueState) -> Step:
         """Reviewed knowledge cards only; guests allowed; never account data."""
         lang = state.language
-        cards = await self._knowledge.search(ctx, ex.faq_query or text, lang, limit=1)
+        cards = await self._knowledge.search(ctx, ex.faq_query or text, lang, limit=3)
         if not cards:
             return TurnDraft(reply_text=t.text("faq_none", lang), case_id=state.active_case_id), state
+        if self._answerer is not None and self._remaining() >= MIN_REWRITE_SECONDS:
+            grounded = await self._grounded_answer(ctx, text, cards, state)
+            if grounded is not None:
+                return grounded, state
         card = cards[0]
         citation = Citation(
             article_id=card.article_id, title=card.title, url=card.url, reviewed_at=card.reviewed_at, version=card.version, scope=card.scope
         )
         reply = card.content if card.scope == "PUBLIC" else f"{t.text('synthetic_policy', lang)} {card.content}"
         return TurnDraft(reply_text=reply, case_id=state.active_case_id, citations=[citation]), state
+
+    async def _grounded_answer(self, ctx: AuthContext, text: str, cards: list, state: DialogueState) -> TurnDraft | None:
+        """Model-written answer from the cards only (code-checked); None falls back to the card text."""
+        account_fact, extra_cards = None, []
+        if _is_customer(ctx) and cards[0].article_key in _BALANCE_TOPICS:
+            try:
+                account = await self._facade.get_account(ctx)
+                main = next((b for b in account.balances if b.wallet.upper() == "MAIN"), None)
+                if main is not None:
+                    account_fact = f"The customer's current main balance is {t.format_lkr(main.amount_minor)} (as of {t.format_time(main.as_of)})."
+                    extra_cards = [AccountCard(data=account)]
+            except ResolveError:
+                pass
+        outcome = await self._answerer.answer(text, cards, state.language, state.script, account_fact,
+                                              budget_seconds=self._remaining() - 0.5)
+        client, reply = self._answerer.client, outcome.reply
+        await self._safe_record(ctx, ModelCallRecord(
+            request_id=ctx.request_id, conversation_id=state.active_case_id or ctx.session_id, case_id=state.active_case_id,
+            purpose="FAQ_ANSWER", prompt_version=ANSWER_PROMPT_VERSION, attempt=1,
+            provider=reply.provider if reply else client.provider, model=reply.model if reply else client.model_name,
+            outcome=outcome.failure or "OK", latency_ms=outcome.latency_ms,
+            input_tokens=reply.input_tokens if reply else None, output_tokens=reply.output_tokens if reply else None,
+            error_type=None,
+        ))
+        if outcome.text is None:
+            return None
+        citations = [Citation(article_id=c.article_id, title=c.title, url=c.url, reviewed_at=c.reviewed_at,
+                              version=c.version, scope=c.scope) for c in outcome.used]
+        return TurnDraft(reply_text=outcome.text, case_id=state.active_case_id, cards=extra_cards, citations=citations,
+                         source_reply_text=" ".join(c.content for c in outcome.used))
 
     # --- structured paths -----------------------------------------------------
 
