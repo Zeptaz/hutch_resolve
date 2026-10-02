@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from .account_api import build_account_router
 from .auth import ResolveError, build_auth_router
 from .config import Settings
 from .database import Database
@@ -23,7 +24,12 @@ class DatabaseProbe(Protocol):
     def close(self) -> None: ...
 
 
-def create_app(database: DatabaseProbe | None = None, settings: Settings | None = None, auth_store=None) -> FastAPI:
+def create_app(
+    database: DatabaseProbe | None = None,
+    settings: Settings | None = None,
+    auth_store=None,
+    account_provider=None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         active_database = database
@@ -45,6 +51,7 @@ def create_app(database: DatabaseProbe | None = None, settings: Settings | None 
         application.state.database = active_database
         application.state.settings = active_settings
         application.state.auth_store = auth_store
+        application.state.account_provider = account_provider
         try:
             yield
         finally:
@@ -57,6 +64,7 @@ def create_app(database: DatabaseProbe | None = None, settings: Settings | None 
         lifespan=lifespan,
     )
     application.include_router(build_auth_router())
+    application.include_router(build_account_router())
 
     @application.middleware("http")
     async def request_id_middleware(request: Request, call_next):

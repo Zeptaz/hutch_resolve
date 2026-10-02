@@ -3,7 +3,7 @@
   "info": {
     "title": "HUTCH Resolve planned API",
     "version": "1.0.0",
-    "description": "Design contract only. No Resolve endpoints implemented at baseline 8df74d7. Existing Voice strict models imported without runtime changes. See docs/contracts.md for scope, confirmation and error rules."
+    "description": "Shared Resolve wire contract v1.0.0. Implemented routes: health/readiness, session lifecycle, and customer-scoped account read. A/D reconciliation is currently an in-process provider function without a persisted investigation route. Other operations remain planned; see docs/contracts.md and context.md for status."
   },
   "servers": [
     {

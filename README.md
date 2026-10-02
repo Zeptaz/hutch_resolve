@@ -16,7 +16,7 @@ Start with [context.md](context.md), the agent-maintained source of truth, and t
 
 ## Start the backend foundation
 
-The starter exposes process liveness/readiness and anonymous/demo session lifecycle endpoints. Demo logins are disabled until `DEMO_IDENTITIES_JSON` is configured with credential hashes and fixed synthetic run/account IDs. Other Resolve business APIs are not implemented yet. Replace the `.env.example` application secret before starting the server; use `APP_COOKIE_SECURE=true` under HTTPS.
+The starter exposes process liveness/readiness, anonymous/demo session lifecycle, and a customer-scoped `GET /api/v1/account`. Demo logins are disabled until `DEMO_IDENTITIES_JSON` is configured with credential hashes and fixed synthetic run/account IDs. Case investigations, actions, receipts and dashboard APIs are not implemented yet. Replace the `.env.example` application secret before starting the server; use `APP_COOKIE_SECURE=true` under HTTPS.
 
 ```powershell
 python -m venv .venv
@@ -36,7 +36,8 @@ The database volume is Docker-managed, outside the OneDrive-synced repository. `
 - `database/migrations/001_sandbox.sql`: synthetic CRM, charging, recharge, product/VAS, usage/quota and service-assurance records.
 - `database/migrations/002_resolve.sql` and `003_scope_constraints.sql`: initial Resolve persistence and cross-run ownership constraints.
 - `database/seed.sql`: fixture version 2 with six deterministic prepaid support cases and provider fault profiles.
-- `backend/resolve/app/`: FastAPI startup, health/readiness, error envelope, and guest/demo session endpoints.
+- `backend/resolve/app/`: FastAPI startup, health/readiness, error envelope, session lifecycle, auth context, and account endpoint.
+- `backend/resolve/providers/`: vendor-neutral PostgreSQL adapter and deterministic ledger reconciliation function.
 - `backend/resolve/migrations/`: Alembic migration environment, non-destructive legacy baseline adoption and the first additive domain-lifecycle migration.
 - `scripts/`: start/stop/reset and fixture UUID generation.
 - `docs/mock-environment.md`: relationships, assumptions, failure modes and future provider contracts.

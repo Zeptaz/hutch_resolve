@@ -58,6 +58,23 @@ class MemoryAuthStore:
         self.revoked.add(session_id)
 
 
+class MemoryAccountProvider:
+    def get_account(self, sandbox_id: UUID, account_id: UUID):
+        if sandbox_id != RUN_ID or account_id != ACCOUNT_ID:
+            return None
+        return {
+            "id": ACCOUNT_ID,
+            "line_alias": "SIM-LK-0001",
+            "display_name": "Synthetic Customer A",
+            "region": "WEST",
+            "status": "ACTIVE",
+            "balances": [],
+            "subscriptions": [],
+            "source_status": [],
+            "simulation": True,
+        }
+
+
 def build_client() -> tuple[TestClient, MemoryAuthStore]:
     store = MemoryAuthStore()
     settings = Settings(
@@ -82,7 +99,7 @@ def build_client() -> tuple[TestClient, MemoryAuthStore]:
             ),
         },
     )
-    return TestClient(create_app(Probe(), settings, store)), store
+    return TestClient(create_app(Probe(), settings, store, MemoryAccountProvider())), store
 
 
 def test_anonymous_session_requires_exact_origin_and_returns_csrf_cookie():
@@ -179,3 +196,25 @@ def test_invalid_demo_credentials_do_not_create_a_session():
         )
         assert response.status_code == 401
         assert not store.sessions
+
+
+def test_account_read_uses_server_scoped_session_and_rejects_guest():
+    client, _ = build_client()
+    with client:
+        assert client.get("/api/v1/account").status_code == 401
+        guest = client.post("/api/v1/sessions/anonymous", json={}, headers={"Origin": ORIGIN})
+        assert guest.status_code == 201
+        denied = client.get("/api/v1/account")
+        assert denied.status_code == 403
+        assert denied.json()["error"]["code"] == "ROLE_FORBIDDEN"
+
+        login = client.post(
+            "/api/v1/demo/sessions",
+            json={"demo_identity": "customer", "credential": "customer-pass"},
+            headers={"Origin": ORIGIN, "X-CSRF-Token": guest.json()["csrf_token"]},
+        )
+        account = client.get("/api/v1/account")
+        assert login.status_code == 200
+        assert account.status_code == 200
+        assert account.json()["id"] == str(ACCOUNT_ID)
+        assert account.json()["line_alias"] == "SIM-LK-0001"

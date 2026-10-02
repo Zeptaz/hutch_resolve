@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -58,12 +59,60 @@ class AgentSessionView(BaseModel):
     principal_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class AuthContext:
+    session_id: UUID
+    principal_id: str
+    role: str
+    sandbox_id: UUID | None
+    account_id: UUID | None
+    request_id: UUID
+    channel: str
+
+
 def _token_hash(value: str) -> bytes:
     return hashlib.sha256(value.encode("utf-8")).digest()
 
 
 def _csrf_token(secret: bytes, credential: str) -> str:
     return hmac.new(secret, b"hutch-resolve-csrf:" + credential.encode("ascii"), hashlib.sha256).hexdigest()
+
+
+def authenticated_context(
+    request: Request,
+    *,
+    cookie_name: str = CUSTOMER_COOKIE,
+    allowed_roles: set[str] | None = None,
+) -> AuthContext:
+    credential = request.cookies.get(cookie_name)
+    if not credential:
+        raise ResolveError(401, "UNAUTHENTICATED", "A valid session is required")
+    configured_store = request.app.state.auth_store
+    session_store = configured_store or AuthStore(request.app.state.database.engine)
+    row = session_store.get_session(
+        _token_hash(credential), datetime.now(UTC)
+    )
+    if row is None:
+        raise ResolveError(401, "SESSION_EXPIRED", "Session is expired or revoked")
+    csrf = _csrf_token(request.app.state.settings.app_secret_key, credential)
+    if row["csrf_hash"] is None or not hmac.compare_digest(row["csrf_hash"], _token_hash(csrf)):
+        raise ResolveError(401, "UNAUTHENTICATED", "Session verification failed")
+    roles = allowed_roles or {"GUEST", "CUSTOMER", "AGENT"}
+    if row["role"] not in roles:
+        raise ResolveError(403, "ROLE_FORBIDDEN", "This session cannot access the requested resource")
+    try:
+        request_id = UUID(request.state.request_id)
+    except (ValueError, AttributeError):
+        request_id = uuid4()
+    return AuthContext(
+        session_id=row["id"],
+        principal_id=row["principal_id"],
+        role=row["role"],
+        sandbox_id=row["sandbox_id"],
+        account_id=row["account_id"],
+        request_id=request_id,
+        channel="AGENT" if row["role"] == "AGENT" else "TEXT",
+    )
 
 
 def _view(row: dict[str, Any], csrf_token: str) -> dict[str, Any]:

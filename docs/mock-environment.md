@@ -11,10 +11,13 @@ flowchart LR
   Scripts[PowerShell start / reset] --> Compose[Docker Compose]
   Compose --> PG[(PostgreSQL 18)]
   PG --> S[sandbox schema: synthetic provider-owned records]
-  PG --> R[resolve schema: planned Resolve-owned persistence]
+  PG --> R[resolve schema: Resolve-owned persistence]
+  R --> API[FastAPI: sessions, account read, health]
+  API --> P[In-process sandbox provider and ledger calculator]
+  P --> S
 ```
 
-One local database models provider ownership by schema and table contract. The container health check waits until migrations and initial fixtures finish, rather than only waiting for PostgreSQL's temporary bootstrap server. There are no separately deployed CRM, charging, or network services, and this repository does not contain a Resolve runtime.
+One local database models provider ownership by schema and table contract. The container health check waits until migrations and initial fixtures finish, rather than only waiting for PostgreSQL's temporary bootstrap server. There are no separately deployed CRM, charging, or network services; the starter Resolve app reads the synthetic data through in-process provider adapters.
 
 ## Sources and assumptions
 
@@ -26,7 +29,7 @@ Telecom-style boundaries for CRM/tickets, charging, recharge fulfilment, catalog
 
 `sandbox.sandbox_runs` owns each isolated fixture set. Customers own prepaid accounts; accounts relate to balance snapshots and ordered money postings, recharge/payment and credit references, offers and subscriptions, subscription events, quota buckets/snapshots/entries, usage records, checks, incidents by region, and CRM-style tickets. Provider operations store idempotency outcome and fault profiles select simulator failure behavior. Composite sandbox foreign keys prevent cross-run references.
 
-`resolve` contains planned persistence for scoped sessions, conversations/messages, versioned cases, investigation evidence revisions, action proposals, confirmations and operations, append-only receipt revisions, Voice bindings/events, audit events, model usage and reviewed knowledge cards. Alembic revision `0002_domain_lifecycle` adds explicit sandbox retirement, GUEST/session metadata, language/dialogue state, leased turn claims, one-operation-per-proposal, persisted idempotency outcomes, internal review history and escalation delivery. New case/session/review/turn relations carry same-run ownership constraints, and the runtime role can append but not rewrite confirmation/review history. Twelve English knowledge cards cite public HUTCH pages and keep limits explicit; English search terms include curated Sinhala/Tamil transliterations. No business handlers exist yet.
+`resolve` contains planned persistence for scoped conversations/messages, versioned cases, investigation evidence revisions, action proposals, confirmations and operations, append-only receipts, Voice bindings/events, audits, model usage and reviewed knowledge cards. Alembic revision `0002_domain_lifecycle` adds explicit sandbox retirement, GUEST/session metadata, language/dialogue state, leased turn claims, one-operation-per-proposal, persisted idempotency outcomes, internal review history and escalation delivery. New relations carry same-run ownership constraints, and the runtime role can append but not rewrite confirmation/review history. The current backend implements health/readiness, session lifecycle and a scoped account read. Its in-process PostgreSQL provider reads account/balance/subscription data and exposes a deterministic A/D ledger reconciliation function; case creation, persisted investigations and action APIs are still pending. Twelve English knowledge cards cite public HUTCH pages and keep limits explicit; English search terms include curated Sinhala/Tamil transliterations.
 
 Amounts are signed `bigint` minor LKR units (100 = LKR 1.00); usage and quota use integer bytes. Persist event occurrence separately from posting/recording time. IDs are UUIDs and mutable targets carry versions. The fixture clock is 2 October 2026, 12:00 Asia/Colombo; security grants, session and action expiries use real time.
 
@@ -50,9 +53,9 @@ Fixtures use non-dialable `SIM-LK-*` aliases, synthetic identities, UTC-aware ti
 - Preserve posting sequence and occurred/recorded times so a late posting is visible. A future provider result should carry source, fetched time, source version, completeness, watermark and cursor. Empty data means none only after a complete read.
 - Freshness assumptions: account, balance and subscription 60 seconds; service checks five minutes. Missing incidents do not prove service health.
 
-## Future provider contract surface (not implemented)
+## Provider contract surface
 
-The eventual in-process providers should expose typed bounded reads for account, statement, recharge, offers/subscriptions, usage/quota and service status. Mutations are restricted to versioned/idempotent VAS deactivation, delivery of settings instructions and ticket creation/update. No refund, credit, recharge purchase or network repair is supported. Each result returns source metadata/completeness; each mutation returns durable operation ID and actual readback status. Simulator/admin endpoints must not be customer-facing. Pagination defaults to 100, capped at 500. Same key/body returns the saved result; same key with a different body conflicts.
+The implemented adapter currently exposes bounded account/balance/subscription reads and balance statements; its A/D reconciliation function is deterministic and tested on the seeded rows. Recharge, usage/quota, service status, case persistence and remaining investigation paths are future provider work. Mutations are restricted to versioned/idempotent VAS deactivation, delivery of settings instructions and ticket creation/update. No refund, credit, recharge purchase or network repair is supported. Each result returns source metadata/completeness; each mutation returns durable operation ID and actual readback status. Simulator/admin endpoints must not be customer-facing. Pagination defaults to 100, capped at 500. Same key/body returns the saved result; same key with a different body conflicts.
 
 Fault profiles cover late/duplicate posts, linked reversal, missing opening snapshot, pending payment, incomplete usage page, stale source, wrong unit, CRM outage, rejected writes, committed writes with lost responses, duplicate/stale confirmation and operation lookup failure. These rows configure a future simulator; they do not execute faults today.
 
@@ -62,4 +65,4 @@ The checked-in `database/seed.sql` is now fixture version 2. It corrects B's sig
 
 ## Local commands
 
-Fresh volume initialization runs SQL migrations 001, 002 and 003, then baseline fixture version 2 and knowledge cards. Run `python -m alembic upgrade head` after the DB is ready to validate/adopt the SQL baseline and track future application migrations. `scripts/reset.ps1` inserts a new fixture run without dropping history. `database/seed.sql` is the baseline; `scripts/seed_run.py` re-keys it for a requested run UUID using only Python's standard library. Run `Get-Content scripts/check-sandbox.sql | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U hutch_admin -d hutch_resolve` in PowerShell to assert the selected fixture invariants. To discard all history, explicitly remove the Compose volume with `docker compose down -v`.
+Fresh volume initialization runs SQL migrations 001, 002 and 003, then baseline fixture version 2 and knowledge cards. Run `python -m alembic upgrade head` after the DB is ready to adopt the existing schemas and apply application revisions 0002+. `scripts/reset.ps1` inserts a new fixture run without dropping history. `database/seed.sql` is the baseline; `scripts/seed_run.py` re-keys it for a requested run UUID using only Python's standard library. Run `Get-Content scripts/check-sandbox.sql | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U hutch_admin -d hutch_resolve` in PowerShell to assert the selected fixture invariants. To discard all history, explicitly remove the Compose volume with `docker compose down -v`.

@@ -1,6 +1,6 @@
 # Shared implementation contracts v1.0.0
 
-**Proposed Resolve interfaces, not deployed endpoints.** The database exists; Resolve application work remains unchecked in [context](../context.md). Existing external Voice interfaces are implemented but have known streaming failures. [OpenAPI 3.1](contracts/openapi.json) defines wire shapes; [examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts. Change these documents and affected owner plans before implementations diverge.
+**Mixed implementation status.** Resolve currently implements health/readiness, session lifecycle, scoped account reads and the synthetic account/balance/subscription provider. Deterministic A/D ledger reconciliation exists as an in-process function but is not yet persisted through a case API. Other listed operations remain proposed in [OpenAPI 3.1](contracts/openapi.json). Existing external Voice interfaces are implemented but have known streaming failures. [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
 
 ## Ownership and connections
 
