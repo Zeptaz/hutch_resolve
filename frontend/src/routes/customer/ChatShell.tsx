@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, FolderOpen, SendHorizontal } from 'lucide-react'
+import { ArrowDown, Bot, FolderOpen, SendHorizontal } from 'lucide-react'
 import { newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
@@ -27,6 +27,8 @@ const LANGUAGES: { value: Language; short: string; label: string }[] = [
 ]
 
 const MAX_TEXT = 4000
+// How much unread thread below the fold before "More below" shows.
+const MORE_BELOW_PX = 48
 
 /** A turn that failed to send. Retrying reuses its client_turn_id so the server can de-duplicate. */
 type FailedTurn = { clientTurnId: string; input: TurnInput; label: string; error: unknown }
@@ -55,6 +57,12 @@ export function ChatShell({ session }: { session: SessionView }) {
   // Language at the moment the conversation is opened; later changes go with each turn instead.
   const openingLanguage = useRef(language)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // True when there is unread thread below the visible area.
+  const [moreBelow, setMoreBelow] = useState(false)
+  const checkMoreBelow = useCallback(() => {
+    const el = scrollRef.current
+    if (el) setMoreBelow(el.scrollHeight - el.scrollTop - el.clientHeight > MORE_BELOW_PX)
+  }, [])
 
   // Reopen this session's conversation after a page refresh, otherwise create one.
   // The same Idempotency-Key makes a retried create safe.
@@ -85,7 +93,8 @@ export function ChatShell({ session }: { session: SessionView }) {
     }
   }, [session.id, attempt])
 
-  // New reply: bring its start into view so long card stacks are read from the top.
+  // New reply that fits on screen: show all of it, down to any buttons under it.
+  // Longer reply: start at its top so the text is read before its cards; "More below" leads on.
   // Typing indicator / failed turn: show the bottom of the thread.
   const lastMessageId = conversation?.messages.at(-1)?.id
   useEffect(() => {
@@ -94,11 +103,14 @@ export function ChatShell({ session }: { session: SessionView }) {
     // Wait a frame so cards have laid out before measuring.
     const frame = requestAnimationFrame(() => {
       const latest = lastMessageId ? el.querySelector<HTMLElement>(`[data-message-id="${lastMessageId}"]`) : null
-      const top = latest && !sending && !failed ? latest.offsetTop - 16 : el.scrollHeight
+      const replyStart = latest && !sending && !failed ? latest.offsetTop - 16 : null
+      const fits = replyStart != null && el.scrollHeight - replyStart <= el.clientHeight
+      const top = replyStart == null || fits ? el.scrollHeight : replyStart
       el.scrollTo({ top, behavior: prefersSmoothScroll() ? 'smooth' : 'auto' })
+      checkMoreBelow()
     })
     return () => cancelAnimationFrame(frame)
-  }, [lastMessageId, sending, failed])
+  }, [lastMessageId, sending, failed, checkMoreBelow])
 
   const reload = useCallback(async (id: string) => {
     try {
@@ -243,79 +255,95 @@ export function ChatShell({ session }: { session: SessionView }) {
 
       <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
-          <div ref={scrollRef} className="relative flex-1 overflow-y-auto" aria-live="polite">
-            <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 py-6">
-              {loadError ? (
-                <ErrorState
-                  title={t('chat.openFailed')}
-                  error={loadError}
-                  onRetry={() => {
-                    setLoadError(null)
-                    setAttempt((n) => n + 1)
-                  }}
-                />
-              ) : !conversation ? (
-                <LoadingState label={t('chat.opening')} rows={2} />
-              ) : (
-                <>
-                  <Welcome />
-                  {conversation.messages.map((m) => {
-                    const result = m.speaker === 'ASSISTANT' ? m.result : null
-                    const hasExtras = !!result && (result.cards.length > 0 || result.citations.length > 0 || result.operation_ids.length > 0)
-                    // Replies animate in; the customer's own message already did while it was sending.
-                    const animate = m.speaker === 'ASSISTANT' && !!openedWith && !openedWith.has(m.id)
-                    const enter = (i: number) =>
-                      animate ? { className: 'animate-bubble-in', style: { animationDelay: `${180 + i * 110}ms` } } : {}
-                    return (
-                      <div key={m.id} data-message-id={m.id} className="flex flex-col gap-2">
-                        <Bubble speaker={m.speaker} time={m.created_at} animate={animate}>
-                          {m.body}
-                        </Bubble>
-                        {result && hasExtras && (
-                          <div className="flex max-w-xl flex-col gap-2 sm:ml-9">
-                            {result.cards.map((card, i) => (
-                              <div key={`${m.id}-${i}`} {...enter(i)}>
-                                <ChatCard card={card} renderConfirmation={(c) => renderProposal(c.data)} />
-                              </div>
-                            ))}
-                            {result.operation_ids.map((id) => (
-                              <OperationTracker
-                                key={id}
-                                operationId={id}
-                                onUpdate={markAcceptedFromOperation}
-                                onSettled={() => {
-                                  setCaseRefresh((n) => n + 1)
-                                  void reload(conversation.id)
-                                }}
-                              />
-                            ))}
-                            <CitationList citations={result.citations} />
-                          </div>
-                        )}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <div ref={scrollRef} onScroll={checkMoreBelow} className="relative flex-1 overflow-y-auto" aria-live="polite">
+              <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 py-6">
+                {loadError ? (
+                  <ErrorState
+                    title={t('chat.openFailed')}
+                    error={loadError}
+                    onRetry={() => {
+                      setLoadError(null)
+                      setAttempt((n) => n + 1)
+                    }}
+                  />
+                ) : !conversation ? (
+                  <LoadingState label={t('chat.opening')} rows={2} />
+                ) : (
+                  <>
+                    <Welcome />
+                    {conversation.messages.map((m) => {
+                      const result = m.speaker === 'ASSISTANT' ? m.result : null
+                      const hasExtras = !!result && (result.cards.length > 0 || result.citations.length > 0 || result.operation_ids.length > 0)
+                      // Replies animate in; the customer's own message already did while it was sending.
+                      const animate = m.speaker === 'ASSISTANT' && !!openedWith && !openedWith.has(m.id)
+                      const enter = (i: number) =>
+                        animate ? { className: 'animate-bubble-in', style: { animationDelay: `${180 + i * 110}ms` } } : {}
+                      return (
+                        <div key={m.id} data-message-id={m.id} className="flex flex-col gap-2">
+                          <Bubble speaker={m.speaker} time={m.created_at} animate={animate}>
+                            {m.body}
+                          </Bubble>
+                          {result && hasExtras && (
+                            <div className="flex max-w-xl flex-col gap-2 sm:ml-9">
+                              {result.cards.map((card, i) => (
+                                <div key={`${m.id}-${i}`} {...enter(i)}>
+                                  <ChatCard card={card} renderConfirmation={(c) => renderProposal(c.data)} />
+                                </div>
+                              ))}
+                              {result.operation_ids.map((id) => (
+                                <OperationTracker
+                                  key={id}
+                                  operationId={id}
+                                  onUpdate={markAcceptedFromOperation}
+                                  onSettled={() => {
+                                    setCaseRefresh((n) => n + 1)
+                                    void reload(conversation.id)
+                                  }}
+                                />
+                              ))}
+                              <CitationList citations={result.citations} />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                    {pending && !pendingShownInline && <div className="max-w-xl sm:ml-9">{renderProposal(pending)}</div>}
+                    {conversation.pending_question && !sending && (
+                      <div className="max-w-xl sm:ml-9">
+                        <QuestionPrompt
+                          question={conversation.pending_question}
+                          defaultComplaint={lastCategory}
+                          disabled={sending}
+                          onAnswer={answer}
+                        />
                       </div>
-                    )
-                  })}
-                  {pending && !pendingShownInline && <div className="max-w-xl sm:ml-9">{renderProposal(pending)}</div>}
-                  {conversation.pending_question && !sending && (
-                    <div className="max-w-xl sm:ml-9">
-                      <QuestionPrompt
-                        question={conversation.pending_question}
-                        defaultComplaint={lastCategory}
-                        disabled={sending}
-                        onAnswer={answer}
-                      />
-                    </div>
-                  )}
-                  {outgoing != null && (
-                    <Bubble speaker="USER" animate pending>
-                      {outgoing}
-                    </Bubble>
-                  )}
-                  {sending && <Typing />}
-                  {failed && <FailedTurnNotice failed={failed} onRetry={retryFailed} t={t} />}
-                </>
-              )}
+                    )}
+                    {outgoing != null && (
+                      <Bubble speaker="USER" animate pending>
+                        {outgoing}
+                      </Bubble>
+                    )}
+                    {sending && <Typing />}
+                    {failed && <FailedTurnNotice failed={failed} onRetry={retryFailed} t={t} />}
+                  </>
+                )}
+              </div>
             </div>
+
+            {moreBelow && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const el = scrollRef.current
+                  el?.scrollTo({ top: el.scrollHeight, behavior: prefersSmoothScroll() ? 'smooth' : 'auto' })
+                }}
+                className="absolute bottom-3 left-1/2 -translate-x-1/2 animate-bubble-in rounded-full bg-background shadow-md"
+              >
+                <ArrowDown aria-hidden /> {t('chat.moreBelow')}
+              </Button>
+            )}
           </div>
 
           <form
