@@ -1,32 +1,52 @@
-# React + TypeScript + Vite
+# HUTCH Resolve frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+One React 19 + TypeScript + Vite app with two areas:
 
-Currently, two official plugins are available:
+- `/`: customer chat (starts a guest session; no sign-in page)
+- `/agent`: internal review dashboard (agent sign-in required)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Owner: Jayith. See [the plan](../docs/plans/jayith.md) and [shared contracts](../docs/contracts.md).
 
-## React Compiler
+## Run
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+cd frontend
+npm install
+npm run dev        # http://localhost:5173
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+`VITE_API_MODE` selects the data source (`.env.development` defaults to `mock`):
+
+| Mode | Behaviour |
+| --- | --- |
+| `mock` | Answers API calls from `docs/contracts/examples.json`. Any agent identity/credential works. The banner's **Mock controls** expire the session, toggle a 503 outage or reset data. |
+| `live` | Calls Resolve through the Vite proxy (`/api` → `http://localhost:8080`). |
+
+Create `frontend/.env.development.local` with `VITE_API_MODE=live` to switch without editing tracked files.
+
+## Scripts
+
+| Command | Purpose |
+| --- | --- |
+| `npm run gen:api` | Regenerate `src/api/schema.d.ts` from `docs/contracts/openapi.json` (run after any contract change) |
+| `npm run typecheck` | TypeScript project check |
+| `npm run lint` | oxlint |
+| `npm run build` | Typecheck and production build |
+
+## Layout
+
+```
+src/
+  api/          typed client, endpoints, error envelope, mock transport, generated schema
+  session/      customer/agent session restore, expiry and CSRF handling
+  components/   shared UI (status badges, states, simulation banner) and shadcn/ui
+  routes/       customer/ and agent/ screens
+  lib/          display-only formatting (Asia/Colombo time, LKR, GB)
+```
+
+## Rules
+
+- Render server results only; never compute authoritative amounts, findings or permissions in the browser.
+- Keep investigation, operation, review and delivery states visually distinct. Pending is never shown as success.
+- Session credentials live in HttpOnly cookies; the CSRF token is held in memory only.
+- Theme: tweakcn "autoblog", adjusted for WCAG AA contrast and state colours (see `src/index.css`).
