@@ -6,20 +6,20 @@ import { deliveryTone, evidenceTone, operationTone, reviewTone, type Tone } from
 
 export type { Tone }
 
-// One neutral chip for every state; only the text colour carries the tone. Amber uses a darker ink so it stays readable.
+// Solid fills; text is white or black, whichever passes contrast on that fill (amber takes black).
 const toneClasses: Record<Tone, string> = {
-  neutral: 'text-muted-foreground',
-  info: 'text-info',
-  success: 'text-success',
-  warning: 'text-warning-ink',
-  danger: 'text-destructive',
+  neutral: 'bg-muted-foreground text-white',
+  info: 'bg-info text-info-foreground',
+  success: 'bg-success text-success-foreground',
+  warning: 'bg-warning text-warning-foreground',
+  danger: 'bg-destructive text-destructive-foreground',
 }
 
 export function StatusBadge({ tone, children, className }: { tone: Tone; children: React.ReactNode; className?: string }) {
   return (
     <span
       className={cn(
-        'inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-semibold whitespace-nowrap',
+        'inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs font-semibold whitespace-nowrap',
         toneClasses[tone],
         className,
       )}
