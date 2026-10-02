@@ -28,6 +28,16 @@ from .voice_contracts import (
 from .voice_security import body_digest, canonical_json, verify_headers
 from backend.resolve.services.voice_consent import VoiceConsentEvidence
 from backend.resolve.services.turn_claims import claim_turn, complete_turn, release_turn
+from backend.resolve.conversation.dto import (
+    AuthContext as ConversationAuthContext,
+    Channel as ConversationChannel,
+    Language as ConversationLanguage,
+    NormalizedTurn,
+    Role as ConversationRole,
+    VoiceConsentEvidence as ConversationVoiceEvidence,
+)
+from backend.resolve.conversation.errors import ResolveError as ConversationError
+from backend.resolve.conversation.service import ConversationService as RealConversationService
 
 logger = logging.getLogger("hutch_resolve.voice")
 VOICE_PROVIDER = "zeptaz_voice"
@@ -153,6 +163,11 @@ def _voice_response(result: Any) -> dict[str, Any]:
     if isinstance(question, dict):
         question = question.get("text")
     proposal = result.get("proposal")
+    if proposal is None:
+        for card in result.get("cards", []):
+            if isinstance(card, dict) and card.get("type") == "confirmation":
+                proposal = card.get("data")
+                break
     if proposal is not None:
         if hasattr(proposal, "model_dump"):
             proposal = proposal.model_dump(mode="json")
@@ -299,7 +314,7 @@ def _presentation_response(engine, *, conversation_id: UUID, binding_id: UUID,
             SELECT result FROM resolve.turn_claims
             WHERE conversation_id=:conversation AND completed_at IS NOT NULL
               AND input_payload->>'binding_id'=:binding
-              AND result->'proposal' IS NOT NULL
+              AND jsonb_typeof(result->'proposal')='object'
             ORDER BY completed_at DESC,client_turn_id DESC LIMIT 1
         """), {"conversation": conversation_id, "binding": str(binding_id)}).scalar_one_or_none()
     if row is None:
@@ -310,6 +325,66 @@ def _presentation_response(engine, *, conversation_id: UUID, binding_id: UUID,
             or proposal.get("proposal_hash") != proposal_hash):
         return None
     return str(result.get("response_id")) if result.get("response_id") else None
+
+
+def _scoped_conversation_version(engine, *, conversation_id: UUID, context: AuthContext) -> int | None:
+    with engine.connect() as connection:
+        return connection.execute(text("""
+            SELECT version FROM resolve.conversations WHERE id=:conversation
+              AND sandbox_id=:sandbox AND session_id=:session AND expires_at>:now
+        """), {"conversation": conversation_id, "sandbox": context.sandbox_id,
+              "session": context.session_id, "now": datetime.now(UTC)}).scalar_one_or_none()
+
+
+async def _real_voice_turn(service: RealConversationService, engine, *, context: AuthContext,
+                           conversation_id: UUID, binding_id: UUID, turn_id: UUID,
+                           proposal_id: UUID | None, payload: VoiceTurnRequest,
+                           digest: str, event_token: UUID) -> dict[str, Any]:
+    """The conversation service owns the single fenced turn claim for both channels."""
+    try:
+        version = await asyncio.to_thread(
+            _scoped_conversation_version, engine, conversation_id=conversation_id, context=context)
+        if version is None:
+            raise ResolveError(404, "NOT_FOUND", "Conversation is unavailable")
+        presentation_response_id = await asyncio.to_thread(
+            _presentation_response, engine, conversation_id=conversation_id, binding_id=binding_id,
+            proposal_id=proposal_id, proposal_hash=payload.presented_proposal_hash)
+        trusted = ConversationVoiceEvidence(
+            binding_id=str(binding_id), voice_session_id=payload.voice_session_id,
+            conversation_id=conversation_id, turn_id=turn_id,
+            language=ConversationLanguage(payload.language), final_transcript=payload.transcript,
+            presented_proposal_id=proposal_id,
+            presented_proposal_hash=payload.presented_proposal_hash,
+            presentation_response_id=presentation_response_id,
+        )
+        normalized = NormalizedTurn(
+            conversation_id=conversation_id, turn_id=turn_id, channel=ConversationChannel.VOICE,
+            language=ConversationLanguage(payload.language),
+            input={"type": "text", "text": payload.transcript},
+            expected_version=version, voice_evidence=trusted,
+        )
+        typed_context = ConversationAuthContext(
+            session_id=context.session_id, principal_id=context.principal_id,
+            role=ConversationRole.CUSTOMER, sandbox_id=context.sandbox_id,
+            account_id=context.account_id, request_id=context.request_id,
+            channel=ConversationChannel.VOICE,
+        )
+        turn_result = await service.handle_turn(typed_context, normalized)
+        response = _voice_response(turn_result)
+        await asyncio.to_thread(_persist_event_response, engine, binding_id=binding_id,
+                                route_key="voice_callback", event_id=payload.event_id,
+                                request_hash=digest, response=response, now=datetime.now(UTC), token=event_token)
+        return response
+    except Exception as exc:
+        await asyncio.to_thread(_release_event, engine, binding_id=binding_id,
+                                route_key="voice_callback", event_id=payload.event_id,
+                                now=datetime.now(UTC), token=event_token)
+        if isinstance(exc, ConversationError):
+            raise ResolveError(exc.http_status, exc.code, exc.message, exc.retryable) from exc
+        if isinstance(exc, ResolveError):
+            raise
+        logger.warning("Conversation Voice turn failed (%s)", type(exc).__name__)
+        raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Conversation service is temporarily unavailable", True) from exc
 
 
 def _create_binding(engine, context: AuthContext, conversation_id: UUID, origin: str,
@@ -429,6 +504,12 @@ def build_voice_router() -> APIRouter:
             await asyncio.to_thread(_release_event, engine, binding_id=binding_id, route_key=route_key,
                                     event_id=payload.event_id, now=datetime.now(UTC), token=event_token)
             raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Conversation service is unavailable", True)
+        if isinstance(service, RealConversationService):
+            return await _real_voice_turn(
+                service, engine, context=context, conversation_id=conversation_id,
+                binding_id=binding_id, turn_id=turn_id, proposal_id=proposal_id,
+                payload=payload, digest=digest, event_token=event_token,
+            )
         now = datetime.now(UTC)
         try:
             claim = await asyncio.to_thread(

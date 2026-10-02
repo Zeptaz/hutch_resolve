@@ -91,7 +91,8 @@ class ResolveFacade:
     def update_review(self, context: AuthContext, **kwargs: Any) -> dict[str, Any]:
         return self._review.update_review(context, **kwargs)
 
-    def create_conversation(self, context: AuthContext, language: str = "en") -> dict[str, Any]:
+    def create_conversation(self, context: AuthContext, language: str = "en",
+                            idempotency_key: str | None = None) -> dict[str, Any]:
         if context.role not in {"GUEST", "CUSTOMER"}:
             raise ResolveError(403, "ROLE_FORBIDDEN", "This role cannot create a customer conversation")
         if language not in ALLOWED_LANGUAGES:
@@ -100,6 +101,30 @@ class ResolveFacade:
         now = datetime.now(UTC)
         expires_at = now + timedelta(minutes=30)
         with self._engine.begin() as connection:
+            subject = f"session:{context.session_id}"
+            route = "POST:/conversations"
+            fingerprint = _fingerprint({"language": language})
+            if idempotency_key is not None:
+                # Serialize claims for one authenticated session. The conversation and
+                # completed idempotency record commit in the same transaction.
+                scoped_session = connection.execute(text("""
+                    SELECT id FROM resolve.sessions WHERE id=:session
+                      AND sandbox_id IS NOT DISTINCT FROM :sandbox
+                      AND revoked_at IS NULL AND expires_at>:now FOR UPDATE
+                """), {"session": context.session_id, "sandbox": context.sandbox_id,
+                      "now": now}).scalar_one_or_none()
+                if scoped_session is None:
+                    raise ResolveError(401, "SESSION_EXPIRED", "Session is unavailable")
+                prior = connection.execute(text("""
+                    SELECT request_fingerprint,response_body FROM resolve.idempotency_records
+                    WHERE subject_id=:subject AND route_key=:route AND idempotency_key=:key
+                """), {"subject": subject, "route": route,
+                      "key": idempotency_key}).mappings().one_or_none()
+                if prior is not None:
+                    if prior["request_fingerprint"] != fingerprint:
+                        raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Conversation key was reused with different input")
+                    saved = prior["response_body"]
+                    return json.loads(saved) if isinstance(saved, str) else saved
             connection.execute(
                 text("""
                     INSERT INTO resolve.conversations(id,sandbox_id,session_id,version,created_at,expires_at,language)
@@ -109,14 +134,22 @@ class ResolveFacade:
                  "session_id": context.session_id, "created_at": now,
                  "expires_at": expires_at, "language": language},
             )
-        return {
-            "id": conversation_id,
-            "language": language,
-            "version": 1,
-            "active_case_id": None,
-            "expires_at": expires_at,
-            "simulation": True,
-        }
+            result = {
+                "id": str(conversation_id), "language": language, "version": 1,
+                "active_case_id": None, "expires_at": expires_at.isoformat(),
+                "simulation": True,
+            }
+            if idempotency_key is not None:
+                connection.execute(text("""
+                    INSERT INTO resolve.idempotency_records
+                      (id,subject_id,route_key,idempotency_key,request_fingerprint,
+                       response_status,response_body,created_at,completed_at)
+                    VALUES (:id,:subject,:route,:key,:fingerprint,201,
+                            CAST(:response AS jsonb),:now,:now)
+                """), {"id": uuid4(), "subject": subject, "route": route,
+                      "key": idempotency_key, "fingerprint": fingerprint,
+                      "response": json.dumps(result), "now": now})
+        return result
 
     def get_account(self, context: AuthContext) -> dict[str, Any]:
         if context.role != "CUSTOMER" or context.account_id is None or context.sandbox_id is None:
@@ -691,7 +724,7 @@ class ResolveFacade:
             SELECT result FROM resolve.turn_claims
             WHERE sandbox_id=:sandbox AND conversation_id=:conversation
               AND input_payload->>'binding_id'=:binding_id
-              AND completed_at IS NOT NULL AND result->'proposal' IS NOT NULL
+              AND completed_at IS NOT NULL AND jsonb_typeof(result->'proposal')='object'
             ORDER BY completed_at DESC,client_turn_id DESC LIMIT 1
         """), {"sandbox": context.sandbox_id,
                "conversation": consent.conversation_id,

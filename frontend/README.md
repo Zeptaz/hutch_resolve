@@ -2,7 +2,7 @@
 
 One React 19 + TypeScript + Vite app with two areas:
 
-- `/`: customer chat (starts a guest session; no sign-in page)
+- `/`: customer chat and call panel (starts a guest session and offers demo customer sign-in)
 - `/agent`: internal review dashboard (agent sign-in required)
 
 Owner: Jayith. See [the plan](../docs/plans/jayith.md) and [shared contracts](../docs/contracts.md).
@@ -11,7 +11,7 @@ Owner: Jayith. See [the plan](../docs/plans/jayith.md) and [shared contracts](..
 
 ```sh
 cd frontend
-npm install
+npm ci
 npm run dev        # http://localhost:5173
 ```
 

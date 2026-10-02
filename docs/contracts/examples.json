@@ -974,7 +974,9 @@
           "channel": "TEXT",
           "client_turn_id": "90000000-0000-4000-8000-000000000008",
           "created_at": "2026-10-02T06:30:00Z",
-          "operation_id": "90000000-0000-4000-8000-000000000006"
+          "operation_id": "90000000-0000-4000-8000-000000000006",
+          "operation_status": "PENDING",
+          "simulation": true
         },
         "operation": {
           "id": "90000000-0000-4000-8000-000000000006",
@@ -1007,7 +1009,9 @@
           "channel": "TEXT",
           "client_turn_id": "90000000-0000-4000-8000-000000000008",
           "created_at": "2026-10-02T06:30:00Z",
-          "operation_id": null
+          "operation_id": null,
+          "operation_status": null,
+          "simulation": true
         },
         "operation": null
       }

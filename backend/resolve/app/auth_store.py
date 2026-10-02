@@ -31,6 +31,20 @@ class AuthStore:
     ) -> None:
         with self._engine.begin() as connection:
             if replaced_session is not None:
+                # claim_turn takes the same conversation row lock. Hold it
+                # through rotation so a new guest turn cannot start after the
+                # in-flight check and finish under the new customer scope.
+                connection.execute(text("""
+                    SELECT id FROM resolve.conversations
+                    WHERE session_id=:id AND sandbox_id IS NULL ORDER BY id FOR UPDATE
+                """), {"id": replaced_session}).all()
+                active_turn = connection.execute(text("""
+                    SELECT 1 FROM resolve.turn_claims tc
+                    JOIN resolve.conversations c ON c.id=tc.conversation_id
+                    WHERE c.session_id=:id AND tc.completed_at IS NULL LIMIT 1
+                """), {"id": replaced_session}).scalar_one_or_none()
+                if active_turn is not None:
+                    raise SessionRotationConflict("A guest turn is still being processed")
                 result = connection.execute(
                     text("UPDATE resolve.sessions SET revoked_at=now() WHERE id=:id AND role='GUEST' AND revoked_at IS NULL"),
                     {"id": replaced_session},
@@ -64,6 +78,22 @@ class AuthStore:
                     "expires_at": expires_at,
                 },
             )
+            if replaced_session is not None:
+                # Preserve the public chat across the guest-to-customer upgrade.
+                # Guest turns are public; claims must receive the new sandbox scope
+                # before a private turn can be accepted on the same conversation.
+                connection.execute(text("""
+                    UPDATE resolve.conversations SET session_id=:new_session,
+                      sandbox_id=:sandbox,expires_at=LEAST(expires_at,:expires)
+                    WHERE session_id=:old_session AND sandbox_id IS NULL
+                """), {"new_session": session_id, "sandbox": sandbox_id,
+                      "expires": expires_at, "old_session": replaced_session})
+                connection.execute(text("""
+                    UPDATE resolve.turn_claims SET sandbox_id=:sandbox
+                    WHERE conversation_id IN
+                      (SELECT id FROM resolve.conversations WHERE session_id=:new_session)
+                      AND sandbox_id IS NULL
+                """), {"sandbox": sandbox_id, "new_session": session_id})
 
     def get_session(self, credential_hash: bytes, now: datetime) -> dict[str, Any] | None:
         with self._engine.connect() as connection:

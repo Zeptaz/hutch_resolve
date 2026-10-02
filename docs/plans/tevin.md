@@ -1,6 +1,6 @@
 # Tevin: conversation backend
 
-Read [context.md](../../context.md) and [shared contracts](../contracts.md). Update both this plan and context after meaningful progress; record tests and unresolved work. No chatbot backend currently exists. Run as a module inside Harry's Resolve application, not a separate service.
+Read [context.md](../../context.md) and [shared contracts](../contracts.md). Update both this plan and context after meaningful progress; record tests and unresolved work. The conversation module is now mounted inside Harry's Resolve application. Do not deploy a separate chatbot service.
 
 ## Boundary and interfaces
 
@@ -54,3 +54,4 @@ Acceptance: a full A journey produces the same case/action/receipt through text 
 | Date | Task | Evidence | Remaining |
 | --- | --- | --- | --- |
 | 2026-10-02 | Baseline | No conversation implementation found; master and frozen contract define intended behavior | T-01 through T-04 pending |
+| 2026-10-02 | Resolve integration | Imported the conversation module and contract tests from `HutchChat`; text and signed Voice turns use one mounted service with persisted scoped turn claims. Revision 0007 stores dialogue state and model telemetry. Contract examples now validate without expected failures. Full default suite 420 passed/34 opt-in skipped; five disposable PostgreSQL conversation/Voice/guest tests passed. | Browser and real-model qualification, native-language human review, full six-scenario end-to-end matrix and release disclosure remain open. Package activation stays disabled until the Resolve action contract includes it. |

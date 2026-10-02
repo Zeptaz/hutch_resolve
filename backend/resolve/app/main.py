@@ -15,6 +15,7 @@ from .account_api import build_account_router
 from .action_api import build_action_router
 from .auth import ResolveError, build_auth_router
 from .case_api import build_case_router
+from .conversation_api import build_conversation_router
 from .review_api import build_review_router
 from .voice_api import build_voice_router
 from .voice_client import VoiceSessionClient
@@ -24,6 +25,17 @@ from .observability import create_request_middleware
 from backend.resolve.providers.sandbox import PostgresSandboxProvider
 from backend.resolve.services.facade import ResolveFacade
 from backend.resolve.services.operations import OperationRunner
+from backend.resolve.conversation import ConversationService
+from backend.resolve.conversation.resolve_adapter import ResolveFacadeAdapter
+from backend.resolve.conversation.storage import (
+    PostgresConversationRepository, PostgresKnowledgeRepository,
+    PostgresModelTelemetry, simulation_clock,
+)
+from backend.resolve.conversation.model import GeminiModelClient
+from backend.resolve.conversation.extraction import Extractor
+from backend.resolve.conversation.answer import GroundedAnswerer
+from backend.resolve.conversation.rewrite import ReplyRewriter
+from backend.resolve.conversation.errors import ResolveError as ConversationError
 
 logger = logging.getLogger("hutch_resolve")
 
@@ -85,7 +97,22 @@ def create_app(
             active_voice_client = VoiceSessionClient(active_settings.voice_base_url, active_settings.voice_hmac_secret)
             owns_voice_client = True
         application.state.voice_client = active_voice_client
-        application.state.conversation_service = conversation_service
+        active_conversation_service = conversation_service
+        if active_conversation_service is None and hasattr(active_database, "engine") and application.state.resolve_facade:
+            engine = active_database.engine
+            model = GeminiModelClient.from_env()
+            active_conversation_service = ConversationService(
+                ResolveFacadeAdapter(application.state.resolve_facade),
+                PostgresConversationRepository(engine), PostgresKnowledgeRepository(engine),
+                Extractor(model) if model else None,
+                lambda context: simulation_clock(engine, context),
+                PostgresModelTelemetry(engine),
+                ReplyRewriter(model) if model else None,
+                answerer=GroundedAnswerer(model) if model else None,
+                # Package activation remains a prototype outside Resolve's contract.
+                packages=None, package_agent=None,
+            )
+        application.state.conversation_service = active_conversation_service
         application.state.operation_runner = None
         if sandbox_engine is not None and hasattr(active_database, "engine") and resolve_facade is None:
             runner = OperationRunner(active_database.engine, sandbox_engine)
@@ -115,6 +142,7 @@ def create_app(
     application.include_router(build_auth_router())
     application.include_router(build_account_router())
     application.include_router(build_case_router())
+    application.include_router(build_conversation_router())
     application.include_router(build_action_router())
     application.include_router(build_review_router())
     application.include_router(build_voice_router())
@@ -134,6 +162,11 @@ def create_app(
                 "details": {},
             }},
         )
+
+    @application.exception_handler(ConversationError)
+    async def conversation_error_handler(request: Request, exc: ConversationError) -> JSONResponse:
+        return await resolve_error_handler(
+            request, ResolveError(exc.http_status, exc.code, exc.message, exc.retryable))
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:

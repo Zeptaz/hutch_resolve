@@ -20,7 +20,7 @@ class TurnClaim:
     result: dict[str, Any] | None
 
 
-def claim_turn(engine: Engine, *, sandbox_id: UUID, conversation_id: UUID,
+def claim_turn(engine: Engine, *, sandbox_id: UUID | None, conversation_id: UUID,
                turn_id: UUID, input_hash: str, input_payload: dict[str, Any],
                now: datetime | None = None) -> TurnClaim:
     now = now or datetime.now(UTC)
@@ -28,7 +28,8 @@ def claim_turn(engine: Engine, *, sandbox_id: UUID, conversation_id: UUID,
         # This short lock serializes claims for distinct turn IDs; it never spans
         # the conversation/model/provider work that follows.
         scoped = connection.execute(text("""
-            SELECT id FROM resolve.conversations WHERE sandbox_id=:sandbox AND id=:conversation FOR UPDATE
+            SELECT id FROM resolve.conversations
+            WHERE sandbox_id IS NOT DISTINCT FROM :sandbox AND id=:conversation FOR UPDATE
         """), {"sandbox": sandbox_id, "conversation": conversation_id}).scalar_one_or_none()
         if scoped is None:
             raise ResolveError(404, "NOT_FOUND", "Conversation is unavailable")

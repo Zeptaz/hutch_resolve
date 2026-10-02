@@ -98,7 +98,7 @@ class MemoryConnection:
                     and row["session_id"] == params["session"]):
                 return Result(dict(row))
             return Result()
-        if "from resolve.conversations where" in sql and "for update" in sql:
+        if "from resolve.conversations" in sql and "for update" in sql:
             return Result(CONVERSATION_ID if params["sandbox"] == RUN_ID and params["conversation"] == CONVERSATION_ID else None)
         if "from resolve.voice_bindings b" in sql:
             row = self.engine.bindings.get(params["binding_id"])

@@ -1,6 +1,6 @@
 # Jayith: customer frontend and internal dashboard
 
-Read [context.md](../../context.md) and [contracts](../contracts.md). Update this plan and context after meaningful progress with implementation/test evidence. Jayith's `HutchChat` and `VoiceFrontend` branches now contain frontend work; integration into `ResolveDev` is in progress. Task checkboxes remain pending until the combined app is verified.
+Read [context.md](../../context.md) and [contracts](../contracts.md). Update this plan and context after meaningful progress with implementation/test evidence. Jayith's `HutchChat` and `VoiceFrontend` UI work was selectively integrated into the combined Resolve app on `ResolveDev` (`f2c9bab`). Browser/live Voice verification remains open; keep corresponding task checkboxes pending.
 
 ## Scope and connections
 
@@ -43,3 +43,4 @@ Dependencies: J-01 can start immediately; J-02 integrates H-04/H-05/T-02; J-03 i
 | 2026-10-02 | Baseline | No frontend code found in either target repository at the planning baseline | J-01 through J-04 pending |
 | 2026-10-02 | UI branch intake | Fetched `HutchChat` (`9e7b8b1`) and `VoiceFrontend` (`4349eed`); selective import into the Resolve frontend is in progress | Combined build, live API/chat bridge, v2 browser verification, dashboard review writes and release tests pending |
 | 2026-10-02 | Combined frontend static checkpoint | One React app now includes chat, scoped call panel and dashboard review writes; demo sign-in keeps the guest conversation pointer. Clean npm install, pinned OpenAPI generation, typecheck and production build pass. Lint exits 0 with warnings. No credentials or build artifacts are tracked. | Live Resolve/browser journey, microphone/Voice v2 playback and consent, conflict/retry browser tests and fluent Sinhala/Tamil review remain open; J checkboxes stay pending |
+| 2026-10-02 | Resolve backend integration | The mounted text route and signed Voice bridge now share the conversation service; five disposable PostgreSQL conversation/Voice/guest checks pass. Frontend phase `f2c9bab` is pushed. | Run actual browser chat/call and dashboard journeys against the services, including interruption/playback acknowledgement, review writes, expiry/retry and accessibility. |
