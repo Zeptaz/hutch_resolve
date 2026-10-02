@@ -412,7 +412,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/agent/cases/{id}": {
+    "/agent/cases/{case_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -432,7 +432,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/agent/cases/{id}/review": {
+    "/agent/cases/{case_id}/review": {
         parameters: {
             query?: never;
             header?: never;
@@ -789,12 +789,15 @@ export interface components {
             proposal_hash: string;
             decision: components["schemas"]["Decision"];
             /** @enum {string} */
-            channel: "TEXT" | "VOICE";
+            channel: "TEXT" | "VOICE" | "AGENT";
             /** Format: uuid */
             client_turn_id: string;
             /** Format: date-time */
             created_at: string;
             operation_id: string | null;
+            operation_status: "PENDING" | null;
+            /** @constant */
+            simulation: true;
         };
         OperationOutcome: {
             code: string | null;
@@ -839,7 +842,7 @@ export interface components {
             delivery_state: components["schemas"]["DeliveryState"];
             provider_ticket_id: string | null;
             /** @enum {string} */
-            review_sync_state: "NOT_APPLICABLE" | "PENDING" | "SYNCED" | "FAILED";
+            review_sync_state: "NOT_APPLICABLE" | "PENDING" | "UNKNOWN" | "SYNCED" | "FAILED" | "REVIEW_REQUIRED";
             next_step: string;
         };
         ReceiptAction: {
@@ -1042,7 +1045,7 @@ export interface components {
             disposition: string | null;
             note: components["schemas"]["ReviewNote"] | null;
             /** @enum {string} */
-            review_sync_state: "NOT_APPLICABLE" | "PENDING" | "SYNCED" | "FAILED";
+            review_sync_state: "NOT_APPLICABLE" | "PENDING" | "UNKNOWN" | "SYNCED" | "FAILED" | "REVIEW_REQUIRED";
             /** Format: date-time */
             updated_at: string;
         };
