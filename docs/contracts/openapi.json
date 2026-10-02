@@ -3,7 +3,7 @@
   "info": {
     "title": "HUTCH Resolve planned API",
     "version": "1.0.0",
-    "description": "Shared Resolve wire contract v1.0.0. Implemented routes: health/readiness, session lifecycle, and customer-scoped account read. A/D reconciliation is currently an in-process provider function without a persisted investigation route. Other operations remain planned; see docs/contracts.md and context.md for status."
+    "description": "Shared Resolve wire contract v1.0.0. Implemented routes: health/readiness, session lifecycle, and customer-scoped account read. Conversation/case creation, scoped case reads and persisted A/D investigations are currently in the in-process facade, not public routes. Other operations remain planned; see docs/contracts.md and context.md for status."
   },
   "servers": [
     {

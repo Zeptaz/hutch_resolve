@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.main import create_app
+from backend.resolve.app.main import create_app
 
 
 class Probe:

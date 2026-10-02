@@ -1,6 +1,6 @@
 # Shared implementation contracts v1.0.0
 
-**Mixed implementation status.** Resolve currently implements health/readiness, session lifecycle, scoped account reads and the synthetic account/balance/subscription provider. Deterministic A/D ledger reconciliation exists as an in-process function but is not yet persisted through a case API. Other listed operations remain proposed in [OpenAPI 3.1](contracts/openapi.json). Existing external Voice interfaces are implemented but have known streaming failures. [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
+**Mixed implementation status.** Resolve currently implements health/readiness, session lifecycle, a customer-scoped account read, and an in-process facade for conversation/case creation, scoped case reads and persisted A/D ledger investigations. Other listed operations remain proposed in [OpenAPI 3.1](contracts/openapi.json). Existing external Voice interfaces are implemented but have known streaming failures. [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
 
 ## Ownership and connections
 
@@ -102,7 +102,7 @@ Public confirmation uses an explicit authenticated decision. Internal Voice conf
 
 Operation states: PENDING -> RUNNING -> SUCCEEDED/FAILED/UNKNOWN; UNKNOWN -> SUCCEEDED/FAILED/REVIEW_REQUIRED. Reconcile unknown at0/2/10seconds via provider lookup/readback. Persist lease/retry state, recover after restart, never mint a new provider key. No lock spans external calls; provider writes use a separate transaction.
 
-The first forward persistence revision is `0002_domain_lifecycle` after the adopted SQL baseline. It stores explicit sandbox run status/retirement, principal and CSRF metadata, conversation language/dialogue state, leased client-turn claims with immutable input hashes and saved results, append-only action confirmations, durable idempotency request/results, review history with INTERNAL visibility, and escalation delivery state. Confirmation/operation and review/session foreign keys preserve case and sandbox scope. The runtime PostgreSQL role may append confirmations/review history but cannot update or delete them. These are schema capabilities; application authorization and lifecycle handlers are not implied by the migration.
+The first forward persistence revision is `0002_domain_lifecycle` after the adopted SQL baseline. It stores explicit sandbox run status/retirement, principal and CSRF metadata, conversation language/dialogue state, leased client-turn claims with immutable input hashes and saved results, append-only action confirmations, durable idempotency request/results, review history with INTERNAL visibility, and escalation delivery state. Revision `0003_case_investigations` adds origin-turn deduplication to cases, immutable calculations/source snapshots, completeness/conflict arrays, investigation windows and stable command-key replay. Confirmation/operation and review/session foreign keys preserve case and sandbox scope. The runtime PostgreSQL role may append confirmations/review history/investigations but cannot update or delete their records. These are schema capabilities; not all action/review lifecycle handlers exist yet.
 
 ReceiptView: id, case_id, revision, issued_at, issue, window, findings, calculations, evidence_references, missing, conflicts, actions, handoff, next_step, simulation, digest_sha256. Store append-only. Digest is SHA256 over UTF-8 JSON with sorted keys/no whitespace/integer numbers, excluding digest_sha256 itself. It is neither a signature nor proof of source truth. Internal notes are excluded from customer receipts.
 
@@ -122,14 +122,15 @@ Commit local review/audit atomically. If provider ticket exists, queue its statu
 
 Tevin exports `ConversationService.handle_turn(AuthContext, NormalizedTurn) -> TurnResult`. Text supplies expected conversation version; Voice bridge obtains it from the validated binding's conversation. NormalizedTurn includes channel, stable turn ID, input, language and optional trusted Voice presentation evidence. Browser body cannot set trusted channel/presentation fields.
 
-Harry exports ResolveFacade methods get_account/create_case/get_case/investigate/propose_action/confirm_action/prepare_escalation/get_operation/get_receipt. Each accepts AuthContext plus typed request; return types match corresponding public domain DTOs. Also provide scoped ConversationRepository (claim/load/save turn, dialogue state, active-case selection) and KnowledgeRepository (bounded lexical lookup with reviewed citation/version). Tevin owns dialogue schema; Harry owns storage/migrations.
+Harry exports ResolveFacade methods create_conversation/get_account/create_case/get_case/investigate/propose_action/confirm_action/prepare_escalation/get_operation/get_receipt. Each accepts AuthContext plus typed request; return types match corresponding public domain DTOs. The current facade implements conversation creation, origin-turn case creation, scoped case reads and persisted balance investigations. Also provide scoped ConversationRepository (claim/load/save turn, dialogue state, active-case selection) and KnowledgeRepository (bounded lexical lookup with reviewed citation/version). Tevin owns dialogue schema; Harry owns storage/migrations.
 
 | Internal method | Input after AuthContext | Result |
 | --- | --- | --- |
+| create_conversation | language | ConversationView; session scope comes only from AuthContext |
 | get_account | No account selector | AccountView |
-| create_case | conversation_id, stable originating turn_id, complaint_type | CaseView; replay scoped originating turn rather than duplicate case |
+| create_case | conversation_id, expected conversation version, stable client_turn_id, complaint_type/window/reported_facts | CaseView; replay scoped originating turn rather than duplicate case |
 | get_case | case_id | CaseView |
-| investigate | case_id, InvestigationRequest, stable command key | InvestigationResult |
+| investigate | case_id, expected case version, complaint/window, stable command key | InvestigationResult; replay returns stored revision |
 | propose_action | case_id, ProposalRequest, stable command key | ProposalView |
 | confirm_action | proposal_id, ConfirmationRequest, stable command key, optional trusted VoiceConsentEvidence | ConfirmationResult |
 | prepare_escalation | case_id, EscalationRequest, stable command key | ProposalView |

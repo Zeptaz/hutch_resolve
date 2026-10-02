@@ -16,16 +16,16 @@ Start with [context.md](context.md), the agent-maintained source of truth, and t
 
 ## Start the backend foundation
 
-The starter exposes process liveness/readiness, anonymous/demo session lifecycle, and a customer-scoped `GET /api/v1/account`. Demo logins are disabled until `DEMO_IDENTITIES_JSON` is configured with credential hashes and fixed synthetic run/account IDs. Case investigations, actions, receipts and dashboard APIs are not implemented yet. Replace the `.env.example` application secret before starting the server; use `APP_COOKIE_SECURE=true` under HTTPS.
+The starter exposes process liveness/readiness, anonymous/demo session lifecycle, and a customer-scoped `GET /api/v1/account`. An in-process facade supports conversation/case creation, scoped case reads and persisted A/D balance investigations for the conversation backend. Demo logins are disabled until `DEMO_IDENTITIES_JSON` is configured with credential hashes and fixed synthetic run/account IDs. Public conversation, action, receipt and dashboard routes are not implemented yet. Replace the `.env.example` application secret before starting the server; use `APP_COOKIE_SECURE=true` under HTTPS.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements-dev.txt
-python -m uvicorn app.main:app --app-dir backend/resolve --host 127.0.0.1 --port 8080
+python -m uvicorn backend.resolve.app.main:app --host 127.0.0.1 --port 8080
 ```
 
-The application reads `DATABASE_URL` from `.env`; it uses the separate `hutch_resolve_app` local role for PostgreSQL. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0002_domain_lifecycle`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003 without replaying CREATE TABLE statements, and revision 0002 adds application lifecycle tables/columns.
+The application reads `DATABASE_URL` from `.env`; it uses the separate `hutch_resolve_app` local role for PostgreSQL. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0003_case_investigations`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003 without replaying CREATE TABLE statements, revision 0002 adds lifecycle tables/columns, and revision 0003 adds immutable investigation records and turn-idempotent case creation.
 
 Reset accepts an optional UUID: `scripts/reset.ps1 -RunId <uuid>`. Fixture IDs are deterministically derived under that run, so repeatable inputs produce repeatable records and different runs do not collide.
 
@@ -38,7 +38,7 @@ The database volume is Docker-managed, outside the OneDrive-synced repository. `
 - `database/seed.sql`: fixture version 2 with six deterministic prepaid support cases and provider fault profiles.
 - `backend/resolve/app/`: FastAPI startup, health/readiness, error envelope, session lifecycle, auth context, and account endpoint.
 - `backend/resolve/providers/`: vendor-neutral PostgreSQL adapter and deterministic ledger reconciliation function.
-- `backend/resolve/migrations/`: Alembic migration environment, non-destructive legacy baseline adoption and the first additive domain-lifecycle migration.
+- `backend/resolve/migrations/`: Alembic environment, non-destructive baseline adoption, lifecycle schema and case-investigation persistence.
 - `scripts/`: start/stop/reset and fixture UUID generation.
 - `docs/mock-environment.md`: relationships, assumptions, failure modes and future provider contracts.
 

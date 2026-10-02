@@ -14,6 +14,7 @@ from .account_api import build_account_router
 from .auth import ResolveError, build_auth_router
 from .config import Settings
 from .database import Database
+from backend.resolve.services.facade import ResolveFacade
 
 logger = logging.getLogger("hutch_resolve")
 
@@ -29,6 +30,7 @@ def create_app(
     settings: Settings | None = None,
     auth_store=None,
     account_provider=None,
+    resolve_facade: ResolveFacade | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -52,6 +54,9 @@ def create_app(
         application.state.settings = active_settings
         application.state.auth_store = auth_store
         application.state.account_provider = account_provider
+        application.state.resolve_facade = resolve_facade or (
+            ResolveFacade(active_database.engine) if hasattr(active_database, "engine") else None
+        )
         try:
             yield
         finally:

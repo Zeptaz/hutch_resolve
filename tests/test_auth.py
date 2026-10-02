@@ -6,8 +6,8 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 
-from app.config import DemoIdentity, Settings
-from app.main import create_app
+from backend.resolve.app.config import DemoIdentity, Settings
+from backend.resolve.app.main import create_app
 
 ORIGIN = "http://localhost:5173"
 RUN_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -32,7 +32,7 @@ class MemoryAuthStore:
         replaced = values.pop("replaced_session", None)
         if replaced is not None:
             if replaced in self.revoked:
-                from app.auth_store import SessionRotationConflict
+                from backend.resolve.app.auth_store import SessionRotationConflict
                 raise SessionRotationConflict
             self.revoked.add(replaced)
         self.sessions[values["credential_hash"]] = {
