@@ -330,10 +330,13 @@ class ConfirmationView(Strict):
     proposal_id: UUID
     proposal_hash: Sha256Hex
     decision: Decision
-    channel: Literal["TEXT", "VOICE"]
+    channel: Literal["TEXT", "VOICE", "AGENT"]
     client_turn_id: UUID
     created_at: AwareDatetime
     operation_id: UUID | None
+    # Contract update on ResolveDev (48c35ad): acceptance reports only the persisted PENDING state.
+    operation_status: Literal["PENDING"] | None
+    simulation: Literal[True]
 
 
 class ConfirmationResult(Strict):

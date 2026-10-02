@@ -328,7 +328,7 @@ class FakeResolveFacade:
 
         return AccountView.model_validate(example("account")).model_copy(update={"id": ctx.account_id})
 
-    async def create_case(self, ctx, conversation_id, turn_id, complaint_type: ComplaintType):
+    async def create_case(self, ctx, conversation_id, turn_id, complaint_type: ComplaintType, *, expected_conversation_version: int):
         self._maybe_fail("create_case")
         if ctx.role is not Role.CUSTOMER:
             raise ResolveError("ROLE_FORBIDDEN")
@@ -474,6 +474,8 @@ class FakeResolveFacade:
                 client_turn_id=request.client_turn_id,
                 created_at=now,
                 operation_id=operation.id if operation else None,
+                operation_status="PENDING" if operation else None,
+                simulation=True,
             ),
             operation=operation,
         )

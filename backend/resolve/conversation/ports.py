@@ -47,9 +47,18 @@ class ResolveFacade(Protocol):
     async def get_account(self, ctx: AuthContext) -> AccountView: ...
 
     async def create_case(
-        self, ctx: AuthContext, conversation_id: UUID, turn_id: UUID, complaint_type: ComplaintType
+        self,
+        ctx: AuthContext,
+        conversation_id: UUID,
+        turn_id: UUID,
+        complaint_type: ComplaintType,
+        *,
+        expected_conversation_version: int,
     ) -> CaseView:
-        """Replaying the same originating turn returns the same case."""
+        """Replaying the same originating turn returns the same case.
+
+        expected_conversation_version mirrors Harry's implementation (ResolveDev 48c35ad), which also
+        advances the conversation version; see the open question in docs/plans/tevin.md."""
         ...
 
     async def get_case(self, ctx: AuthContext, case_id: UUID) -> CaseView: ...

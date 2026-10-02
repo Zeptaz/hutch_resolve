@@ -11,6 +11,7 @@
 | `service.py` | Claim → route → complete lifecycle; structured paths and free-text routing. |
 | `extraction.py` | T-02 model output schema, prompt, budgeted `Extractor` (6 s total, one repair), and code-side time-window resolution. |
 | `model.py` | `ModelClient` boundary and `GeminiModelClient` (google-genai, JSON-schema output, SDK retries off). |
+| `resolve_adapter.py` | Adapts Harry's sync, dict-returning `backend.resolve.services.facade.ResolveFacade` to `ports.ResolveFacade`: worker threads, context/error conversion, DTO validation of every result. No business logic. |
 | `try_extract.py` | Manual live check: `python -m resolve.conversation.try_extract` with `GEMINI_API_KEY`/`GEMINI_TEXT_MODEL`. |
 | `templates.py` | Deterministic replies. English is authoritative; Sinhala/Tamil load from `locales/*.json` only when marked `REVIEWED`. |
 | `locales/` | Machine-drafted, **unreviewed** Sinhala and Tamil wording (inactive). See `LANGUAGE_REVIEW.md`. |
@@ -54,6 +55,16 @@ Pending question codes for the UI: `CHOOSE_COMPLAINT_TYPE`, `COMPLAINT_DETAILS`,
 ## Fingerprint rule
 
 The fingerprint covers channel, language, input and Voice evidence, but **not** `expected_version`. The version is concurrency control: the Voice bridge reads it from the binding at receipt time, so including it would turn a legitimate same-turn retry into a false `IDEMPOTENCY_CONFLICT`.
+
+## Integration with Harry's facade
+
+`ResolveFacadeAdapter(ResolveFacade(app_engine, provider_engine=sandbox_engine))` is what the conversation service receives in the real app. Known deviations it absorbs or exposes are listed in `docs/plans/tevin.md` ("Integration findings").
+
+```bash
+PYTHON=~/.venvs/hutch/bin/python sh tests/conversation/run_integration.sh
+```
+
+This starts a **throwaway** PostgreSQL on port 55433 (never the shared container), applies Harry's migrations, runs `tests/conversation/test_resolve_integration.py` against his real facade, and removes the container. Turn storage is still the in-memory fake until Harry's repository exists.
 
 ## Tests
 

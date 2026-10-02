@@ -2,29 +2,48 @@
 
 Read [context.md](../../context.md) and [shared contracts](../contracts.md). Update both this plan and context after meaningful progress; record tests and unresolved work. Run as a module inside Harry's Resolve application, not a separate service.
 
-## Current status (2026-10-02)
+## Current status (2026-10-02, afternoon)
 
-**Built and pushed on `HutchChat` (`backend/resolve/conversation/`, `tests/conversation/`):** the conversation module for T-01 to T-04 against contract fakes. 188 unit tests pass. Live Gemini (`gemini-3.5-flash-lite`) scored Singlish 10/10 and Sinhala script 5/5 (small sample). A local, uncommitted bridge ran Jayith's live chat against the module: Singlish complaint, typed "yes" refused, Accept and Decline worked.
+**Built and pushed on `HutchChat`:** the conversation module for T-01 to T-04 against contract fakes, browser-checked through a local bridge.
 
-**Not yet integrated with Harry's backend.** No task is checked because acceptance needs the real facade and storage. `ResolveDev` (as of `1fb6472`) provides auth/sessions, account read, A/D reconciliation, persisted investigations, case APIs and a sync, dict-returning `ResolveFacade` with `create_conversation`, `get_account`, `get_case`, `create_case`, `investigate`. The `turn_claims` table exists, but no repository code uses it yet.
+**New on local branch `tevin/resolve-integration`** (= `HutchChat` + Harry's `ResolveDev` at `a17fe64`, not pushed yet): `resolve_adapter.py` connects the module to **Harry's real facade**. 5 integration tests pass against his code on a throwaway, fully migrated PostgreSQL (`tests/conversation/run_integration.sh`). Real rows were written:
+- Case A: 42000/42000/0 from Harry's ledger.
+- Case D: CONFLICTING 42000/35000/-7000.
+- Accept created a PENDING operation.
 
-**Blockers and asks for Harry**, in priority order:
+Combined suite: 203 passed, 2 strict xfails for Harry's stale examples.
 
-1. **Turn storage:** `claim_turn` / `complete_turn` / `release_turn` on `resolve.turn_claims`, plus persisting `DialogueState`. Who writes it: Harry, or Tevin on Harry's table?
-2. **Facade shape:** Harry's facade is sync and returns dicts; `ports.py` expects async typed contract models. Proposal: Tevin writes an adapter in the conversation module.
-3. **Conversation routes:** the contract assigns `/conversations`, `/conversations/{id}` and `/messages` to Tevin. Proposal: add them to Harry's app using his `AuthContext`/session checks; the local bridge is the prototype.
-4. **Small dependencies:** a run simulation-clock reader, knowledge-card search, a `ModelTelemetry` store into `resolve.model_calls`.
-5. **Dates:** H-04 (proposals, confirmations, operations, receipts) gates T-03; H-06 (B/C/E/F) gates T-04.
-6. **Decisions:** guest-to-customer upgrade in chat (also needed by Jayith); import root `backend.resolve` vs `resolve`.
+**Live Gemini, full eval set (41 cases), `gemini-3.5-flash-lite`:** Singlish 10/10, Sinhala script 5/5, English 12/12, Tanglish 5/5, Tamil script 4/4, mixed 2/2, adversarial 3/3; 0 fallbacks; median about 1.6 s, max 3.4 s. The set and its expected answers are author-drafted and still need a fluent reviewer.
 
-**Next steps:**
+**No task checked yet:** turn storage is still the in-memory fake, and offers, Voice and B/C/E/F depend on Harry.
 
-1. Agree items 1 to 3 with Harry. This closes T-01's open items.
-2. Adapter to Harry's real facade, then run A/D through it (T-02 integration). Can start now on a separate branch.
-3. Once turn storage exists: real conversation routes in Harry's app, A/D end to end in Jayith's live chat; check T-02.
-4. Once H-04 lands: real Accept/Decline, handoff and receipts; check T-03.
-5. In parallel: enable Gemini billing before the demo (free tier: 20 requests/day for `gemini-3.8-flash`, too low to record) and finish the 41-case eval (Tamil, English, mixed, adversarial); find a fluent si/ta reviewer for `locales/` and the eval answers; rotate the Gemini key (it appeared in terminal history).
-6. After H-06: real B/C/E/F. Then REL-02 technical PDF and AI disclosure from measured runs.
+### Blockers and asks for Harry (priority order)
+
+1. **Turn storage:** `claim_turn` / `complete_turn` / `release_turn` on `resolve.turn_claims`, plus persisting `DialogueState`. Who writes it?
+2. **Conversation routes:** the contract assigns `/conversations`, `/conversations/{id}` and `/messages` to Tevin. OK to add them to Harry's app with his `AuthContext`/session checks? The local bridge is the prototype.
+3. **Adapter OK?** `resolve_adapter.py` keeps Harry's facade as is.
+4. **Simulation clock reader, knowledge-card search, `ModelTelemetry` store** (`resolve.model_calls`).
+5. **H-06 date** (DATA_DEPLETION/CONNECTIVITY are "not implemented yet"); **Voice consent gate** in `confirm_action` (H-07).
+6. **Decisions:** guest-to-customer upgrade (Jayith needs it); import root `backend.resolve` vs `resolve`.
+
+### Integration findings for Harry (from running against `ResolveDev` `a17fe64`)
+
+1. **Double version bump:** `create_case` advances `conversations.version`, while turn storage must advance it exactly once per turn. Tests work around it by creating the case on the first turn.
+2. **Corrections blocked:** `investigate` rejects a different window than the one first saved on the case (STALE_VERSION). The contract says corrections request a new revision.
+3. **Error codes differ from the contract:** expired/changed proposal returns STALE_VERSION (contract: PROPOSAL_EXPIRED/PROPOSAL_INVALIDATED); new code ACTION_ALREADY_CONFIRMED. The adapter maps confirm STALE_VERSION to PROPOSAL_INVALIDATED; unknown codes fall back by HTTP status.
+4. **Orphan case:** an unsupported complaint (DATA_DEPLETION) creates a case, then `investigate` refuses it. Reject earlier, or document.
+5. **Stale examples:** `examples.json` `accepted_202`/`declined_200` lack the new required `ConfirmationView.operation_status`/`simulation` (Jayith's mocks use them). Strict xfail in the parity test.
+6. **No `prepare_escalation` yet:** the adapter requests the review proposal through `propose_action`, so the escalation reason is not stored.
+7. **Offer differs from the contract example:** for a balance complaint only CREATE_REVIEW_TICKET is eligible (DEACTIVATE_VAS only under VAS_DISPUTE), while the contract example offers VAS deactivation for A's balance case. Confirm intended.
+8. **`database/00-bootstrap.sh` is 100644 in Git**, so the postgres entrypoint fails on macOS ("bad interpreter: Permission denied"); it works only with a local chmod +x. Harry's H-01 already lists checkout rules for the shell bootstrap.
+
+### Next steps
+
+1. Push `tevin/resolve-integration` and send Harry the asks and findings above.
+2. Once turn storage exists: real conversation routes in Harry's app, A/D end to end in Jayith's live chat; check T-02.
+3. Once Harry's operation runner/receipts are wired into the routes: real Accept/Decline outcomes and receipts; check T-03.
+4. User actions: enable Gemini billing before the demo; rotate the Gemini key; find a fluent si/ta reviewer.
+5. After H-06: real B/C/E/F; then REL-02 technical PDF and AI disclosure (measured runs above).
 
 ## Boundary and interfaces
 
@@ -85,3 +104,5 @@ Acceptance: a full A journey produces the same case/action/receipt through text 
 | 2026-10-02 | T-04 live extraction (first measurement) | **Live, small sample.** `try_extract --eval --rpm 4 --only singlish,sinhala_script` with `gemini-3.5-flash-lite` at 2026-10-02T08:21Z: Singlish 10/10, Sinhala script 5/5, 0 fallbacks, median 1519 ms, max 3072 ms. Earlier full run with `gemini-3.8-flash` was unusable as a measurement: free-tier quota (5/min, 20/day) refused 33 calls and 6 exceeded the 6 s budget; only 2/41 were scored (both correct). Fixed: Gemini rejects request deadlines under 10 s, so the HTTP backstop is now 10 s while the Extractor still cancels at 6 s. Default model switched to `gemini-3.5-flash-lite`. | 15 cases only; expected answers not yet checked by a fluent speaker; Tamil/English/mixed/adversarial not re-run (quota). Free-tier quota is too low for a demo: enable billing or confirm limits before recording. |
 | 2026-10-02 | Browser check through local bridge | **Browser, local only.** Uncommitted bridge (fake Resolve, real `gemini-3.5-flash-lite`) served Jayith's live-mode chat: Singlish balance complaint understood and answered with A's calculation/finding cards and VAS offer with live expiry; typed `ow karanna` refused; Accept showed PENDING then simulated SUCCEEDED; Decline recorded with no change. Found and fixed: raw JSON shown as the customer's own message for button/form turns (now readable, matching the UI mock), and replies naming Accept/Decline buttons the UI labels "Yes, go ahead"/"No, thanks". Unit: 188 passed. Pushed `c9bc7d7`. | Bridge treats every chat as demo line A (guest upgrade undecided), keeps state in memory, simulates operation success; not Harry's API. |
 | 2026-10-02 | Integration check against `ResolveDev` `1fb6472` | Read-only review of Harry's branch: facade methods `create_conversation`, `get_account`, `get_case`, `create_case`, `investigate` (sync, dict results); `turn_claims` table in migration 0002 without repository code; no proposals/confirmations, knowledge search, telemetry store or simulation-clock reader yet. | See "Blockers and asks for Harry" above. |
+| 2026-10-02 | T-04 live extraction (full set) | **Live.** `try_extract --eval --rpm 4` with `gemini-3.5-flash-lite` at 2026-10-02T09:41Z for the remaining 26 cases: English 12/12, Tanglish 5/5, Tamil script 4/4, mixed 2/2, adversarial 3/3, 0 fallbacks, median 1610 ms, max 3355 ms. With the 08:21Z run: 41/41. | Author-drafted set and answers; fluent review pending; one model, one run each. |
+| 2026-10-02 | T-02/T-03 integration against Harry's facade (local branch `tevin/resolve-integration`) | **Integration, isolated DB.** Merged `ResolveDev` `a17fe64`; `ConfirmationView` mirror updated to Harry's contract change (`operation_status`, `simulation`, channel AGENT). Added `resolve_adapter.py` and `test_resolve_integration.py` + `run_integration.sh` (throwaway postgres:18 on 55433, Alembic to `0004_action_proposals`). 5 passed; DB rows verified: 5 sessions via Harry's AuthStore, 5 conversations, 5 cases, 4 investigations with Tevin command keys, 3 proposals, 1 ACCEPT confirmation + PENDING CREATE_REVIEW_TICKET operation. Combined suite 203 passed + 2 strict xfails. | Turn storage still in memory; findings 1-8 above for Harry; Voice confirmation refused by the adapter until Harry adds the consent gate. |

@@ -47,9 +47,19 @@ def test_enums_match_openapi(name: str) -> None:
     assert {member.value for member in getattr(dto, name)} == set(SCHEMAS[name]["enum"])
 
 
+# Contract gap on ResolveDev 48c35ad: ConfirmationView gained required operation_status/simulation,
+# but these examples were not updated. Strict xfail: passes again (and must be removed) once fixed.
+STALE_EXAMPLES = {"accepted_202", "declined_200"}
+
+
 @pytest.mark.parametrize(
     "key",
-    sorted(k for k, v in EXAMPLES.items() if v["schema"] in MIRRORS),
+    [
+        pytest.param(k, marks=pytest.mark.xfail(strict=True, reason="examples.json not updated for ConfirmationView (Harry)"))
+        if k in STALE_EXAMPLES
+        else k
+        for k in sorted(k for k, v in EXAMPLES.items() if v["schema"] in MIRRORS)
+    ],
 )
 def test_examples_parse_and_round_trip(key: str) -> None:
     entry = EXAMPLES[key]

@@ -491,7 +491,9 @@ class ConversationService:
     ) -> Step:
         conv_id, turn_id = turn.conversation_id, turn.turn_id
         # Each complaint gets its own case; never silently attach to the active one.
-        case = await self._facade.create_case(ctx, conv_id, turn_id, complaint_type)
+        case = await self._facade.create_case(
+            ctx, conv_id, turn_id, complaint_type, expected_conversation_version=turn.expected_version
+        )
         investigation = await self._facade.investigate(
             ctx,
             case.id,
