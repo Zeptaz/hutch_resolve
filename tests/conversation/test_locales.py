@@ -28,7 +28,8 @@ def test_draft_has_same_keys_and_placeholders_as_english(language: Language) -> 
         assert set(sections[section]) == expected, (language, section)
         for key, value in sections[section].items():
             assert placeholders(value) == placeholders(english[key]), (language, section, key)
-            assert value.strip() and value != english[key]
+            placeholder_only = english[key].strip("{}") in placeholders(english[key])  # e.g. "{complaint}"
+            assert value.strip() and (value != english[key] or placeholder_only)
 
 
 @pytest.mark.parametrize("language", LOCALES)

@@ -89,7 +89,7 @@ def test_typed_clear_yes_in_text_chat_still_needs_the_button(hm: Harness) -> Non
     conv = hm.open(ctx)
     hm.send(ctx, hm.turn(conv, details()))
     result = hm.send(ctx, hm.turn(conv, text("ow")))
-    assert "Accept or Decline button" in result.reply_text
+    assert "buttons on the offer" in result.reply_text
     assert hm.facade.calls["confirm_action"] == 0
 
 

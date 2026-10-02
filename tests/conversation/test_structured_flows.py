@@ -238,3 +238,14 @@ def test_unexpected_facade_errors_propagate_for_api_layer(h) -> None:
         assert err.code == "STALE_VERSION" and err.http_status == 409
     else:
         raise AssertionError("expected STALE_VERSION")
+
+
+def test_history_shows_readable_text_for_buttons_and_forms(h) -> None:
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    h.send(ctx, h.turn(conv, {"type": "category_selection", "complaint_type": "BALANCE_RECHARGE"}))
+    offered = h.send(ctx, h.turn(conv, details()))
+    h.send(ctx, h.turn(conv, decision(confirmation_card(offered), "ACCEPT")))
+    user_bodies = [m.body for m in h.repo.conversations[conv].messages if m.speaker == "USER"]
+    assert user_bodies == ["Balance or recharge", "Balance or recharge: details sent", "Yes, go ahead."]
+    assert not any("{" in body or "proposal" in body for body in user_bodies)

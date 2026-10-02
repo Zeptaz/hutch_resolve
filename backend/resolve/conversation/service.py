@@ -13,7 +13,6 @@ the structured forms remain fully usable.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -156,7 +155,7 @@ class ConversationService:
             # Same-id retry re-claims; deterministic command keys stop Resolve repeating work.
             await self._conversations.release_turn(ctx, claim)
             raise
-        return await self._conversations.complete_turn(ctx, claim, _user_body(turn), draft, state)
+        return await self._conversations.complete_turn(ctx, claim, _user_body(turn, state.language), draft, state)
 
     async def _route(self, ctx: AuthContext, turn: NormalizedTurn, state: DialogueState) -> Step:
         inp = turn.input
@@ -766,7 +765,15 @@ def _proposal_ref(proposal: ProposalView, turn: NormalizedTurn) -> PendingPropos
     )
 
 
-def _user_body(turn: NormalizedTurn) -> str:
-    if isinstance(turn.input, TextInput):
-        return turn.input.text
-    return json.dumps(turn.input.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+def _user_body(turn: NormalizedTurn, lang: Language) -> str:
+    """Readable stand-in for button/form turns; the structured input itself is in the fingerprint."""
+    inp = turn.input
+    if isinstance(inp, TextInput):
+        return inp.text
+    if isinstance(inp, CategoryInput):
+        return t.text("user_category", lang, complaint=t.complaint_label(inp.complaint_type, lang).capitalize())
+    if isinstance(inp, DetailsInput):
+        return t.text("user_details", lang, complaint=t.complaint_label(inp.complaint_type, lang).capitalize())
+    if isinstance(inp, DecisionInput):
+        return t.text("user_accept" if inp.decision is Decision.ACCEPT else "user_decline", lang)
+    return t.text("user_case_selection", lang)

@@ -26,7 +26,7 @@ _EN: dict[str, str] = {
     "no_findings": "I checked the available records but found nothing to report for that time window.",
     "offer_action": "I can {action} for {target}. What this means: {consequences} Do you want me to go ahead?",
     "multiple_actions": "There is more than one thing I can do here: {options}. Tell me which one you want.",
-    "confirm_prompt": "Please use the Accept or Decline button to answer.",
+    "confirm_prompt": "Please answer using the buttons on the offer above.",
     "confirm_prompt_voice": "Please say clearly whether you want me to go ahead: yes or no.",
     "declined": "Okay, I won't make that change. Nothing on your account was changed.",
     "accepted": "Your request is recorded. {status}",
@@ -59,6 +59,12 @@ _EN: dict[str, str] = {
     "accepted_review": "Your case is queued for review (request ID {reference}). {status} I'll only give you a ticket number once one has actually been issued.",
     "ticket_issued": "Ticket number: {ticket}.",
     "synthetic_policy": "This is a demo policy for the simulation, not an official HUTCH rule:",
+    # Shown as the customer's own message when they use a button or form instead of typing.
+    "user_category": "{complaint}",
+    "user_details": "{complaint}: details sent",
+    "user_case_selection": "Switch to another case",
+    "user_accept": "Yes, go ahead.",
+    "user_decline": "No, don't make that change.",
 }
 
 _ACTION_LABELS_EN: dict[ActionType, str] = {
