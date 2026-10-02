@@ -203,14 +203,14 @@ export function ReviewPanel({ detail, onChanged }: { detail: AgentCaseDetail; on
           )}
 
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`note-${c.id}`} className="flex items-center justify-between text-xs font-semibold">
-              <span>
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <label htmlFor={`note-${c.id}`} className="font-semibold">
                 {mode === 'reopen' ? 'Reason for reopening' : mode === 'close' ? 'Closing note' : 'Internal note'}
-              </span>
-              <span className="inline-flex items-center gap-1 font-normal text-muted-foreground">
+              </label>
+              <span id={`note-private-${c.id}`} className="inline-flex items-center gap-1 text-muted-foreground">
                 <Lock className="size-3" aria-hidden /> Never shown to the customer
               </span>
-            </label>
+            </div>
             <Textarea
               id={`note-${c.id}`}
               ref={textRef}
@@ -232,7 +232,7 @@ export function ReviewPanel({ detail, onChanged }: { detail: AgentCaseDetail; on
                     : 'What you checked, what you found, what is next.'
               }
               className="resize-y bg-card"
-              aria-describedby={`note-help-${c.id}`}
+              aria-describedby={`note-private-${c.id} note-help-${c.id}`}
             />
             <p id={`note-help-${c.id}`} className="flex justify-between text-[11px] text-muted-foreground">
               <span>{problem && (draft.text || draft.disposition || mode !== 'note') ? problem : 'Ctrl/⌘ + Enter to send'}</span>

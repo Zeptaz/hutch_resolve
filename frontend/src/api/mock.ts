@@ -4,7 +4,7 @@
 import type { RawResponse, Realm, RequestOptions } from './client'
 import { handleCustomer } from './mock-customer'
 import { emptyState, example, fail, isExpired, ok, type MockState } from './mock-util'
-import type { AgentCaseDetail, AgentSessionView, CaseQueue, CaseQueueRow, ReviewNote, ReviewRequest, ReviewResult, ReviewStatus, SessionView } from './types'
+import type { AgentCaseDetail, AgentSessionView, AuditEvent, CaseQueue, CaseQueueRow, ReviewNote, ReviewRequest, ReviewResult, ReviewStatus, SessionView } from './types'
 
 const SESSION_TTL_MS = 30 * 60 * 1000
 const STORAGE_KEY = 'hutch-resolve.mock-state.v2'
@@ -49,7 +49,7 @@ const queueD = example<CaseQueue>('queue').items[0]
 
 // Review changes made in mock mode (memory only; a reload starts over). Mirrors the contract's
 // version check and allowed transitions so the conflict and validation UI can be exercised.
-const reviews: Record<string, { status: ReviewStatus; version: number; notes: ReviewNote[]; updated_at: string }> = {}
+const reviews: Record<string, { status: ReviewStatus; version: number; notes: ReviewNote[]; events: AuditEvent[]; updated_at: string }> = {}
 
 function withReview<T extends { case_id?: string; review_status: ReviewStatus; version: number; updated_at: string }>(id: string, row: T): T {
   const r = reviews[id]
@@ -57,7 +57,7 @@ function withReview<T extends { case_id?: string; review_status: ReviewStatus; v
 }
 
 function patchReview(id: string, body: ReviewRequest, current: { review_status: ReviewStatus; version: number }): RawResponse {
-  const base = reviews[id] ?? { status: current.review_status, version: current.version, notes: [], updated_at: '' }
+  const base = reviews[id] ?? { status: current.review_status, version: current.version, notes: [], events: [], updated_at: '' }
   if (body.expected_version !== base.version) return fail(409, 'STALE_VERSION', 'Case changed; reload before updating review.')
   const to = body.review_status ?? base.status
   const allowed: Record<ReviewStatus, ReviewStatus[]> = { NEW: ['NEW', 'IN_REVIEW', 'CLOSED'], IN_REVIEW: ['IN_REVIEW', 'CLOSED'], CLOSED: ['CLOSED', 'IN_REVIEW'] }
@@ -67,7 +67,15 @@ function patchReview(id: string, body: ReviewRequest, current: { review_status: 
   const now = new Date().toISOString()
   const text = body.note ?? body.reopen_reason
   const note: ReviewNote | null = text ? { id: crypto.randomUUID(), actor_id: state.agent?.principal_id ?? 'agent', note: text, created_at: now, visibility: 'INTERNAL' } : null
-  reviews[id] = { status: to, version: base.version + 1, notes: note ? [...base.notes, note] : base.notes, updated_at: now }
+  // Same audit event Resolve writes, so the panel can show the closing outcome.
+  const event: AuditEvent = {
+    id: crypto.randomUUID(),
+    event_type: 'REVIEW_UPDATED',
+    actor_id: state.agent?.principal_id ?? 'agent',
+    created_at: now,
+    details: { from: base.status, to, version: base.version + 1, disposition: body.disposition ?? null },
+  }
+  reviews[id] = { status: to, version: base.version + 1, notes: note ? [...base.notes, note] : base.notes, events: [...base.events, event], updated_at: now }
   return ok({ case_id: id, version: base.version + 1, review_status: to, disposition: body.disposition ?? null, note, review_sync_state: 'NOT_APPLICABLE', updated_at: now } satisfies ReviewResult)
 }
 
@@ -91,6 +99,7 @@ function detailFor(id: string): AgentCaseDetail | null {
   if (!d || !r) return d
   d.case = { ...d.case, review_status: r.status, version: r.version, updated_at: r.updated_at }
   d.review_notes = [...d.review_notes, ...r.notes]
+  d.audit_events = [...d.audit_events, ...r.events]
   return d
 }
 
@@ -221,6 +230,13 @@ export const mockControls = {
     state.customer = { ...example<SessionView>('customer_session'), expires_at: freshExpiry() }
     clearCustomerData()
     save()
+  },
+  /** Another agent adds a note to this case, bumping its version (exercises the 409 / draft-keeping path). */
+  reviewElsewhere(caseId: string, note = 'Another agent added a note.') {
+    const d = detailFor(caseId)
+    if (!d) return
+    const r = patchReview(caseId, { expected_version: d.case.version, note }, d.case)
+    if (r.status !== 200) throw new Error(`mock review failed: ${r.status}`)
   },
   setOutage(on: boolean) {
     state.outage = on
