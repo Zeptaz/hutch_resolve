@@ -16,7 +16,9 @@ from pathlib import Path
 from .dto import ActionType, ComplaintType, DeliveryState, Handoff, Language, OperationStatus
 
 _EN: dict[str, str] = {
-    "choose_complaint": "What would you like help with? Choose the closest option: balance or recharge, data running out, no connection, or a service you did not expect.",
+    "choose_complaint": "What's the problem? Tell me in your own words, like \"my reload didn't arrive\" or \"my data finished too fast\", or pick an option below.",
+    "describe_complaint": "Okay, your {complaint}. Tell me a bit more: when did it happen, and was there an amount? If you're not sure, just say \"today\".",
+    "anything_else": "Is there anything else I can help you with? Tell me, or pick an option below.",
     "login_required": "To look at your account, please sign in first. I can still answer general questions without signing in.",
     "complaint_details": "When did this happen? Please give the start and end of the time window (up to 30 days) and any amount you noticed.",
     "invalid_window_order": "The end of the time window must be after the start. Please check the dates.",
@@ -24,8 +26,8 @@ _EN: dict[str, str] = {
     "evidence_partial": "Some records I need are not available yet ({missing}), so I can't confirm the full picture.",
     "evidence_conflicting": "The records don't agree with each other, so I can't give a final answer or change your account. A person needs to review this.",
     "no_findings": "I checked the available records but found nothing to report for that time window.",
-    "offer_action": "I can {action} for {target}. What this means: {consequences} Do you want me to go ahead?",
-    "multiple_actions": "There is more than one thing I can do here: {options}. Tell me which one you want.",
+    "offer_action": "I can {action} for {target}. {consequences} Shall I go ahead?",
+    "multiple_actions": "I can help in more than one way here: {options}. Which would you like?",
     "confirm_prompt": "Please answer using the buttons on the offer above.",
     "confirm_prompt_voice": "Please say clearly whether you want me to go ahead: yes or no.",
     "declined": "Okay, I won't make that change. Nothing on your account was changed.",
@@ -42,10 +44,9 @@ _EN: dict[str, str] = {
     "clarify_target": "Which service or package do you mean?",
     "clarify_negation": "Just to be sure: did you subscribe to it or recharge yourself, or not?",
     # Restates only what the customer reported (type, amount); never model-written text.
-    "ack_complaint": "You told me about a problem with your {complaint}.",
-    "ack_complaint_amount": "You told me about a problem with your {complaint} and mentioned {amount}.",
-    "checked_window": "I checked {window}.",
-    "checked_default_window": "You didn't mention a time, so I checked {window}.",
+    "ack_amount": "You mentioned {amount}.",
+    "checked_window": "I looked at your {complaint} records for {window}.",
+    "checked_default_window": "You didn't say when, so I looked at your {complaint} records for {window}.",
     "rechecked": "I re-checked with the corrected details ({window}).",
     "offer_still_open": "My earlier offer is still open.",
     "no_pending_action": "There's nothing waiting for your confirmation right now.",

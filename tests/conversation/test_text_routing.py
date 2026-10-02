@@ -20,7 +20,7 @@ def test_singlish_complaint_without_time_checks_today_and_says_so(hm: Harness) -
     result = hm.send(ctx, hm.turn(conv, text("mage balance eka adu wela"), language="si"))
 
     assert result.reply_text.startswith(
-        "You told me about a problem with your balance or recharge. You didn't mention a time, so I checked 2 Oct, 00:00–12:00."
+        "You didn't say when, so I looked at your balance or recharge records for 2 Oct, 00:00–12:00."
     )
     assert "reconcile to LKR 420" in result.reply_text
     case_id, request = hm.facade.investigation_requests[0]
@@ -42,7 +42,7 @@ def test_reported_amount_and_time_are_passed_as_customer_facts(hm: Harness) -> N
     assert request.reported_facts.amount_minor == 50000
     assert request.window_start.isoformat() == "2026-09-30T18:30:00+00:00"
     assert result.reply_text.startswith(
-        "You told me about a problem with your balance or recharge and mentioned LKR 500.00. I checked 1 Oct, 00:00–24:00."
+        "I looked at your balance or recharge records for 1 Oct, 00:00–24:00. You mentioned LKR 500.00."
     )
 
 
@@ -74,7 +74,7 @@ def test_each_clarification_is_asked_at_most_once(hm: Harness) -> None:
     conv = hm.open(ctx)
     assert hm.send(ctx, hm.turn(conv, text("data finished last time"))).pending_question.code == "CLARIFY_TIME_WINDOW"
     result = hm.send(ctx, hm.turn(conv, text("not sure")))
-    assert "You didn't mention a time" in result.reply_text  # proceeds with the stated default
+    assert result.reply_text.startswith("You didn't say when")  # proceeds with the stated default
     assert hm.facade.calls["investigate"] == 1
 
 
@@ -94,7 +94,9 @@ def test_unknown_complaint_type_offers_category_and_keeps_facts(hm: Harness) -> 
     result = hm.send(ctx, hm.turn(conv, text("something is wrong, I paid 300")))
     assert result.pending_question.code == "CHOOSE_COMPLAINT_TYPE"
     picked = hm.send(ctx, hm.turn(conv, {"type": "category_selection", "complaint_type": "BALANCE_RECHARGE"}))
-    assert picked.pending_question.code == "COMPLAINT_DETAILS"
+    # With a model, a chip leads to a plain-language question rather than a form.
+    assert picked.pending_question.code == "DESCRIBE_COMPLAINT"
+    assert picked.pending_question.allowed_input_types == ["text"]
     assert hm.state(conv).candidate.reported_facts.amount_minor == 30000
 
 
@@ -257,3 +259,34 @@ def test_replayed_text_turn_does_not_call_model_again(hm: Harness) -> None:
     first = hm.send(ctx, turn)
     assert hm.send(ctx, turn) == first
     assert len(hm.model.prompts) == 1
+
+
+def test_chip_then_plain_answer_investigates(hm: Harness) -> None:
+    hm.model.on("it happened today, around 500", extraction(intent="OTHER", time={"kind": "TODAY"}, amount_lkr=500))
+    ctx = customer(ACCOUNT_A)
+    conv = hm.open(ctx)
+    hm.send(ctx, hm.turn(conv, {"type": "category_selection", "complaint_type": "BALANCE_RECHARGE"}))
+    result = hm.send(ctx, hm.turn(conv, text("it happened today, around 500")))
+    assert result.case_id is not None and "You mentioned LKR 500.00." in result.reply_text
+    _, request = hm.facade.investigation_requests[0]
+    assert request.complaint_type == "BALANCE_RECHARGE" and request.reported_facts.amount_minor == 50000
+
+
+def test_thanks_after_a_case_offers_more_help(hm: Harness) -> None:
+    hm.model.on("thanks", extraction(intent="OTHER"))
+    ctx = customer(ACCOUNT_D)
+    conv = hm.open(ctx)
+    offered = hm.send(ctx, hm.turn(conv, details()))
+    card = next(c for c in offered.cards if c.type == "confirmation").data
+    hm.send(ctx, hm.turn(conv, {"type": "action_decision", "proposal_id": str(card.id), "proposal_hash": card.proposal_hash, "decision": "DECLINE"}))
+    result = hm.send(ctx, hm.turn(conv, text("thanks")))
+    assert result.reply_text.startswith("Is there anything else")
+    assert result.pending_question.allowed_input_types == ["category_selection", "text"]
+
+
+def test_opening_question_offers_chips_and_free_text() -> None:
+    from resolve.conversation import opening_question
+
+    question = opening_question("en")
+    assert question.code == "CHOOSE_COMPLAINT_TYPE"
+    assert question.allowed_input_types == ["category_selection", "text"]

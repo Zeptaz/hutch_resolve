@@ -15,7 +15,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from .dto import ActionType, ComplaintType, Language, PendingQuestion, ReportedFacts, Sha256Hex
-from .extraction import Ambiguity
+from .extraction import Ambiguity, Script
 
 DIALOGUE_STATE_SCHEMA_VERSION = 1
 
@@ -67,6 +67,8 @@ class DialogueState(BaseModel):
 
     schema_version: Annotated[int, Field(ge=1)] = DIALOGUE_STATE_SCHEMA_VERSION
     language: Language = Language.EN
+    # Set from the customer's own messages (model-detected); then the UI language hint is ignored.
+    script: Script | None = None
     active_case_id: UUID | None = None
     pending_question: PendingQuestion | None = None
     candidate: Candidate | None = None

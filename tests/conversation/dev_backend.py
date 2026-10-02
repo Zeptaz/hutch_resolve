@@ -14,8 +14,11 @@ hybrid  Harry's real ResolveFacade (adapter) for balance and VAS complaints, off
         RESOLVE_DEV_DATABASE_URL / RESOLVE_DEV_SANDBOX_URL (use a throwaway one).
 real    Not available until Harry ships turn storage and the conversation routes.
 
-Pick a demo line by opening  http://localhost:5174/api/v1/dev  (through the frontend proxy).
-Limits: no real auth/CSRF; turn storage is in memory; restarting forgets everything.
+Just open the chat: in dummy mode you are one DEMO CUSTOMER whose records hold every
+problem (the matching fixture answers each complaint), and replies follow the language you
+write in. Optional: test one specific line at  http://localhost:5174/api/v1/dev .
+Limits: no real auth/CSRF; turn storage is in memory; restarting forgets everything; the demo
+customer's records adapt to the complaint (a simulation shortcut, not evidence).
 """
 
 from __future__ import annotations
@@ -40,7 +43,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse  # no
 
 import conftest  # noqa: E402  (fixture account IDs and clock)
 from fakes import FakeConversationRepository, FakeResolveFacade, RecordingTelemetry  # noqa: E402
-from resolve.conversation import ConversationService  # noqa: E402
+from resolve.conversation import ConversationService, opening_question  # noqa: E402
+from resolve.conversation.rewrite import ReplyRewriter  # noqa: E402
 from resolve.conversation.dto import (  # noqa: E402
     AuthContext,
     Channel,
@@ -60,7 +64,8 @@ from resolve.conversation.state import PendingProposalRef  # noqa: E402
 from resolve.conversation.try_extract import load_dotenv  # noqa: E402
 
 MODE = os.environ.get("RESOLVE_BACKEND", "dummy").lower()
-DEFAULT_LINE = os.environ.get("DEV_LINE", "A").upper()
+# Dummy default: the all-problems demo customer. Hybrid uses Harry's real fixtures, one problem per line.
+DEFAULT_LINE = os.environ.get("DEV_LINE", "DEMO" if MODE == "dummy" else "A").upper()
 PORT = int(os.environ.get("DEV_BACKEND_PORT", "8080"))
 LINES = {
     "A": ("SIM-LK-0001", "Balance adds up; video-alerts add-on renews"),
@@ -71,6 +76,12 @@ LINES = {
     "F": ("SIM-LK-0006", "Charged for a service with no activation record"),
 }
 ACCOUNTS = {k: getattr(conftest, f"ACCOUNT_{k}") for k in LINES}
+DEMO_ACCOUNT = UUID("20000000-0000-0000-0000-0000000000de")
+ACCOUNTS["DEMO"] = DEMO_ACCOUNT
+# The demo customer's reported description is Gemini's English summary; this only picks a fixture.
+MISSING_RECHARGE = re.compile(
+    r"(not|n't|never)\b.{0,40}\b(credit|add|arriv|receiv|reflect|show|come|came|go through|went through)"
+    r"|\b(missing|pending|didn't get|did not get)\b", re.IGNORECASE)
 DUMMY_SIMULATED_SUCCESS_AFTER = timedelta(seconds=4)
 HARRY_COMPLAINTS = {ComplaintType.BALANCE_RECHARGE, ComplaintType.VAS_DISPUTE}  # implemented on ResolveDev
 
@@ -116,6 +127,23 @@ def load_knowledge() -> list[tuple[KnowledgeCard, set[str]]]:
         aliases = {a.strip('"').lower() for a in v[5].strip("{}").split(",") if a}
         cards.append((card, aliases | set(re.findall(r"[a-z]+", (v[3] + " " + v[1]).lower()))))
     return cards
+
+
+class DemoPersonaFacade(FakeResolveFacade):
+    """Dummy facade where the DEMO customer's records contain every fixture problem."""
+
+    def scenario_for(self, ctx, request) -> str:
+        if ctx.account_id != DEMO_ACCOUNT:
+            return super().scenario_for(ctx, request)
+        complaint = request.complaint_type
+        if complaint is ComplaintType.BALANCE_RECHARGE:
+            facts = request.reported_facts
+            return "E" if facts.recharge_reference or MISSING_RECHARGE.search(facts.description or "") else "A"
+        return {ComplaintType.DATA_DEPLETION: "B", ComplaintType.CONNECTIVITY: "C", ComplaintType.VAS_DISPUTE: "F"}[complaint]
+
+    async def get_account(self, ctx):
+        account = await super().get_account(ctx)
+        return account.model_copy(update={"line_alias": "SIM-LK-DEMO", "display_name": "Demo customer"}) if ctx.account_id == DEMO_ACCOUNT else account
 
 
 class SeedKnowledgeRepository:
@@ -208,7 +236,7 @@ if MODE not in {"dummy", "hybrid"}:
     sys.exit("RESOLVE_BACKEND must be dummy, hybrid or real")
 
 client = GeminiModelClient.from_env()
-dummy = FakeResolveFacade(real_now, {account: name for name, account in ACCOUNTS.items()}, strict_complaints=True)
+dummy = DemoPersonaFacade(real_now, {account: name for name, account in ACCOUNTS.items() if name != "DEMO"}, strict_complaints=True)
 repo = FakeConversationRepository(real_now, lease=timedelta(seconds=30))
 telemetry = RecordingTelemetry()
 facade: Any = dummy
@@ -242,8 +270,9 @@ async def simulation_now(ctx: AuthContext) -> datetime:
     return await asyncio.to_thread(read)
 
 
+rewriter = ReplyRewriter(client) if client and os.environ.get("DEV_REPLY_REWRITE", "1") != "0" else None
 service = ConversationService(facade, repo, SeedKnowledgeRepository(), Extractor(client) if client else None,
-                              simulation_now, telemetry)
+                              simulation_now, telemetry, rewriter)
 sessions: dict[str, tuple[AuthContext, str]] = {}
 COOKIE = "resolve_customer_session"
 
@@ -355,18 +384,21 @@ async def dev_home(request: Request):
     model = client.model_name if client else "none: free text falls back to forms"
     source = ("Balance/VAS complaints use <b>Harry's real facade</b>; data/connection use the dummy."
               if MODE == "hybrid" else "All Resolve answers are dummy stand-ins.")
+    demo = ('<p><a href="/api/v1/dev/line/DEMO"><b>Demo customer</b></a> (default): one customer whose records hold '
+            'every problem; just describe yours in any language.</p><p>Or test one specific line:</p>'
+            if MODE == "dummy" else "<p>Choose a demo line; the chat opens signed in as that line:</p>")
     return f"""<!doctype html><meta charset="utf-8"><title>Resolve dev backend</title>
 <body style="font-family:system-ui;max-width:640px;margin:2rem auto;padding:0 1rem;line-height:1.6">
 <h2>Resolve dev backend: {MODE.upper()} mode</h2>
 <p><b>Simulation only.</b> Gemini model: {model}.<br>
 {source}</p>
-<p>Choose a demo line; the chat opens signed in as that line:</p><ul>{rows}</ul></body>"""
+{demo}<ul>{rows}</ul></body>"""
 
 
 @app.get("/api/v1/dev/line/{line}")
 async def dev_line(line: str):
     line = line.upper()
-    if line not in LINES:
+    if line not in ACCOUNTS or (line == "DEMO" and MODE != "dummy"):
         return error("RESOURCE_NOT_FOUND", "Unknown demo line")
     token, _ = new_session(line)
     response = RedirectResponse("/", status_code=303)
@@ -415,7 +447,8 @@ async def create_conversation(request: Request):
     else:
         conversation_id = repo.create(ctx)
     conv = repo.conversations[conversation_id]
-    conv.state = conv.state.evolve(language=language)
+    # Open with free text plus suggested categories (the chat shows them as chips).
+    conv.state = conv.state.evolve(language=language, pending_question=opening_question(language))
     return conversation_view(conversation_id, [])
 
 

@@ -39,7 +39,7 @@ def test_a_reconciles_and_offers_vas_proposal_from_resolve(h) -> None:
 
     # Reply text carries Resolve's finding verbatim; nothing is recomputed here.
     assert result.reply_text.startswith(
-        "You told me about a problem with your balance or recharge and mentioned LKR 1,000.00. I checked 2 Oct, 08:00–12:00. "
+        "I looked at your balance or recharge records for 2 Oct, 08:00–12:00. You mentioned LKR 1,000.00. "
         "The posted recharge and subsequent deductions reconcile to LKR 420."
     )
     kinds = [card.type for card in result.cards]

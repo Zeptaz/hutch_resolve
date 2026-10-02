@@ -344,6 +344,10 @@ class FakeResolveFacade:
             raise ResolveError("RESOURCE_NOT_FOUND")
         return case
 
+    def scenario_for(self, ctx, request: InvestigationRequest) -> str:
+        """Which fixture records answer this investigation; the dev backend's demo persona overrides it."""
+        return self._scenarios[ctx.account_id]
+
     async def get_account(self, ctx):
         self._maybe_fail("get_account")
         if ctx.role is not Role.CUSTOMER:
@@ -391,7 +395,7 @@ class FakeResolveFacade:
         if request.expected_version != case.version:
             raise ResolveError("STALE_VERSION")
         self.investigation_requests.append((case_id, request))
-        scenario = self._scenarios[ctx.account_id]
+        scenario = self.scenario_for(ctx, request)
         revision = case.investigation.revision + 1 if case.investigation else 1
         payload = scenario_result(scenario)
         if self._strict and request.complaint_type.value not in SCENARIO_COMPLAINTS[scenario]:

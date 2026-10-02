@@ -13,6 +13,7 @@
 | `model.py` | `ModelClient` boundary and `GeminiModelClient` (google-genai, JSON-schema output, SDK retries off). |
 | `resolve_adapter.py` | Adapts Harry's sync, dict-returning `backend.resolve.services.facade.ResolveFacade` to `ports.ResolveFacade`: worker threads, context/error conversion, DTO validation of every result. No business logic. |
 | `try_extract.py` | Manual live check: `python -m resolve.conversation.try_extract` with `GEMINI_API_KEY`/`GEMINI_TEXT_MODEL`. |
+| `rewrite.py` | `ReplyRewriter`: re-expresses the English reply in the customer's detected language/style (e.g. Singlish). Code keeps every number/ID, rejects new numbers, links and "80k"-style magnitudes, and falls back to English on any doubt. Optional; off unless passed to the service. |
 | `templates.py` | Deterministic replies. English is authoritative; Sinhala/Tamil load from `locales/*.json` only when marked `REVIEWED`. |
 | `locales/` | Machine-drafted, **unreviewed** Sinhala and Tamil wording (inactive). See `LANGUAGE_REVIEW.md`. |
 | `eval/extraction_cases.jsonl` | 41-case multilingual extraction set; `try_extract --eval` scores live Gemini per variety. |
@@ -52,6 +53,10 @@ Pending question codes for the UI: `CHOOSE_COMPLAINT_TYPE`, `COMPLAINT_DETAILS`,
 - When Resolve makes **several** actions eligible, the reply lists them with pending question `CHOOSE_ACTION` (text only). A choice must match an action Resolve listed for the active case, and only requests a proposal; consent still needs the Accept control.
 - Each model attempt produces a `ModelCallRecord` (request/conversation/case IDs, purpose, prompt version, attempt, provider, model, outcome, latency, provider-reported tokens, error class). It has no field for prompt, transcript or output. **Harry:** implement `ModelTelemetry.record_model_call` into `resolve.model_calls`; telemetry failures are logged and never fail a turn.
 
+## Language
+
+The customer never has to pick a language. Each text message's detected language and script (from extraction) become the conversation language; button clicks keep it, and a bare "ok" does not switch back to English. The UI's `language` field is only used before anything was detected. With a `ReplyRewriter`, non-English replies are machine-written from the English source and fact-checked by code. They are **not reviewed by a fluent speaker**, so label them that way in demos and documents. Reviewed `locales/*.json` wording remains the path to reviewed native-language replies.
+
 ## Fingerprint rule
 
 The fingerprint covers channel, language, input and Voice evidence, but **not** `expected_version`. The version is concurrency control: the Voice bridge reads it from the binding at receipt time, so including it would turn a legitimate same-turn retry into a false `IDEMPOTENCY_CONFLICT`.
@@ -76,7 +81,7 @@ This starts a **throwaway** PostgreSQL on port 55433 (never the shared container
 | `hybrid` | Harry's real facade (adapter) for balance and VAS complaints, offers, confirmations, his `OperationRunner` and receipts; the dummy for data and connection until H-06. Needs `sh tests/conversation/hybrid_db.sh start` (throwaway DB) |
 | `real` | Not available until Harry ships turn storage and the conversation routes |
 
-Start the frontend with the `frontend-live` launch entry, then open **http://localhost:5174/api/v1/dev** to choose demo line A to F. The same journeys run against the dummy and the real facade in `test_resolve_integration.py`; a pass on both is what keeps the dummy honest.
+Start `dev-backend` and `frontend-live`, then just open **http://localhost:5174** and talk. In dummy mode you are one demo customer whose records hold every problem: an extra deduction gets A's breakdown, a missing reload E, data B, connection C, an unknown service F. This is a simulation shortcut, not evidence. The chat opens with suggestion chips (`opening_question`), and replies follow the language you write in. To test one specific line (e.g. D's conflict), open http://localhost:5174/api/v1/dev. The same journeys run against the dummy and the real facade in `test_resolve_integration.py`; a pass on both is what keeps the dummy honest.
 
 ## Tests
 

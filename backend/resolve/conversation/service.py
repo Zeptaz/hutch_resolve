@@ -70,6 +70,7 @@ from .extraction import (
     resolve_window,
 )
 from .identity import command_key, turn_fingerprint
+from .rewrite import REWRITE_PROMPT_VERSION, ReplyRewriter
 from .ports import (
     ConversationRepository,
     KnowledgeRepository,
@@ -90,6 +91,7 @@ Q_COMPLAINT_DETAILS = "COMPLAINT_DETAILS"
 Q_LOGIN_REQUIRED = "LOGIN_REQUIRED"
 Q_CONFIRM_ACTION = "CONFIRM_ACTION"
 Q_CHOOSE_ACTION = "CHOOSE_ACTION"
+Q_DESCRIBE_COMPLAINT = "DESCRIBE_COMPLAINT"
 # Text only: a details form carries its own complaint type and could override the one being collected.
 Q_CLARIFY = {
     Ambiguity.TIME_WINDOW: ("CLARIFY_TIME_WINDOW", "clarify_time_window", ["text"]),
@@ -131,6 +133,7 @@ class ConversationService:
         extractor: Extractor | None = None,
         simulation_now: SimulationClock = _real_time,
         telemetry: ModelTelemetry | None = None,
+        rewriter: ReplyRewriter | None = None,
     ) -> None:
         """`simulation_now` returns the scoped run's simulation clock (Harry); business
         windows use it, while auth and proposal expiry stay on real time in Resolve."""
@@ -140,6 +143,7 @@ class ConversationService:
         self._extractor = extractor
         self._simulation_now = simulation_now
         self._telemetry = telemetry or NullTelemetry()
+        self._rewriter = rewriter  # replies in the customer's language/style (machine-written; see rewrite.py)
 
     async def handle_turn(self, ctx: AuthContext, turn: NormalizedTurn) -> TurnResult:
         _check_trusted_fields(ctx, turn)
@@ -150,7 +154,11 @@ class ConversationService:
             return outcome.result
         claim = outcome.claim
         try:
-            draft, state = await self._route(ctx, turn, claim.state.evolve(language=turn.language))
+            start = claim.state
+            if start.script is None:  # nothing detected from the customer yet: use the UI hint
+                start = start.evolve(language=turn.language)
+            draft, state = await self._route(ctx, turn, start)
+            draft = await self._localize(ctx, turn, draft, state)
         except Exception:
             # Same-id retry re-claims; deterministic command keys stop Resolve repeating work.
             await self._conversations.release_turn(ctx, claim)
@@ -180,6 +188,9 @@ class ConversationService:
         extraction = await self._extract(ctx, turn, inp.text, state, now)
         if extraction is None:
             return self._structured_fallback(ctx, state)
+        if extraction.detected_language is not Language.EN or len(inp.text.split()) >= 3:
+            # Reply in the language the customer writes; a bare "ok" does not switch back to English.
+            state = state.evolve(language=extraction.detected_language, script=extraction.script)
 
         intent = extraction.intent
         choice = _match_choice(state, extraction)
@@ -216,6 +227,9 @@ class ConversationService:
                 return await self._human_request(ctx, turn, extraction, state)
             case Intent.CORRECTION | Intent.FOLLOW_UP if extraction.complaint_type:
                 return await self._collect_complaint(ctx, turn, extraction, state, Candidate(), now)
+            case Intent.OTHER if state.active_case_id and state.pending_proposal is None:
+                # "thanks", "ok" after a case: offer more help instead of restarting the menu.
+                return _ask(state, Q_CHOOSE_COMPLAINT, t.text("anything_else", state.language), ["category_selection", "text"])
         return _ask(state, Q_CHOOSE_COMPLAINT, t.text("choose_complaint", state.language), ["category_selection", "text"])
 
     async def _extract(
@@ -241,6 +255,34 @@ class ConversationService:
         outcome = await self._extractor.extract(text, context)
         await self._record_usage(ctx, turn, state, outcome)
         return outcome.extraction
+
+    async def _localize(self, ctx: AuthContext, turn: NormalizedTurn, draft: TurnDraft, state: DialogueState) -> TurnDraft:
+        """Re-express the reply in the customer's language/style; keep English on any doubt."""
+        if self._rewriter is None or self._rewriter.style_for(state.language, state.script) is None:
+            return draft
+        outcome = await self._rewriter.rewrite(draft.reply_text, state.language, state.script)
+        client, reply = self._rewriter.client, outcome.reply
+        await self._safe_record(ctx, ModelCallRecord(
+            request_id=ctx.request_id, conversation_id=turn.conversation_id, case_id=draft.case_id or state.active_case_id,
+            purpose="REPLY_REWRITE", prompt_version=REWRITE_PROMPT_VERSION, attempt=1,
+            provider=reply.provider if reply else client.provider, model=reply.model if reply else client.model_name,
+            outcome=outcome.failure or "OK", latency_ms=outcome.latency_ms,
+            input_tokens=reply.input_tokens if reply else None, output_tokens=reply.output_tokens if reply else None,
+            error_type=None,
+        ))
+        if outcome.text is None:
+            return draft
+        question = draft.pending_question
+        if question is not None and question.text == draft.reply_text:
+            question = question.model_copy(update={"text": outcome.text})
+        return TurnDraft(reply_text=outcome.text, case_id=draft.case_id, cards=draft.cards, citations=draft.citations,
+                         pending_question=question, operation_ids=draft.operation_ids)
+
+    async def _safe_record(self, ctx: AuthContext, record: ModelCallRecord) -> None:
+        try:
+            await self._telemetry.record_model_call(ctx, record)
+        except Exception:  # noqa: BLE001
+            log.warning("model telemetry write failed", extra={"request_id": str(ctx.request_id), "outcome": record.outcome})
 
     async def _record_usage(self, ctx: AuthContext, turn: NormalizedTurn, state: DialogueState, outcome: ExtractionOutcome) -> None:
         """Usage telemetry must never block or fail a customer turn."""
@@ -341,9 +383,8 @@ class ConversationService:
         draft, new_state = await self._open_and_investigate(
             ctx, turn, candidate.complaint_type, start, end, candidate.reported_facts, state
         )
-        checked = t.text("checked_default_window" if defaulted else "checked_window", lang, window=t.format_window(start, end))
-        ack = _acknowledgement(candidate.complaint_type, candidate.reported_facts, lang)
-        return _prefixed(draft, f"{ack} {checked}"), new_state
+        prefix = _checked_prefix(candidate.complaint_type, candidate.reported_facts, start, end, defaulted, lang)
+        return _prefixed(draft, prefix), new_state
 
     async def _correct(self, ctx: AuthContext, turn: NormalizedTurn, ex: Extraction, state: DialogueState, now: datetime) -> Step:
         """Changed facts request a new investigation revision of the same case through Resolve."""
@@ -468,6 +509,10 @@ class ConversationService:
     def _on_category(self, inp: CategoryInput, state: DialogueState) -> Step:
         base = state.candidate or Candidate()
         state = state.evolve(candidate=base.model_copy(update={"complaint_type": inp.complaint_type}))
+        if self._extractor is not None:
+            # Ask in plain words; the details form is the fallback when no model can read the answer.
+            reply = t.text("describe_complaint", state.language, complaint=t.complaint_label(inp.complaint_type, state.language))
+            return _ask(state, Q_DESCRIBE_COMPLAINT, reply, ["text"])
         return _ask(state, Q_COMPLAINT_DETAILS, t.text("complaint_details", state.language), ["complaint_details", "text"])
 
     async def _on_details(self, ctx: AuthContext, turn: NormalizedTurn, inp: DetailsInput, state: DialogueState) -> Step:
@@ -479,8 +524,8 @@ class ConversationService:
         draft, new_state = await self._open_and_investigate(
             ctx, turn, inp.complaint_type, inp.window_start, inp.window_end, inp.reported_facts, state
         )
-        checked = t.text("checked_window", lang, window=t.format_window(inp.window_start, inp.window_end))
-        return _prefixed(draft, f"{_acknowledgement(inp.complaint_type, inp.reported_facts, lang)} {checked}"), new_state
+        prefix = _checked_prefix(inp.complaint_type, inp.reported_facts, inp.window_start, inp.window_end, False, lang)
+        return _prefixed(draft, prefix), new_state
 
     async def _open_and_investigate(
         self,
@@ -670,12 +715,22 @@ def _prefixed(draft: TurnDraft, prefix: str) -> TurnDraft:
     )
 
 
-def _acknowledgement(complaint_type: ComplaintType, facts: ReportedFacts, lang: Language) -> str:
-    """Repeat back what the customer reported, from typed fields only (no model text)."""
-    complaint = t.complaint_label(complaint_type, lang)
+def opening_question(language: Language | str) -> PendingQuestion:
+    """First question of a new conversation: free text plus suggested categories (UI chips)."""
+    language = Language(language)
+    return PendingQuestion(code=Q_CHOOSE_COMPLAINT, text=t.text("choose_complaint", language),
+                           allowed_input_types=["category_selection", "text"])
+
+
+def _checked_prefix(
+    complaint_type: ComplaintType, facts: ReportedFacts, start: datetime, end: datetime, defaulted: bool, lang: Language
+) -> str:
+    """What was checked, restating only what the customer reported (type, typed amount; no model text)."""
+    key = "checked_default_window" if defaulted else "checked_window"
+    parts = [t.text(key, lang, complaint=t.complaint_label(complaint_type, lang), window=t.format_window(start, end))]
     if facts.amount_minor is not None:
-        return t.text("ack_complaint_amount", lang, complaint=complaint, amount=t.format_lkr(facts.amount_minor))
-    return t.text("ack_complaint", lang, complaint=complaint)
+        parts.append(t.text("ack_amount", lang, amount=t.format_lkr(facts.amount_minor)))
+    return " ".join(parts)
 
 
 def _merge_facts(base: ReportedFacts, ex: Extraction) -> ReportedFacts:
