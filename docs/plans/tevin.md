@@ -1,6 +1,30 @@
 # Tevin: conversation backend
 
-Read [context.md](../../context.md) and [shared contracts](../contracts.md). Update both this plan and context after meaningful progress; record tests and unresolved work. No chatbot backend currently exists. Run as a module inside Harry's Resolve application, not a separate service.
+Read [context.md](../../context.md) and [shared contracts](../contracts.md). Update both this plan and context after meaningful progress; record tests and unresolved work. Run as a module inside Harry's Resolve application, not a separate service.
+
+## Current status (2026-10-02)
+
+**Built and pushed on `HutchChat` (`backend/resolve/conversation/`, `tests/conversation/`):** the conversation module for T-01 to T-04 against contract fakes. 188 unit tests pass. Live Gemini (`gemini-3.5-flash-lite`) scored Singlish 10/10 and Sinhala script 5/5 (small sample). A local, uncommitted bridge ran Jayith's live chat against the module: Singlish complaint, typed "yes" refused, Accept and Decline worked.
+
+**Not yet integrated with Harry's backend.** No task is checked because acceptance needs the real facade and storage. `ResolveDev` (as of `1fb6472`) provides auth/sessions, account read, A/D reconciliation, persisted investigations, case APIs and a sync, dict-returning `ResolveFacade` with `create_conversation`, `get_account`, `get_case`, `create_case`, `investigate`. The `turn_claims` table exists, but no repository code uses it yet.
+
+**Blockers and asks for Harry**, in priority order:
+
+1. **Turn storage:** `claim_turn` / `complete_turn` / `release_turn` on `resolve.turn_claims`, plus persisting `DialogueState`. Who writes it: Harry, or Tevin on Harry's table?
+2. **Facade shape:** Harry's facade is sync and returns dicts; `ports.py` expects async typed contract models. Proposal: Tevin writes an adapter in the conversation module.
+3. **Conversation routes:** the contract assigns `/conversations`, `/conversations/{id}` and `/messages` to Tevin. Proposal: add them to Harry's app using his `AuthContext`/session checks; the local bridge is the prototype.
+4. **Small dependencies:** a run simulation-clock reader, knowledge-card search, a `ModelTelemetry` store into `resolve.model_calls`.
+5. **Dates:** H-04 (proposals, confirmations, operations, receipts) gates T-03; H-06 (B/C/E/F) gates T-04.
+6. **Decisions:** guest-to-customer upgrade in chat (also needed by Jayith); import root `backend.resolve` vs `resolve`.
+
+**Next steps:**
+
+1. Agree items 1 to 3 with Harry. This closes T-01's open items.
+2. Adapter to Harry's real facade, then run A/D through it (T-02 integration). Can start now on a separate branch.
+3. Once turn storage exists: real conversation routes in Harry's app, A/D end to end in Jayith's live chat; check T-02.
+4. Once H-04 lands: real Accept/Decline, handoff and receipts; check T-03.
+5. In parallel: enable Gemini billing before the demo (free tier: 20 requests/day for `gemini-3.8-flash`, too low to record) and finish the 41-case eval (Tamil, English, mixed, adversarial); find a fluent si/ta reviewer for `locales/` and the eval answers; rotate the Gemini key (it appeared in terminal history).
+6. After H-06: real B/C/E/F. Then REL-02 technical PDF and AI disclosure from measured runs.
 
 ## Boundary and interfaces
 
@@ -10,16 +34,16 @@ ResolveFacade owns enquiry, cases, investigation, proposals, confirmations, oper
 
 ## T-01: contracts, state and independent development
 
-- [ ] Implement interface fakes and tests using published examples. Freeze input/output with Harry/Jayith before routing changes. *2026-10-02: fakes, DTO mirrors and Protocols implemented with unit tests (see log); freeze with Harry/Jayith not yet done.*
+- [ ] Implement interface fakes and tests using published examples. Freeze input/output with Harry/Jayith before routing changes. *2026-10-02: fakes, DTO mirrors and Protocols implemented with unit tests (see log); freeze with Harry/Jayith not yet done. Harry's facade is sync/dict-based, so the shape must be agreed (adapter proposed).*
 - [x] Define persistent dialogue state: active_case_id, pending_question, candidate complaint/entities requiring clarification, language and pending proposal reference. Store through Harry's scoped repository interface; do not create a second conversation database.
 - [x] Handle text and structured input, maximum 4000 text characters. The structured variants are category_selection, complaint_details, action_decision and case_selection; they run the same business paths without a model.
-- [ ] Use stable conversation+client_turn_id identity. Save input fingerprint and completed result. Identical replay returns the same result; changed payload conflicts. Coordinate with Harry's persisted turn claim so retries/restart cannot repeat a business action. Serialize accepted turns per conversation without holding a DB lock across model calls. *2026-10-02: implemented and unit-tested against an in-memory repository fake; coordination with Harry's persisted claim pending.*
+- [ ] Use stable conversation+client_turn_id identity. Save input fingerprint and completed result. Identical replay returns the same result; changed payload conflicts. Coordinate with Harry's persisted turn claim so retries/restart cannot repeat a business action. Serialize accepted turns per conversation without holding a DB lock across model calls. *2026-10-02: implemented and unit-tested against an in-memory repository fake. Harry's `resolve.turn_claims` table exists on `ResolveDev`; repository code to use it is not written yet (ownership to agree).*
 
 ## T-02: intake and primary text flow
 
 - [ ] Public FAQ works under GUEST; account enquiry/complaint requires authenticated customer scope. Ask for demo login rather than extracting an account from speech/text. *2026-10-02: implemented against fakes (guest FAQ from reviewed cards with citation; account paths ask for sign-in).*
 - [ ] Route FAQ, account enquiry, BALANCE_RECHARGE, DATA_DEPLETION, CONNECTIVITY, VAS_DISPUTE, action decision, receipt/status and human request. One clarification at a time for critical uncertain dates, amounts, target or negation. *2026-10-02: intent routing and one-at-a-time clarification implemented against fakes.*
-- [ ] Define model structured extraction schema: allowed intent, language, complaint type, candidate entities and ambiguity list. Validate all output. Entity candidates are customer-reported, never authoritative evidence. *2026-10-02: `extraction.py` schema + strict validation + one repair in 6 s; not yet run against live Gemini.*
+- [ ] Define model structured extraction schema: allowed intent, language, complaint type, candidate entities and ambiguity list. Validate all output. Entity candidates are customer-reported, never authoritative evidence. *2026-10-02: `extraction.py` schema + strict validation + one repair in 6 s; live Gemini measured on Singlish/Sinhala (see log).*
 - [ ] Create a case through ResolveFacade and invoke investigation after required clarification. Default explicit demo windows use the simulation clock; real timestamps are used for authentication/confirmation expiry. Maximum investigation window is 30 days. *2026-10-02: implemented against fakes; needs Harry's simulation clock source.*
 - [ ] Compose reply/card DTOs from persisted findings. Preserve monetary amounts, units, evidence references and state codes. Follow-up answers use the saved investigation; corrections request a new revision through Resolve. *2026-10-02: follow-up uses saved investigation; correction requests a new revision; implemented against fakes.*
 - [ ] Persist multiple issues as separate cases in one conversation. Explicit case selection updates active state after scoped authorization. Do not silently attach new complaints to an unrelated active case. *2026-10-02: implemented against fakes.*
@@ -59,3 +83,5 @@ Acceptance: a full A journey produces the same case/action/receipt through text 
 | 2026-10-02 | T-03 | Voice spoken-consent gate (`_spoken_decision`), shared `_confirm` with recorded declines, ask-again on CONFIRMATION_REQUIRED, review-ticket wording without invented ticket numbers, status with Ticket/Receipt cards, SYNTHETIC knowledge label; extraction schema `extract-v2` adds `decision`. **Unit:** `python -m pytest tests/conversation -q` -> 160 passed. Mutation checks caught: ignoring transcript mismatch, treating UNCLEAR as consent, spoken path in text chat, dropping ask-again, ignoring presented hash, always printing a ticket number (initially survived; test tightened). | Not run with Harry's facade/H-04 or the Voice bridge (H-07); no live Gemini; English-only templates. |
 | 2026-10-02 | T-04 (partial) | Model telemetry per attempt (`ModelCallRecord`, no text fields); A-F routed with stand-in B/C/E/F results; review reasons in replies; `CHOOSE_ACTION` with model choice limited to Resolve-listed actions (`extract-v3`); locale loader using `locales/{si,ta}.json` only when `REVIEWED`; machine-drafted unreviewed si/ta; `eval/extraction_cases.jsonl` (41 cases) and `try_extract --eval`; `LANGUAGE_REVIEW.md`. **Unit:** `python -m pytest tests/conversation -q` -> 187 passed. Mutation checks caught: dropping review reasons, accepting any model choice, keeping choices after choosing, using unreviewed drafts. | **No live Gemini eval and no fluent review yet**; B/C/E/F use stand-ins until H-06; finding text from Resolve stays English; technical/AI disclosure needs measured runs. |
 | 2026-10-02 | T-04 live extraction (first measurement) | **Live, small sample.** `try_extract --eval --rpm 4 --only singlish,sinhala_script` with `gemini-3.5-flash-lite` at 2026-10-02T08:21Z: Singlish 10/10, Sinhala script 5/5, 0 fallbacks, median 1519 ms, max 3072 ms. Earlier full run with `gemini-3.8-flash` was unusable as a measurement: free-tier quota (5/min, 20/day) refused 33 calls and 6 exceeded the 6 s budget; only 2/41 were scored (both correct). Fixed: Gemini rejects request deadlines under 10 s, so the HTTP backstop is now 10 s while the Extractor still cancels at 6 s. Default model switched to `gemini-3.5-flash-lite`. | 15 cases only; expected answers not yet checked by a fluent speaker; Tamil/English/mixed/adversarial not re-run (quota). Free-tier quota is too low for a demo: enable billing or confirm limits before recording. |
+| 2026-10-02 | Browser check through local bridge | **Browser, local only.** Uncommitted bridge (fake Resolve, real `gemini-3.5-flash-lite`) served Jayith's live-mode chat: Singlish balance complaint understood and answered with A's calculation/finding cards and VAS offer with live expiry; typed `ow karanna` refused; Accept showed PENDING then simulated SUCCEEDED; Decline recorded with no change. Found and fixed: raw JSON shown as the customer's own message for button/form turns (now readable, matching the UI mock), and replies naming Accept/Decline buttons the UI labels "Yes, go ahead"/"No, thanks". Unit: 188 passed. Pushed `c9bc7d7`. | Bridge treats every chat as demo line A (guest upgrade undecided), keeps state in memory, simulates operation success; not Harry's API. |
+| 2026-10-02 | Integration check against `ResolveDev` `1fb6472` | Read-only review of Harry's branch: facade methods `create_conversation`, `get_account`, `get_case`, `create_case`, `investigate` (sync, dict results); `turn_claims` table in migration 0002 without repository code; no proposals/confirmations, knowledge search, telemetry store or simulation-clock reader yet. | See "Blockers and asks for Harry" above. |
