@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { formatTime, humanize } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { ChatCard, CitationList } from './cards/ChatCards'
+import { ProposalSummary } from './cards/ConfirmationCard'
 
 const LANGUAGES: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
@@ -131,9 +133,19 @@ export function ChatShell({ session }: { session: SessionView }) {
                 <>
                   <Welcome />
                   {conversation.messages.map((m) => (
-                    <Bubble key={m.id} speaker={m.speaker} time={m.created_at}>
-                      {m.body}
-                    </Bubble>
+                    <div key={m.id} className="flex flex-col gap-2">
+                      <Bubble speaker={m.speaker} time={m.created_at}>
+                        {m.body}
+                      </Bubble>
+                      {m.speaker === 'ASSISTANT' && m.result && (m.result.cards.length > 0 || m.result.citations.length > 0) && (
+                        <div className="flex max-w-xl flex-col gap-2 sm:ml-9">
+                          {m.result.cards.map((card, i) => (
+                            <ChatCard key={`${m.id}-${i}`} card={card} renderConfirmation={(c) => <ProposalSummary proposal={c.data} />} />
+                          ))}
+                          <CitationList citations={m.result.citations} />
+                        </div>
+                      )}
+                    </div>
                   ))}
                   {sending && <Typing />}
                   {failed && (

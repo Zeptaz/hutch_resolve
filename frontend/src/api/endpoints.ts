@@ -3,11 +3,16 @@ import type {
   AgentCaseDetail,
   AgentSessionView,
   CaseQueue,
+  CaseView,
   ConversationView,
+  EscalationRequest,
   Language,
   LoginRequest,
   MessageRequest,
+  OperationView,
+  ProposalView,
   QueueFilters,
+  ReceiptView,
   SessionView,
   TurnResult,
 } from './types'
@@ -26,6 +31,14 @@ export const customerApi = {
   /** Reuse body.client_turn_id when retrying the same turn; generate a new one for a new turn. */
   sendMessage: (conversationId: string, body: MessageRequest) =>
     request<TurnResult>('customer', 'POST', `/conversations/${conversationId}/messages`, { body }),
+
+  getCase: (id: string) => request<CaseView>('customer', 'GET', `/cases/${id}`),
+  getOperation: (id: string, signal?: AbortSignal) =>
+    request<OperationView>('customer', 'GET', `/operations/${id}`, { signal }),
+  getReceipt: (caseId: string) => request<ReceiptView>('customer', 'GET', `/cases/${caseId}/receipt`),
+  /** Returns a CREATE_REVIEW_TICKET proposal; the customer still confirms it like any other action. */
+  requestReview: (caseId: string, body: EscalationRequest, idempotencyKey = newId()) =>
+    request<ProposalView>('customer', 'POST', `/cases/${caseId}/escalations`, { body, idempotencyKey }),
 }
 
 export const agentApi = {

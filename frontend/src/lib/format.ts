@@ -31,6 +31,13 @@ export function formatGb(bytes: number) {
   return `${(bytes / 1e9).toLocaleString('en-LK', { maximumFractionDigits: 2 })} GB`
 }
 
+/** Format a calculation value according to its contract unit. */
+export function formatCalcValue(unit: string, n: number) {
+  if (unit === 'LKR_MINOR') return formatLkr(n)
+  if (unit === 'BYTES') return formatGb(n)
+  return n.toLocaleString('en-LK')
+}
+
 /** "BALANCE_RECHARGE" → "Balance recharge" for enum values without a dedicated label. */
 export function humanize(value: string) {
   const s = value.replace(/_/g, ' ').toLowerCase()

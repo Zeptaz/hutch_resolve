@@ -39,6 +39,9 @@ function MockControls({ realm }: { realm: Realm }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>Exercise UI states</DropdownMenuLabel>
+        {realm === 'customer' && (
+          <DropdownMenuItem onSelect={() => run((c) => c.continueAsDemoLine())}>Continue as demo line A</DropdownMenuItem>
+        )}
         <DropdownMenuItem onSelect={() => run((c) => c.expireSession(realm))}>Expire this session</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => run((c) => c.setOutage(!c.outage))}>Toggle service outage (503)</DropdownMenuItem>
         <DropdownMenuSeparator />

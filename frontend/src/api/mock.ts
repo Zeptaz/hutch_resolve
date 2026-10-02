@@ -1,43 +1,23 @@
 // Mock transport: answers API calls with the synthetic fixtures in docs/contracts/examples.json.
 // It mimics the contract's shapes and status codes so screens can be built before Resolve exists.
 // It does NOT implement business rules — never copy logic from here into real UI code.
-import fixtures from '@contracts/examples.json'
 import type { RawResponse, Realm, RequestOptions } from './client'
-import type {
-  AgentCaseDetail,
-  AgentSessionView,
-  CaseQueue,
-  CaseQueueRow,
-  ConversationView,
-  MessageView,
-  SessionView,
-  TurnResult,
-} from './types'
-
-type Examples = typeof fixtures.examples
-function example<K extends keyof Examples>(key: K): unknown {
-  return structuredClone(fixtures.examples[key].value)
-}
+import { handleCustomer } from './mock-customer'
+import { emptyState, example, fail, isExpired, ok, type MockState } from './mock-util'
+import type { AgentCaseDetail, AgentSessionView, CaseQueue, CaseQueueRow, SessionView } from './types'
 
 const SESSION_TTL_MS = 30 * 60 * 1000
-const STORAGE_KEY = 'hutch-resolve.mock-state'
+const STORAGE_KEY = 'hutch-resolve.mock-state.v2'
 const LATENCY_MS = 250
-
-type MockState = {
-  customer: SessionView | null
-  agent: AgentSessionView | null
-  conversations: Record<string, ConversationView>
-  outage: boolean
-}
 
 function loadState(): MockState {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as MockState
+    if (raw) return { ...emptyState(), ...(JSON.parse(raw) as Partial<MockState>) }
   } catch {
     /* storage unavailable: fall through to a fresh state */
   }
-  return { customer: null, agent: null, conversations: {}, outage: false }
+  return emptyState()
 }
 
 const state = loadState()
@@ -54,25 +34,18 @@ function freshExpiry() {
   return new Date(Date.now() + SESSION_TTL_MS).toISOString()
 }
 
-function isExpired(s: { expires_at: string } | null) {
-  return !s || Date.parse(s.expires_at) <= Date.now()
-}
-
-function ok(body: unknown, status = 200): RawResponse {
-  return { status, body }
-}
-
-function fail(status: number, code: string, message: string, retryable = false, details = {}): RawResponse {
-  return {
-    status,
-    body: { error: { code, message: `Mock: ${message}`, retryable, request_id: crypto.randomUUID(), details } },
-  }
+function clearCustomerData() {
+  state.conversations = {}
+  state.cases = {}
+  state.proposals = {}
+  state.operations = {}
+  state.receiptRevisions = {}
 }
 
 // --- Agent fixtures -------------------------------------------------------
 
-const detailA = example('agent_detail') as AgentCaseDetail
-const queueD = (example('queue') as CaseQueue).items[0]
+const detailA = example<AgentCaseDetail>('agent_detail')
+const queueD = example<CaseQueue>('queue').items[0]
 
 function queueRows(): CaseQueueRow[] {
   const rowA: CaseQueueRow = {
@@ -93,7 +66,7 @@ function detailFor(id: string): AgentCaseDetail | null {
   if (id === queueD.case_id) {
     // Fixture D has a queue row and an investigation but no full packet; assemble one for layout work.
     const d = structuredClone(detailA)
-    const investigation = example('d_conflicting') as NonNullable<AgentCaseDetail['case']['investigation']>
+    const investigation = example<NonNullable<AgentCaseDetail['case']['investigation']>>('d_conflicting')
     d.case = {
       ...d.case,
       id: queueD.case_id,
@@ -108,7 +81,7 @@ function detailFor(id: string): AgentCaseDetail | null {
     d.confirmations = []
     d.operations = []
     d.receipts = []
-    d.handoff = example('crm_outage_handoff') as AgentCaseDetail['handoff']
+    d.handoff = example<AgentCaseDetail['handoff']>('crm_outage_handoff')
     return d
   }
   return null
@@ -127,74 +100,21 @@ function route(realm: Realm, method: string, path: string, opts: RequestOptions)
       return ok(state.customer)
     }
     if (method === 'POST' && path === '/sessions/anonymous') {
-      state.customer = { ...(example('guest_session') as SessionView), expires_at: freshExpiry() }
+      state.customer = { ...example<SessionView>('guest_session'), expires_at: freshExpiry() }
       return ok(state.customer, 201)
     }
     if (method === 'POST' && path === '/demo/sessions') {
-      state.customer = { ...(example('customer_session') as SessionView), expires_at: freshExpiry() }
+      state.customer = { ...example<SessionView>('customer_session'), expires_at: freshExpiry() }
+      clearCustomerData()
       return ok(state.customer)
     }
     if (method === 'DELETE' && path === '/session') {
       state.customer = null
-      state.conversations = {}
+      clearCustomerData()
       return ok(null, 204)
     }
-
     if (isExpired(state.customer)) return fail(401, 'SESSION_EXPIRED', 'session expired.')
-    const session = state.customer!
-
-    if (method === 'POST' && path === '/conversations') {
-      const lang = (opts.body as { language?: ConversationView['language'] })?.language ?? 'en'
-      const base = example('conversation') as ConversationView
-      // Guests only get public FAQ access, so they start with an empty conversation and no cases.
-      const conv: ConversationView =
-        session.role === 'GUEST'
-          ? { ...base, id: crypto.randomUUID(), version: 1, language: lang, active_case_id: null, messages: [], cases: [], pending_question: null, pending_proposal: null }
-          : { ...base, language: lang }
-      conv.expires_at = session.expires_at
-      state.conversations[conv.id] = conv
-      return ok(conv, 201)
-    }
-    const convMatch = path.match(/^\/conversations\/([^/]+)(\/messages)?$/)
-    if (convMatch) {
-      const conv = state.conversations[convMatch[1]]
-      if (!conv) return fail(404, 'RESOURCE_NOT_FOUND', 'conversation not found.')
-      if (method === 'GET' && !convMatch[2]) return ok(conv)
-      if (method === 'POST' && convMatch[2]) {
-        const body = opts.body as { client_turn_id: string; expected_version: number; input: { type: string; text?: string } }
-        const replay = conv.messages.find((m) => m.client_turn_id === body.client_turn_id && m.speaker === 'ASSISTANT')
-        if (replay?.result) return ok(replay.result)
-        if (body.expected_version !== conv.version) {
-          return fail(409, 'STALE_VERSION', 'stale conversation version.', false, { current_version: conv.version })
-        }
-        const now = new Date().toISOString()
-        const userMsg: MessageView = {
-          id: crypto.randomUUID(),
-          client_turn_id: body.client_turn_id,
-          speaker: 'USER',
-          body: body.input.text ?? `[${body.input.type}]`,
-          created_at: now,
-          result: null,
-        }
-        const result = example('turn_result') as TurnResult
-        const assistantId = crypto.randomUUID()
-        result.message_id = assistantId
-        result.conversation_id = conv.id
-        result.conversation_version = conv.version + 1
-        const assistantMsg: MessageView = {
-          id: assistantId,
-          client_turn_id: body.client_turn_id,
-          speaker: 'ASSISTANT',
-          body: result.reply_text,
-          created_at: now,
-          result,
-        }
-        conv.messages.push(userMsg, assistantMsg)
-        conv.version += 1
-        return ok(result)
-      }
-    }
-    return fail(404, 'RESOURCE_NOT_FOUND', `no mock for ${method} ${path}.`)
+    return handleCustomer(state, state.customer!, method, path, opts)
   }
 
   // realm === 'agent'
@@ -203,7 +123,7 @@ function route(realm: Realm, method: string, path: string, opts: RequestOptions)
     return ok(state.agent)
   }
   if (method === 'POST' && path === '/agent/sessions') {
-    state.agent = { ...(example('agent_session') as AgentSessionView), expires_at: freshExpiry() }
+    state.agent = { ...example<AgentSessionView>('agent_session'), expires_at: freshExpiry() }
     return ok(state.agent)
   }
   if (method === 'DELETE' && path === '/agent/session') {
@@ -252,6 +172,12 @@ export const mockControls = {
     if (s) s.expires_at = new Date(Date.now() - 1000).toISOString()
     save()
   },
+  /** Stand-in for the undecided guest→customer upgrade: become synthetic customer A. */
+  continueAsDemoLine() {
+    state.customer = { ...example<SessionView>('customer_session'), expires_at: freshExpiry() }
+    clearCustomerData()
+    save()
+  },
   setOutage(on: boolean) {
     state.outage = on
     save()
@@ -260,10 +186,7 @@ export const mockControls = {
     return state.outage
   },
   reset() {
-    state.customer = null
-    state.agent = null
-    state.conversations = {}
-    state.outage = false
+    Object.assign(state, emptyState())
     save()
   },
 }
