@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -8,6 +8,7 @@ from backend.resolve.providers.sandbox import (
     LedgerPosting,
     LedgerSnapshot,
     LedgerStatement,
+    _has_snapshot_sequence_conflict,
     reconcile_statement,
 )
 
@@ -65,3 +66,11 @@ def test_unsafe_json_integer_is_rejected():
     unsafe_opening = replace(source.opening, amount_minor=9_007_199_254_740_992)
     with pytest.raises(ValueError, match="LEDGER_VALUE_OUT_OF_RANGE"):
         reconcile_statement(replace(source, opening=unsafe_opening))
+
+
+def test_repeated_snapshot_sequence_only_conflicts_when_values_disagree():
+    opening = LedgerSnapshot(UUID(int=11), 10_000, "LKR", NOW, 0)
+    repeated = LedgerSnapshot(UUID(int=12), 10_000, "LKR", NOW + timedelta(hours=1), 0)
+    different = LedgerSnapshot(UUID(int=13), 9_000, "LKR", NOW + timedelta(hours=2), 0)
+    assert not _has_snapshot_sequence_conflict([opening, repeated])
+    assert _has_snapshot_sequence_conflict([opening, different])

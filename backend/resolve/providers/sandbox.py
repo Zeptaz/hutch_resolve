@@ -91,6 +91,20 @@ class ServiceStatement:
     fetched_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class RechargeRecord:
+    id: UUID
+    payment_ref: str
+    channel: str
+    amount_minor: int
+    payment_status: str
+    fulfilment_status: str
+    credited_entry_id: UUID | None
+    credited_amount_minor: int | None
+    credited_kind: str | None
+    created_at: datetime
+
+
 class AccountProvider(Protocol):
     def get_account(self, sandbox_id: UUID, account_id: UUID) -> dict[str, Any] | None: ...
 
@@ -256,8 +270,7 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
             if expected_sequences != actual_sequences:
                 warnings.append("POSTING_SEQUENCE_GAP")
                 complete = False
-            sequences = [item.last_posting_seq for item in parsed_snapshots]
-            if sequences.count(opening.last_posting_seq) > 1 or sequences.count(closing.last_posting_seq) > 1:
+            if _has_snapshot_sequence_conflict(parsed_snapshots):
                 warnings.append("DUPLICATE_SNAPSHOT_SEQUENCE")
         version = f"fixture-v{run}"
         if closing is not None:
@@ -363,6 +376,27 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
             account["package_active"], tuple(dict(row) for row in checks[:500]),
             tuple(dict(row) for row in incidents[:500]), complete,
             f"fixture-v{account['fixture_version']}:assurance", fetched_at)
+
+    def get_recharge_records(self, sandbox_id: UUID, account_id: UUID, window_start: datetime,
+                             window_end: datetime, payment_ref: str | None = None) -> tuple[tuple[RechargeRecord, ...], bool, str]:
+        with self._engine.connect() as connection:
+            run = connection.execute(text("SELECT fixture_version FROM sandbox.sandbox_runs WHERE id=:sandbox AND run_status='ACTIVE'"),
+                {"sandbox": sandbox_id}).scalar_one_or_none()
+            if run is None:
+                return (), False, "unknown"
+            rows = connection.execute(text("""
+                SELECT r.id,r.payment_ref,r.channel,r.amount_minor,r.payment_status,r.fulfilment_status,
+                       r.credited_entry_id,m.amount_minor AS credited_amount_minor,m.kind AS credited_kind,r.created_at
+                FROM sandbox.recharges r LEFT JOIN sandbox.money_entries m
+                  ON (m.sandbox_id,m.id)=(r.sandbox_id,r.credited_entry_id)
+                WHERE r.sandbox_id=:sandbox AND r.account_id=:account
+                  AND r.created_at>=:start AND r.created_at<:end
+                  AND (CAST(:payment_ref AS text) IS NULL OR r.payment_ref=CAST(:payment_ref AS text))
+                ORDER BY r.created_at DESC,r.id LIMIT 501
+            """), {"sandbox": sandbox_id, "account": account_id, "start": window_start,
+                "end": window_end, "payment_ref": payment_ref}).mappings().all()
+        complete = len(rows) <= 500
+        return tuple(RechargeRecord(**row) for row in rows[:500]), complete, f"fixture-v{run}:recharge"
 
     def get_action_target(
         self, sandbox_id: UUID, account_id: UUID, action_type: str, target_id: UUID
@@ -547,6 +581,13 @@ def reconcile_statement(statement: LedgerStatement) -> dict[str, Any]:
         "eligible_actions": [],
         "review_reasons": sorted(set(conflicts + missing)),
     }
+
+
+def _has_snapshot_sequence_conflict(snapshots: list[LedgerSnapshot]) -> bool:
+    values_by_sequence: dict[int, set[tuple[int, str]]] = {}
+    for snapshot in snapshots:
+        values_by_sequence.setdefault(snapshot.last_posting_seq, set()).add((snapshot.amount_minor, snapshot.currency))
+    return any(len(values) > 1 for values in values_by_sequence.values())
 
 
 def reconcile_quota(statement: QuotaBucketStatement, usage: tuple[QuotaUsage, ...], *,
@@ -752,3 +793,61 @@ def reconcile_service_status(statement: ServiceStatement, *, incident_freshness:
     return {"evidence_state": state, "findings": [{"code": code, "text": message, "evidence_ids": support_ids}],
         "calculations": [], "evidence": evidence, "missing": sorted(set(missing)), "conflicts": [],
         "eligible_actions": [], "review_reasons": sorted(set(missing))}
+
+
+def reconcile_recharge_records(records: tuple[RechargeRecord, ...], *, fetched_at: datetime,
+                               source_version: str, complete: bool,
+                               expected_reference: str | None = None) -> dict[str, Any]:
+    """Keep captured payment, recharge fulfilment and ledger credit as separate facts."""
+    selected = tuple(record for record in records if expected_reference is None or record.payment_ref == expected_reference)
+    evidence: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    missing: list[str] = []
+    conflicts: list[str] = []
+    sufficient = False
+    for record in selected:
+        if abs(record.amount_minor) > 9_007_199_254_740_991 or record.amount_minor <= 0:
+            conflicts.append("RECHARGE_AMOUNT_INVALID")
+        if record.credited_entry_id is not None and (
+            record.credited_amount_minor != record.amount_minor or record.credited_kind != "RECHARGE"
+        ):
+            conflicts.append("RECHARGE_CREDIT_MISMATCH")
+        if record.payment_status == "CAPTURED" and record.fulfilment_status == "PENDING" and record.credited_entry_id is None:
+            code = "PAYMENT_CAPTURED_FULFILMENT_PENDING"
+            message = "Payment is captured, but recharge fulfilment and account credit are still pending. Do not submit another payment for this transaction."
+            sufficient = True
+        elif record.payment_status == "CAPTURED" and record.fulfilment_status == "FULFILLED" and record.credited_entry_id is not None:
+            code = "RECHARGE_FULFILLED_AND_CREDITED"
+            message = "Recharge fulfilment is complete and its linked account credit is present."
+            sufficient = True
+        elif record.payment_status == "FAILED" and record.credited_entry_id is None:
+            code = "RECHARGE_PAYMENT_FAILED"
+            message = "The payment provider reports a failed payment and no account credit is linked."
+            sufficient = True
+        else:
+            code = "RECHARGE_STATUS_UNRESOLVED"
+            message = "Payment and recharge fulfilment records do not yet establish a completed account credit. Do not submit another payment until this transaction is checked."
+            missing.append("RECHARGE_STATUS_UNRESOLVED")
+        if record.credited_entry_id is not None and record.fulfilment_status != "FULFILLED":
+            conflicts.append("CREDIT_WITHOUT_FULFILMENT")
+        evidence_id = uuid4()
+        evidence.append({"id": evidence_id, "source": "RECHARGE_FULFILMENT", "source_record_id": str(record.id),
+            "source_version": source_version, "observed_at": record.created_at, "fetched_at": fetched_at,
+            "value": record.payment_status, "unit": "LKR_MINOR",
+            "source_payload": {"payment_ref": record.payment_ref, "channel": record.channel,
+                "amount_minor": record.amount_minor, "payment_status": record.payment_status,
+                "fulfilment_status": record.fulfilment_status,
+                "credited_entry_id": str(record.credited_entry_id) if record.credited_entry_id else None,
+                "credited_amount_minor": record.credited_amount_minor, "credited_kind": record.credited_kind}})
+        findings.append({"code": code, "text": message, "evidence_ids": [evidence_id]})
+    if not selected:
+        missing.append("RECHARGE_RECORD_NOT_FOUND" if expected_reference else "RECHARGE_RECORD_MISSING")
+        findings.append({"code": "RECHARGE_RECORD_NOT_FOUND",
+            "text": "No matching recharge record was found in the available period; this does not prove that no payment occurred.",
+            "evidence_ids": []})
+    if not complete:
+        missing.append("RECHARGE_SOURCE_INCOMPLETE")
+    state = "CONFLICTING" if conflicts else "SUFFICIENT" if sufficient and not missing else "PARTIAL"
+    return {"evidence_state": state, "findings": findings, "calculations": [], "evidence": evidence,
+        "missing": sorted(set(missing)), "conflicts": sorted(set(conflicts)), "eligible_actions": [],
+        "review_reasons": sorted(set(missing + conflicts))}

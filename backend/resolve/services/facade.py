@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import Engine, text
 
 from backend.resolve.app.auth import AuthContext, ResolveError
-from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_quota, reconcile_service_status, reconcile_statement
+from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_quota, reconcile_recharge_records, reconcile_service_status, reconcile_statement
 from .review import AgentReviewService
 
 ALLOWED_LANGUAGES = {"en", "si", "ta"}
@@ -305,6 +305,7 @@ class ResolveFacade:
         if case_scope["version"] != expected_version:
             raise ResolveError(409, "STALE_VERSION", "Case changed; reload before investigating")
 
+        additional_source_status: list[dict[str, Any]] = []
         if complaint_type == "CONNECTIVITY":
             service_statement = self._provider.get_service_statement(context.sandbox_id, context.account_id)  # type: ignore[attr-defined]
             if service_statement is None:
@@ -383,6 +384,28 @@ class ResolveFacade:
                 if str(exc) == "LEDGER_VALUE_OUT_OF_RANGE":
                     raise ResolveError(422, "VALIDATION_ERROR", "Ledger value exceeds the safe response range") from exc
                 raise
+            if complaint_type == "BALANCE_RECHARGE":
+                recharge_reference = facts.get("recharge_reference")
+                recharge_records, recharge_complete, recharge_version = self._provider.get_recharge_records(
+                    context.sandbox_id, context.account_id, window_start, window_end, recharge_reference)  # type: ignore[attr-defined]
+                recharge_result = reconcile_recharge_records(recharge_records, fetched_at=datetime.now(UTC),
+                    source_version=recharge_version, complete=recharge_complete, expected_reference=recharge_reference)
+                result["findings"].extend(recharge_result["findings"])
+                result["evidence"].extend(recharge_result["evidence"])
+                result["missing"] = sorted(set(result["missing"] + recharge_result["missing"]))
+                result["conflicts"] = sorted(set(result["conflicts"] + recharge_result["conflicts"]))
+                result["review_reasons"] = sorted(set(result["review_reasons"] + recharge_result["review_reasons"]))
+                if "CONFLICTING" in {result["evidence_state"], recharge_result["evidence_state"]}:
+                    result["evidence_state"] = "CONFLICTING"
+                elif recharge_result["evidence_state"] == "SUFFICIENT":
+                    result["evidence_state"] = "SUFFICIENT"
+                elif "PARTIAL" in {result["evidence_state"], recharge_result["evidence_state"]}:
+                    result["evidence_state"] = "PARTIAL"
+                additional_source_status.append({"source": "RECHARGE_FULFILMENT", "fetched_at": datetime.now(UTC),
+                    "as_of": max((item.created_at for item in recharge_records), default=None),
+                    "complete_through": max((item.created_at for item in recharge_records), default=None),
+                    "source_version": recharge_version, "complete": recharge_complete,
+                    "next_cursor": None, "warnings": [] if recharge_complete else ["PAGE_LIMIT_EXCEEDED"]})
         account_target = self._provider.get_action_target(context.sandbox_id, context.account_id,
                                                          "CREATE_REVIEW_TICKET", context.account_id)  # type: ignore[attr-defined]
         if account_target:
@@ -413,6 +436,7 @@ class ResolveFacade:
             "source_version": statement.source_version, "complete": statement.complete,
             "next_cursor": None, "warnings": list(statement.warnings),
         }]
+        source_status.extend(additional_source_status)
         if vas_targets:
             source_status.append({"source": "PRODUCT_VAS", "fetched_at": datetime.now(UTC),
                 "as_of": vas_targets[0]["as_of"], "complete_through": vas_targets[0]["as_of"],
