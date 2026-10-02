@@ -16,6 +16,7 @@ import { CasePanel } from './CasePanel'
 import { ChatCard, CitationList } from './cards/ChatCards'
 import { ConfirmationCard, type ProposalState } from './cards/ConfirmationCard'
 import { OperationTracker } from './cards/OperationTracker'
+import { QuestionPrompt } from './QuestionPrompt'
 
 const LANGUAGES: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
@@ -123,6 +124,11 @@ export function ChatShell({ session }: { session: SessionView }) {
     })
   }
 
+  const answer = (input: TurnInput, label: string) => {
+    if (sending) return
+    void sendTurn(input, label, newId())
+  }
+
   const retryFailed = () => {
     if (!failed) return
     void sendTurn(failed.input, failed.label, failed.clientTurnId)
@@ -137,6 +143,8 @@ export function ChatShell({ session }: { session: SessionView }) {
   const renderProposal = (p: ProposalView) => (
     <ConfirmationCard key={p.id} proposal={p} state={proposalState(p)} onDecide={(d) => void decide(p, d)} />
   )
+
+  const textAllowed = !conversation?.pending_question || conversation.pending_question.allowed_input_types.includes('text')
 
   // A pending proposal that didn't arrive inside a message (e.g. a human-review request) is shown at the end.
   const pending = conversation?.pending_proposal
@@ -208,6 +216,11 @@ export function ChatShell({ session }: { session: SessionView }) {
                     )
                   })}
                   {pending && !pendingShownInline && <div className="max-w-xl sm:ml-9">{renderProposal(pending)}</div>}
+                  {conversation.pending_question && !sending && (
+                    <div className="max-w-xl sm:ml-9">
+                      <QuestionPrompt question={conversation.pending_question} disabled={sending} onAnswer={answer} />
+                    </div>
+                  )}
                   {sending && <Typing />}
                   {failed && <FailedTurnNotice failed={failed} onRetry={retryFailed} />}
                 </>
@@ -232,11 +245,15 @@ export function ChatShell({ session }: { session: SessionView }) {
                     submitText()
                   }
                 }}
-                placeholder="Describe your issue — e.g. “I recharged LKR 1000 but my balance is LKR 420”"
+                placeholder={
+                  textAllowed
+                    ? 'Describe your issue — e.g. “I recharged LKR 1000 but my balance is LKR 420”'
+                    : 'Please use the options above to answer'
+                }
                 aria-label="Message"
                 rows={1}
                 className="max-h-40 min-h-11 resize-none rounded-xl"
-                disabled={!conversation}
+                disabled={!conversation || !textAllowed}
               />
               <Button type="submit" size="icon-lg" aria-label="Send" disabled={!conversation || sending || !draft.trim()}>
                 <SendHorizontal aria-hidden />
@@ -245,7 +262,12 @@ export function ChatShell({ session }: { session: SessionView }) {
           </form>
         </main>
 
-        <CasePanel conversation={conversation} refreshKey={caseRefresh} />
+        <CasePanel
+          conversation={conversation}
+          refreshKey={caseRefresh}
+          disabled={sending}
+          onSelectCase={(id, label) => answer({ type: 'case_selection', case_id: id }, `Switch to: ${label}`)}
+        />
       </div>
     </div>
   )

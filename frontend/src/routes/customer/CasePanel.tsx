@@ -3,6 +3,7 @@ import { customerApi } from '@/api/endpoints'
 import type { CaseView, ConversationView } from '@/api/types'
 import { EvidenceBadge, StatusBadge, type Tone } from '@/components/StatusBadge'
 import { humanize } from '@/lib/format'
+import { COMPLAINT_LABEL } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import { ReceiptDownloadButton } from './cards/ChatCards'
 
@@ -15,7 +16,17 @@ const CASE_STATUS: Record<string, { label: string; tone: Tone }> = {
 }
 
 /** Case context beside the chat. Every status shown here comes from Resolve. */
-export function CasePanel({ conversation, refreshKey }: { conversation: ConversationView | null; refreshKey: number }) {
+export function CasePanel({
+  conversation,
+  refreshKey,
+  disabled,
+  onSelectCase,
+}: {
+  conversation: ConversationView | null
+  refreshKey: number
+  disabled: boolean
+  onSelectCase: (caseId: string, label: string) => void
+}) {
   const activeId = conversation?.active_case_id ?? null
   const [active, setActive] = useState<CaseView | null>(null)
 
@@ -46,15 +57,26 @@ export function CasePanel({ conversation, refreshKey }: { conversation: Conversa
         <ul className="flex flex-col gap-2">
           {conversation.cases.map((c) => {
             const status = CASE_STATUS[c.status] ?? { label: humanize(c.status), tone: 'neutral' as Tone }
+            const isActive = c.id === activeId
+            const label = COMPLAINT_LABEL[c.complaint_type] ?? humanize(c.complaint_type)
             return (
-              <li
-                key={c.id}
-                className={cn('rounded-lg border bg-card p-3 text-sm', c.id === activeId && 'border-primary/50 ring-1 ring-primary/30')}
-              >
-                <p className="font-medium">{humanize(c.complaint_type)}</p>
-                <StatusBadge tone={status.tone} className="mt-1.5">
-                  {status.label}
-                </StatusBadge>
+              <li key={c.id}>
+                <button
+                  type="button"
+                  disabled={isActive || disabled}
+                  aria-current={isActive ? 'true' : undefined}
+                  onClick={() => onSelectCase(c.id, label)}
+                  className={cn(
+                    'w-full rounded-lg border bg-card p-3 text-left text-sm transition-colors enabled:hover:bg-muted disabled:cursor-default',
+                    isActive && 'border-primary/50 ring-1 ring-primary/30',
+                  )}
+                >
+                  <p className="font-medium">{label}</p>
+                  <span className="mt-1.5 flex items-center justify-between gap-2">
+                    <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+                    {!isActive && <span className="text-xs text-muted-foreground">Switch</span>}
+                  </span>
+                </button>
               </li>
             )
           })}
