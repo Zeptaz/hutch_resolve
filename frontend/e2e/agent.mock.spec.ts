@@ -33,7 +33,7 @@ test('case packet answers first: why it is here and the key numbers', async ({ p
 
 test('tabs show actions and ticket, receipts and history', async ({ page }) => {
   await queueRow(page, MOCK.D.line).click()
-  await page.getByRole('tab', { name: /Actions & ticket/ }).click()
+  await page.getByRole('tab', { name: /^Actions/ }).click()
   const ticket = page.getByRole('region', { name: 'Review ticket' })
   await expect(ticket).toContainText('Delivery to the ticket system')
   await expect(ticket).toContainText('Not assigned yet')
@@ -158,4 +158,41 @@ test('a Resolve outage shows an error with retry, not an empty queue', async ({ 
   await mockControl(page, 'setOutage', false)
   await page.getByRole('button', { name: /Try again|Retry/i }).first().click()
   await expect(queue(page).getByRole('listitem')).toHaveCount(2)
+})
+
+test('switching tabs while reading keeps the tab bar in place, and the tab is in the URL', async ({ page }) => {
+  await queueRow(page, MOCK.D.line).click()
+  await expect(page.getByRole('region', { name: 'Sources checked' })).toBeVisible()
+  const scroller = page.locator('[data-case-scroller]')
+  const barOffset = () =>
+    page.evaluate(() => {
+      const sc = document.querySelector('[data-case-scroller]')!
+      return document.querySelector('[role=tablist]')!.getBoundingClientRect().top - sc.getBoundingClientRect().top
+    })
+
+  // Read down into the evidence, then switch to a much shorter tab.
+  await scroller.evaluate((el) => el.scrollTo(0, el.scrollHeight))
+  await page.getByRole('tab', { name: /^History/ }).click()
+  await expect(page).toHaveURL(/\?tab=history$/)
+  await expect.poll(barOffset).toBeLessThan(24)
+  await expect.poll(barOffset).toBeGreaterThanOrEqual(0)
+  await page.getByRole('tab', { name: /^Actions/ }).click()
+  await expect.poll(barOffset).toBeLessThan(24)
+
+  // Refresh keeps the tab; Evidence is the default and drops the parameter.
+  await page.reload()
+  await expect(page.getByRole('tab', { name: /^Actions/ })).toHaveAttribute('data-state', 'active')
+  await page.getByRole('tab', { name: /^Evidence/ }).click()
+  await expect(page).toHaveURL(new RegExp(`/agent/cases/${MOCK.D.id}$`))
+})
+
+test('opening another case starts at its top', async ({ page }) => {
+  await queueRow(page, MOCK.D.line).click()
+  await expect(page.getByRole('region', { name: 'Sources checked' })).toBeVisible()
+  const scroller = page.locator('[data-case-scroller]')
+  await scroller.evaluate((el) => el.scrollTo(0, el.scrollHeight))
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(100)
+  await queueRow(page, MOCK.A.line).click()
+  await expect(page).toHaveURL(new RegExp(`/agent/cases/${MOCK.A.id}$`))
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBe(0)
 })

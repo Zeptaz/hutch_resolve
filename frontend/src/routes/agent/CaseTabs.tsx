@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { useNow } from './time'
 import { Calculator, Database, Download, FileCheck2, History, ListChecks, MessagesSquare, Search, Ticket, UserRound } from 'lucide-react'
 import type { AgentCaseDetail, Calculation, InvestigationResult, ProposalView, ReceiptView, SourceStatus } from '@/api/types'
@@ -21,21 +22,71 @@ const SYNC_TONE: Record<string, Tone> = {
   REVIEW_REQUIRED: 'danger',
 }
 
+const TAB_IDS = ['evidence', 'actions', 'conversation', 'receipts', 'history'] as const
+type TabId = (typeof TAB_IDS)[number]
+
 export function CaseTabs({ detail }: { detail: AgentCaseDetail }) {
+  // The open tab lives in the URL (?tab=), so refresh and Back land on the same view.
+  const [params, setParams] = useSearchParams()
+  const requested = params.get('tab') as TabId | null
+  const active: TabId = requested && TAB_IDS.includes(requested) ? requested : 'evidence'
+  // Marks where the tab bar sits in the flow; the bar itself is sticky, so it can't be measured for this.
+  const anchorRef = useRef<HTMLDivElement>(null)
+  const stripRef = useRef<HTMLDivElement>(null)
+
+  // On narrow screens the strip scrolls sideways; keep the open tab in view (also when opened from the URL).
+  useEffect(() => {
+    const strip = stripRef.current
+    const tab = strip?.querySelector<HTMLElement>('[role=tab][data-state=active]')
+    if (!strip || !tab) return
+    const left = tab.offsetLeft - strip.offsetLeft
+    if (left < strip.scrollLeft || left + tab.offsetWidth > strip.scrollLeft + strip.clientWidth) {
+      strip.scrollTo({ left: Math.max(0, left - 16), behavior: 'smooth' })
+    }
+  }, [active])
+
+  const select = (value: string) => {
+    const anchor = anchorRef.current
+    const scroller = anchor?.closest<HTMLElement>('[data-case-scroller]')
+    // Was the reader already below the tab bar? Then the new tab should open right under it,
+    // instead of wherever the old, longer tab happened to leave the scroll position.
+    const anchored = anchor && scroller ? anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top <= 8 : false
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p)
+        if (value === 'evidence') next.delete('tab')
+        else next.set('tab', value)
+        return next
+      },
+      { replace: true, preventScrollReset: true },
+    )
+    if (anchored && anchor && scroller) {
+      window.requestAnimationFrame(() => {
+        const offset = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+        scroller.scrollTo({ top: scroller.scrollTop + offset, behavior: 'instant' })
+      })
+    }
+  }
+
   const messages = detail.conversation.messages.length
   const tabs = [
     { value: 'evidence', label: 'Evidence', icon: <Search /> },
-    { value: 'actions', label: 'Actions & ticket', icon: <ListChecks />, count: detail.proposals.length },
+    { value: 'actions', label: 'Actions', icon: <ListChecks />, count: detail.proposals.length },
     { value: 'conversation', label: 'Conversation', icon: <MessagesSquare />, count: messages },
     { value: 'receipts', label: 'Receipts', icon: <FileCheck2 />, count: detail.receipts.length },
     { value: 'history', label: 'History', icon: <History />, count: detail.audit_events.length },
   ]
   return (
-    <Tabs defaultValue="evidence" className="gap-4">
-      <div className="-mx-1 overflow-x-auto px-1 pb-1">
+    <Tabs value={active} onValueChange={select} className="gap-4">
+      {/* Stays in reach while reading a long tab. */}
+      <div ref={anchorRef} aria-hidden className="-mb-4 h-0" />
+      <div
+        ref={stripRef}
+        className="sticky top-0 z-20 -mx-1 overflow-x-auto bg-background/90 px-1 py-2 backdrop-blur [scrollbar-width:none] supports-[backdrop-filter]:bg-background/75 max-sm:[mask-image:linear-gradient(to_right,black_85%,transparent)]"
+      >
         <TabsList className="h-10 w-max rounded-full bg-muted p-1">
           {tabs.map((t) => (
-            <TabsTrigger key={t.value} value={t.value} className="h-8 rounded-full px-3 data-active:bg-card data-active:shadow-sm">
+            <TabsTrigger key={t.value} value={t.value} className="h-8 rounded-full px-2.5 data-active:bg-card data-active:shadow-sm [&_svg]:hidden 2xl:[&_svg]:inline-block">
               {t.icon}
               {t.label}
               {t.count != null && t.count > 0 && <span className="rounded-full bg-foreground/10 px-1.5 text-[11px] font-semibold tabular-nums">{t.count}</span>}
@@ -43,19 +94,19 @@ export function CaseTabs({ detail }: { detail: AgentCaseDetail }) {
           ))}
         </TabsList>
       </div>
-      <TabsContent value="evidence" className="animate-fade-in">
+      <TabsContent value="evidence" className="min-h-[calc(100dvh-8rem)] animate-fade-in">
         <EvidenceTab detail={detail} />
       </TabsContent>
-      <TabsContent value="actions" className="animate-fade-in">
+      <TabsContent value="actions" className="min-h-[calc(100dvh-8rem)] animate-fade-in">
         <ActionsTab detail={detail} />
       </TabsContent>
-      <TabsContent value="conversation" className="animate-fade-in">
+      <TabsContent value="conversation" className="min-h-[calc(100dvh-8rem)] animate-fade-in">
         <ConversationTab detail={detail} />
       </TabsContent>
-      <TabsContent value="receipts" className="animate-fade-in">
+      <TabsContent value="receipts" className="min-h-[calc(100dvh-8rem)] animate-fade-in">
         <ReceiptsTab receipts={detail.receipts} />
       </TabsContent>
-      <TabsContent value="history" className="animate-fade-in">
+      <TabsContent value="history" className="min-h-[calc(100dvh-8rem)] animate-fade-in">
         <HistoryTab detail={detail} />
       </TabsContent>
     </Tabs>

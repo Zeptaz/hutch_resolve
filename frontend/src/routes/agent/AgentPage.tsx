@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LogOut } from 'lucide-react'
 import { Outlet, useMatch } from 'react-router'
 import { BrandMark } from '@/components/BrandMark'
@@ -30,7 +30,14 @@ function AgentGate() {
   const refreshQueue = useCallback(() => setQueueTick((n) => n + 1), [])
   const signal = useMemo(() => ({ tick: queueTick, refreshQueue }), [queueTick, refreshQueue])
   // On phones the queue and the case take turns; from lg up they sit side by side.
-  const caseOpen = useMatch('/agent/cases/:caseId') != null
+  const caseMatch = useMatch('/agent/cases/:caseId')
+  const caseOpen = caseMatch != null
+  const openCaseId = caseMatch?.params.caseId
+  // A different case always opens at its top, however far down the previous one was read.
+  const caseScroller = useRef<HTMLElement>(null)
+  useEffect(() => {
+    caseScroller.current?.scrollTo({ top: 0, behavior: 'instant' })
+  }, [openCaseId])
 
   if (status === 'restoring') return <LoadingState label="Checking your session…" />
   if (status === 'error') return <ErrorState title="Could not reach Resolve" error={error} onRetry={retry} />
@@ -54,7 +61,12 @@ function AgentGate() {
           <div className={cn('min-h-0 w-full flex-col lg:flex lg:w-[25rem] lg:shrink-0 lg:border-r', caseOpen ? 'hidden' : 'flex')}>
             <CaseQueue />
           </div>
-          <section aria-label="Case" className={cn('relative min-h-0 flex-1 overflow-y-auto', caseOpen ? 'block' : 'hidden lg:block')}>
+          <section
+            ref={caseScroller}
+            data-case-scroller
+            aria-label="Case"
+            className={cn('relative min-h-0 flex-1 overflow-y-auto', caseOpen ? 'block' : 'hidden lg:block')}
+          >
             <Outlet />
           </section>
         </div>
