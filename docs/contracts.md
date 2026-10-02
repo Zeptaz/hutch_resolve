@@ -168,7 +168,8 @@ Typed in-process ports: get_account, get_statement, list_recharges, list_offers/
 | --- | --- | --- |
 | DATABASE_URL / SANDBOX_DATABASE_URL | Resolve server | Separate Resolve/provider DB role DSNs |
 | APP_ORIGIN | Resolve server | http://localhost:5173; exact HTTPS origin on deployment |
-| DEMO_IDENTITIES_JSON | Resolve secret config | Identity -> credential hash/role/synthetic account selector; never client-selectable role |
+| DEMO_IDENTITIES_JSON | Resolve secret config | JSON map: identity -> `{credential_sha256, role, principal_id, sandbox_id, account_id?}`; credential hashes and fixed synthetic scope are server-side |
+| APP_SECRET_KEY | Resolve secret config | Random secret >=32 bytes for CSRF derivation; replace the example value |
 | VOICE_BASE_URL | Resolve server | http://localhost:8088 |
 | HUTCH_RESOLVE_HMAC_SECRET | Both servers | Same random secret, minimum32 characters |
 | HUTCH_RESOLVE_BASE_URL | Voice server | http://localhost:8080/api/v1 |

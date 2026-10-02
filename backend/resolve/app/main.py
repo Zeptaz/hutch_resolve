@@ -3,11 +3,14 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Protocol
+from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from .auth import ResolveError, build_auth_router
 from .config import Settings
 from .database import Database
 
@@ -20,15 +23,28 @@ class DatabaseProbe(Protocol):
     def close(self) -> None: ...
 
 
-def create_app(database: DatabaseProbe | None = None) -> FastAPI:
+def create_app(database: DatabaseProbe | None = None, settings: Settings | None = None, auth_store=None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         active_database = database
+        active_settings = settings
         if active_database is None:
-            load_dotenv()
-            settings = Settings.from_environment()
-            active_database = Database.connect(settings.database_url)
+            if active_settings is None:
+                load_dotenv()
+                active_settings = Settings.from_environment()
+            active_database = Database.connect(active_settings.database_url)
+        elif active_settings is None:
+            active_settings = Settings(
+                database_url="postgresql+psycopg://test:test@localhost/test",
+                app_origins=frozenset({"http://localhost:5173"}),
+                app_secret_key=b"test-only-secret-key-not-for-deployment",
+                cookie_secure=False,
+                session_minutes=30,
+                demo_identities={},
+            )
         application.state.database = active_database
+        application.state.settings = active_settings
+        application.state.auth_store = auth_store
         try:
             yield
         finally:
@@ -40,6 +56,46 @@ def create_app(database: DatabaseProbe | None = None) -> FastAPI:
         description="Synthetic telecom complaint investigation and resolution.",
         lifespan=lifespan,
     )
+    application.include_router(build_auth_router())
+
+    @application.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        try:
+            request_id = str(UUID(request.headers.get("X-Request-Id", "")))
+        except ValueError:
+            request_id = str(uuid4())
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-Id"] = request_id
+        return response
+
+    @application.exception_handler(ResolveError)
+    async def resolve_error_handler(request: Request, exc: ResolveError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": {
+                "code": exc.code,
+                "message": exc.message,
+                "retryable": exc.retryable,
+                "request_id": getattr(request.state, "request_id", str(uuid4())),
+                "details": {},
+            }},
+        )
+
+    @application.exception_handler(RequestValidationError)
+    async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        del exc
+        request_id = getattr(request.state, "request_id", str(uuid4()))
+        return JSONResponse(
+            status_code=422,
+            content={"error": {
+                "code": "VALIDATION_ERROR",
+                "message": "Request does not match the expected format",
+                "retryable": False,
+                "request_id": request_id,
+                "details": {},
+            }},
+        )
 
     @application.get("/api/v1/healthz", tags=["Operations"])
     async def health() -> dict[str, str]:

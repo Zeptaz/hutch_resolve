@@ -9,6 +9,10 @@ class Database:
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
 
+    @property
+    def engine(self) -> Engine:
+        return self._engine
+
     @classmethod
     def connect(cls, url: str) -> Database:
         engine = create_engine(url, pool_pre_ping=True)

@@ -11,12 +11,12 @@ Start with [context.md](context.md), the agent-maintained source of truth, and t
 1. Copy `.env.example` to `.env` and change the local development passwords if desired.
 2. Run `powershell -ExecutionPolicy Bypass -File scripts/start.ps1`.
 3. On a fresh Docker volume, PostgreSQL 18 applies both SQL migrations and loads the initial run automatically.
-4. Adopt the existing SQL baseline into Alembic with `python -m alembic upgrade head` (the migration connection uses `MIGRATION_DATABASE_URL`). Connect with any PostgreSQL client at `localhost:55432`, database `hutch_resolve`, user `hutch_admin`. The sandbox account is `hutch_sandbox`; the application account is `hutch_resolve_app`.
+4. Adopt the existing SQL baseline and application migrations with `python -m alembic upgrade head` (the migration connection uses `MIGRATION_DATABASE_URL`). Connect with any PostgreSQL client at `localhost:55432`, database `hutch_resolve`, user `hutch_admin`. The sandbox account is `hutch_sandbox`; the application account is `hutch_resolve_app`.
 5. Run `powershell -ExecutionPolicy Bypass -File scripts/reset.ps1` to add another isolated fixture run. Previous runs remain available. `scripts/stop.ps1` stops the database without removing its Docker volume.
 
 ## Start the backend foundation
 
-The starter exposes only process liveness and readiness for PostgreSQL plus Alembic schema revision `0002_domain_lifecycle`; it does not yet implement Resolve business APIs.
+The starter exposes process liveness/readiness and anonymous/demo session lifecycle endpoints. Demo logins are disabled until `DEMO_IDENTITIES_JSON` is configured with credential hashes and fixed synthetic run/account IDs. Other Resolve business APIs are not implemented yet. Replace the `.env.example` application secret before starting the server; use `APP_COOKIE_SECURE=true` under HTTPS.
 
 ```powershell
 python -m venv .venv
@@ -25,7 +25,7 @@ python -m pip install -r requirements-dev.txt
 python -m uvicorn app.main:app --app-dir backend/resolve --host 127.0.0.1 --port 8080
 ```
 
-The application reads `DATABASE_URL` from `.env`; it uses the separate `hutch_resolve_app` local role for PostgreSQL. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and the adopted schema revision. Alembic uses the local admin `MIGRATION_DATABASE_URL` to create its revision table; the first revision only validates/adopts schemas 001-003 and will not recreate or alter sandbox rows.
+The application reads `DATABASE_URL` from `.env`; it uses the separate `hutch_resolve_app` local role for PostgreSQL. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0002_domain_lifecycle`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003 without replaying CREATE TABLE statements, and revision 0002 adds application lifecycle tables/columns.
 
 Reset accepts an optional UUID: `scripts/reset.ps1 -RunId <uuid>`. Fixture IDs are deterministically derived under that run, so repeatable inputs produce repeatable records and different runs do not collide.
 
@@ -34,9 +34,9 @@ The database volume is Docker-managed, outside the OneDrive-synced repository. `
 ## Repository map
 
 - `database/migrations/001_sandbox.sql`: synthetic CRM, charging, recharge, product/VAS, usage/quota and service-assurance records.
-- `database/migrations/002_resolve.sql` and `003_scope_constraints.sql`: planned Resolve persistence and cross-run ownership constraints only; they do not implement API behavior.
+- `database/migrations/002_resolve.sql` and `003_scope_constraints.sql`: initial Resolve persistence and cross-run ownership constraints.
 - `database/seed.sql`: fixture version 2 with six deterministic prepaid support cases and provider fault profiles.
-- `backend/resolve/app/`: FastAPI startup and health/readiness foundation.
+- `backend/resolve/app/`: FastAPI startup, health/readiness, error envelope, and guest/demo session endpoints.
 - `backend/resolve/migrations/`: Alembic migration environment, non-destructive legacy baseline adoption and the first additive domain-lifecycle migration.
 - `scripts/`: start/stop/reset and fixture UUID generation.
 - `docs/mock-environment.md`: relationships, assumptions, failure modes and future provider contracts.

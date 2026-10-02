@@ -38,6 +38,8 @@ Acceptance: fresh initialization and existing-volume upgrade pass; A=42000, D ac
 ## H-02: application, authentication and facade
 
 - [ ] Create FastAPI composition, validated configuration, SQLAlchemy repositories, health/readiness and consistent error handling. Pin dependencies in an isolated environment.
+- [x] Implement guest/demo customer/agent session endpoints with opaque hashed cookie tokens, configured credential hashes and fixed run/account scope, exact Origin checks, deterministic hashed CSRF tokens, atomic guest upgrade, 30-minute expiry, revocation and logout-driven Voice binding invalidation. Unit and isolated PostgreSQL integration pass.
+- [ ] Add authenticated request context for domain routes, guest conversation transfer, route-level roles, throttling, and full nested-entity authorization before expanding the API surface.
 - [ ] Implement opaque hashed sessions, separate customer/agent cookies, Origin/CSRF checks, 30-minute expiry, logout/revocation, and synthetic login mapping. Caller-provided roles/account IDs never establish authorization.
 - [ ] Add guest FAQ sessions; upgrading a guest rotates the token, scopes its existing conversation to the authenticated run/account, and preserves only public history. Changing an already private identity creates a new session/conversation.
 - [ ] Authorize every entity read/write, including nested IDs. Same-run membership alone is insufficient for customer access: conversation must belong to the current session. Agent access is run-scoped. Distinguish forbidden role (403) from inaccessible entity (404).
@@ -112,5 +114,6 @@ Existing Voice read timeout is eight seconds; conversation processing must retur
 | --- | --- | --- | --- |
 | 2026-10-02 | Baseline | 15 existing Voice tests pass; ephemeral streaming reproduction fails; live DB healthy; seed defects confirmed read-only | H-01 through H-09 remain unchecked |
 | 2026-10-02 | H-01 fixture corrections + H-01 migration phase + H-02 readiness starter | Fixture v2 SQL assertions pass on isolated bootstrap; Alembic fresh upgrade and repeated upgrade both pass at `0002_domain_lifecycle`; app-role `/api/v1/readyz` returns 200; PostgreSQL confirms all five new tables and denies UPDATE on review history while allowing INSERT; tests 5 passed, compileall and diff check pass | H-01 reset/session and Voice-binding revocation, reversal fixture, readiness-after-seed marker; H-02 authentication/facade/repositories and consistent errors; H-03 onward |
+| 2026-10-02 | H-02 session authentication slice | 10 tests pass; isolated PostgreSQL login flow verified guest creation, atomic guest-to-customer token rotation, fixed customer/account and agent/run scopes, CSRF logout, and revoked-cookie rejection; migrated runtime role used successfully | AuthContext middleware for future routes, guest conversation transfer, throttling, all business APIs and authorization; route access policy tests against real domain entities |
 
 Work order and time boxes are in context.md. Harry owns the critical path; publish interfaces early and integrate one vertical text slice before secondary features.
