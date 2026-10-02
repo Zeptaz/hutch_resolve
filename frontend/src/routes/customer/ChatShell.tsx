@@ -9,7 +9,6 @@ import { ErrorState, LoadingState } from '@/components/states'
 import { StatusBadge } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useI18n, type Translate } from '@/i18n/context'
 import { formatTime } from '@/lib/format'
@@ -21,10 +20,10 @@ import { OperationTracker } from './cards/OperationTracker'
 import { QuestionPrompt } from './QuestionPrompt'
 
 // Each language is named in its own script so it is recognisable whatever the current UI language.
-const LANGUAGES: { value: Language; label: string }[] = [
-  { value: 'en', label: 'English' },
-  { value: 'si', label: 'සිංහල' },
-  { value: 'ta', label: 'தமிழ்' },
+const LANGUAGES: { value: Language; short: string; label: string }[] = [
+  { value: 'en', short: 'EN', label: 'English' },
+  { value: 'si', short: 'සි', label: 'සිංහල' },
+  { value: 'ta', short: 'த', label: 'தமிழ்' },
 ]
 
 const MAX_TEXT = 4000
@@ -215,7 +214,7 @@ export function ChatShell({ session }: { session: SessionView }) {
           <Dialog open={casesOpen} onOpenChange={setCasesOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" className="lg:hidden">
-                <FolderOpen aria-hidden /> {t('chat.cases')}
+                <FolderOpen aria-hidden /> <span className="sr-only sm:not-sr-only">{t('chat.cases')}</span>
                 {!!conversation?.cases.length && (
                   <span className="rounded-full bg-primary px-1.5 text-[11px] leading-4 text-primary-foreground">
                     {conversation.cases.length}
@@ -231,18 +230,7 @@ export function ChatShell({ session }: { session: SessionView }) {
               </div>
             </DialogContent>
           </Dialog>
-          <Select value={language} onValueChange={(v) => setLanguage(v as Language)}>
-            <SelectTrigger size="sm" aria-label={t('lang.label')} className="w-fit min-w-20">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LANGUAGES.map((l) => (
-                <SelectItem key={l.value} value={l.value}>
-                  {l.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <LanguageToggle value={language} onChange={setLanguage} label={t('lang.label')} />
         </div>
       </header>
 
@@ -436,6 +424,46 @@ function Typing() {
       {[0, 150, 300].map((d) => (
         <span key={d} className="size-1.5 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: `${d}ms` }} />
       ))}
+    </div>
+  )
+}
+
+/** Segmented EN | සි | த switch. A radio group: arrow keys move between languages, Tab leaves the group. */
+function LanguageToggle({ value, onChange, label }: { value: Language; onChange: (l: Language) => void; label: string }) {
+  const move = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+    if (!step) return
+    e.preventDefault()
+    const i = LANGUAGES.findIndex((l) => l.value === value)
+    const next = LANGUAGES[(i + step + LANGUAGES.length) % LANGUAGES.length]
+    onChange(next.value)
+    e.currentTarget.querySelector<HTMLButtonElement>(`[data-lang="${next.value}"]`)?.focus()
+  }
+  return (
+    <div role="radiogroup" aria-label={label} onKeyDown={move} className="flex h-7 items-center rounded-full bg-muted p-0.5">
+      {LANGUAGES.map((l) => {
+        const selected = l.value === value
+        return (
+          <button
+            key={l.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={l.label}
+            title={l.label}
+            lang={l.value}
+            data-lang={l.value}
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onChange(l.value)}
+            className={cn(
+              'h-6 min-w-8 rounded-full px-2 text-xs font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+              selected ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {l.short}
+          </button>
+        )
+      })}
     </div>
   )
 }
