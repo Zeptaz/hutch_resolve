@@ -97,6 +97,8 @@ TURN_BUDGET_SECONDS = {Channel.TEXT: 15.0, Channel.VOICE: 7.0}
 MIN_REWRITE_SECONDS = 1.5  # below this, keep the English reply rather than risk the deadline
 MIN_AGENT_SECONDS = 3.0  # the package agent needs at least one model call
 _DEADLINE: ContextVar[float | None] = ContextVar("turn_deadline", default=None)
+# Voice has no card to look at, so spoken offers state the consequences; text points to the card.
+_CHANNEL: ContextVar[Channel] = ContextVar("turn_channel", default=Channel.TEXT)
 # Knowledge topics where a signed-in customer's current balance is useful context.
 _BALANCE_TOPICS = {"how-to-reload", "check-balance-how", "reload-not-received", "prepaid-recharge"}
 _CODE = re.compile(r"[A-Z0-9_]+")
@@ -180,6 +182,7 @@ class ConversationService:
             return outcome.result
         claim = outcome.claim
         token = _DEADLINE.set(self._monotonic() + self._budgets[turn.channel])
+        channel_token = _CHANNEL.set(turn.channel)
         try:
             start = claim.state
             if start.script is None:  # nothing detected from the customer yet: use the UI hint
@@ -192,6 +195,7 @@ class ConversationService:
             raise
         finally:
             _DEADLINE.reset(token)
+            _CHANNEL.reset(channel_token)
         return await self._conversations.complete_turn(ctx, claim, _user_body(turn, state.language), draft, state)
 
     def _remaining(self) -> float:
@@ -238,6 +242,8 @@ class ConversationService:
             return _confirm_prompt(state, turn.channel)
         if intent is Intent.FAQ:
             return await self._faq(ctx, turn, inp.text, extraction, state)
+        if intent is Intent.GREETING:
+            return _introduce(state, extraction.customer_name)
         if intent is Intent.OFF_TOPIC:
             return _ask(state, Q_CHOOSE_COMPLAINT, t.text("off_topic", state.language), ["category_selection", "text"])
         if intent is Intent.PACKAGES:
@@ -903,6 +909,20 @@ def _ask(state: DialogueState, code: str, reply: str, allowed: list[InputType]) 
     return draft, state.evolve(pending_question=question)
 
 
+# A first name the customer typed: letters (Latin, Sinhala, Tamil), up to two words. Anything else is dropped.
+_NAME = re.compile(r"[A-Za-z\u0D80-\u0DFF\u0B80-\u0BFF][A-Za-z\u0D80-\u0DFF\u0B80-\u0BFF.'-]*(?: [A-Za-z\u0D80-\u0DFF\u0B80-\u0BFF.'-]+)?")
+
+
+def _introduce(state: DialogueState, name: str | None) -> Step:
+    """Who the assistant is and what it can do, greeting the customer by the name they gave."""
+    name = (name or "").strip()
+    if name and _NAME.fullmatch(name) and len(name) <= 24:
+        reply = t.text("introduce_named", state.language, name=name[:1].upper() + name[1:])
+    else:
+        reply = t.text("introduce", state.language)
+    return _ask(state, Q_CHOOSE_COMPLAINT, reply, ["category_selection", "text"])
+
+
 def _login_required(state: DialogueState) -> Step:
     return _ask(state, Q_LOGIN_REQUIRED, t.text("login_required", state.language), ["text"])
 
@@ -1034,7 +1054,11 @@ def _citations(cards: list[KnowledgeCard]) -> list[Citation]:
 
 def _offer_draft(proposal: ProposalView, lang: Language, case_id) -> TurnDraft:
     question = PendingQuestion(code=Q_CONFIRM_ACTION, text=t.text("confirm_prompt", lang), allowed_input_types=["action_decision", "text"])
-    reply = t.text("offer_action", lang, action=t.action_label(proposal.action_type, lang), target=proposal.target_label, consequences=proposal.consequences)
+    action = t.action_label(proposal.action_type, lang)
+    if _CHANNEL.get() is Channel.VOICE:
+        reply = t.text("offer_action_voice", lang, action=action, target=proposal.target_label, consequences=proposal.consequences)
+    else:  # points to the card's buttons; the consequences stay in the text too
+        reply = t.text("offer_action", lang, action=action, target=proposal.target_label, consequences=proposal.consequences)
     return TurnDraft(reply_text=reply, case_id=case_id, cards=[ConfirmationCard(data=proposal)], pending_question=question)
 
 
@@ -1043,7 +1067,7 @@ def _offer_with_alternatives(proposal: ProposalView, alternatives: list[ActionCh
     if not alternatives:
         return offer
     options = "; ".join(f"{t.action_label(a.action_type, lang)} ({a.target_label})" for a in alternatives)
-    return TurnDraft(reply_text=f"{offer.reply_text} {t.text('other_options', lang, options=options)}", case_id=case_id,
+    return TurnDraft(reply_text=f"{offer.reply_text}\n{t.text('other_options', lang, options=options)}", case_id=case_id,
                      cards=offer.cards, pending_question=offer.pending_question)
 
 
@@ -1051,15 +1075,18 @@ def _investigation_draft(
     inv: InvestigationResult, proposal: ProposalView | None, lang: Language, alternatives: list[ActionChoice] | None = None
 ) -> TurnDraft:
     """Reply strictly from Resolve's findings; no number is computed or rephrased here."""
-    parts = [finding.text for finding in inv.findings] or [t.text("no_findings", lang)]
+    # Short paragraphs: what was found; what is missing or limits the answer; what can be done next.
+    found = [finding.text for finding in inv.findings] or [t.text("no_findings", lang)]
+    limits = []
     if inv.evidence_state is EvidenceState.PARTIAL:
         missing = ", ".join(dict.fromkeys(t.missing_label(code, lang) for code in inv.missing)) or t.missing_label("unknown", lang)
-        parts.append(t.text("evidence_partial", lang, missing=missing))
+        limits.append(t.text("evidence_partial", lang, missing=missing))
     elif inv.evidence_state is EvidenceState.CONFLICTING:
-        parts.append(t.text("evidence_conflicting", lang))
+        limits.append(t.text("evidence_conflicting", lang))
     # Resolve's customer-facing limits (e.g. future renewal vs past dispute). Code-style reasons such as
     # OPENING_SNAPSHOT_MISSING are already explained by the missing-records sentence and never shown raw.
-    parts += [reason for reason in inv.review_reasons if not _CODE.fullmatch(reason)]
+    limits += [reason for reason in inv.review_reasons if not _CODE.fullmatch(reason)]
+    parts = [" ".join(found)] + ([" ".join(limits)] if limits else [])
 
     cards: list = [CalculationCard(data=calc) for calc in inv.calculations]
     cards += [FindingCard(data=finding) for finding in inv.findings]
@@ -1071,7 +1098,7 @@ def _investigation_draft(
         cards += offer.cards
         question = offer.pending_question
 
-    return TurnDraft(reply_text=" ".join(parts), case_id=inv.case_id, cards=cards, pending_question=question)
+    return TurnDraft(reply_text="\n\n".join(parts), case_id=inv.case_id, cards=cards, pending_question=question)
 
 
 def _after_investigation(

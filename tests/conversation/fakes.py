@@ -716,6 +716,7 @@ def extraction(**overrides) -> dict:
         "faq_query": None,
         "summary": None,
         "ambiguities": [],
+        "customer_name": None,
     }
     if "time" in overrides:
         base["time_reference"] = {**base["time_reference"], **overrides.pop("time")}

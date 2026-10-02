@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .dto import CONTRACT_ACTION_TYPES, ActionType, ComplaintType, Language, MAX_TEXT_CHARS
 from .model import ModelClient, ModelError, ModelReply
 
-PROMPT_VERSION = "extract-v5"
+PROMPT_VERSION = "extract-v6"
 TOTAL_BUDGET_SECONDS = 6.0
 MAX_WINDOW = timedelta(days=30)
 # Sri Lanka observes no DST; a fixed offset avoids a tzdata dependency.
@@ -39,6 +39,7 @@ class Intent(StrEnum):
     HUMAN_REQUEST = "HUMAN_REQUEST"
     PACKAGES = "PACKAGES"  # wants package suggestions, or wants the assistant to activate one (prototype)
     OFF_TOPIC = "OFF_TOPIC"  # nothing to do with their mobile service
+    GREETING = "GREETING"  # hello / introduces themselves / asks who the assistant is or what it can do
     OTHER = "OTHER"
 
 
@@ -104,6 +105,7 @@ class Extraction(BaseModel):
     faq_query: Annotated[str, Field(max_length=200)] | None
     summary: Annotated[str, Field(max_length=300)] | None
     ambiguities: list[Ambiguity]
+    customer_name: Annotated[str, Field(max_length=40)] | None = None
 
     @property
     def amount_minor(self) -> int | None:
@@ -145,10 +147,11 @@ RESPONSE_SCHEMA: dict[str, Any] = {
         "faq_query": _nullable({"type": "string", "maxLength": 200}),
         "summary": _nullable({"type": "string", "maxLength": 300}),
         "ambiguities": {"type": "array", "items": _enum(Ambiguity)},
+        "customer_name": _nullable({"type": "string", "maxLength": 40}),
     },
     "required": [
         "intent", "decision", "action_choice", "detected_language", "script", "complaint_type", "time_reference",
-        "amount_lkr", "recharge_reference", "faq_query", "summary", "ambiguities",
+        "amount_lkr", "recharge_reference", "faq_query", "summary", "ambiguities", "customer_name",
     ],
 }
 
@@ -176,8 +179,12 @@ intent:
 - ACTION_DECISION: answers yes/no to an action offered by the assistant.
 - STATUS: asks whether a request/action/ticket/package activation is done, or asks for a receipt.
 - HUMAN_REQUEST: wants a person, agent or review.
+- GREETING: only a greeting, the customer introducing themselves, or a question about the assistant itself ("hi",
+  "good morning", "I'm Kamal", "mama Nimal", "introduce yourself", "who are you", "oya kauda", "what can you do",
+  "nee yaar"). If the message also asks for something, use that intent instead ("hi mata reload ekak danna one" -> FAQ).
 - OFF_TOPIC: clearly unrelated to their mobile line or HUTCH (weather, homework, coding, news, jokes, other companies).
-- OTHER: greetings, thanks or anything else.
+  Questions about the assistant itself are GREETING, not OFF_TOPIC.
+- OTHER: thanks, "ok", or anything else.
 
 decision (only for ACTION_DECISION, else null):
 - ACCEPT only for a clear, unconditional yes to the offered action: e.g. "yes", "ok go ahead", "ow", "hari", "karanna", "aama", "sari", "seri".
@@ -199,6 +206,8 @@ Extract only what the customer actually said. Never guess numbers or dates.
 - faq_query: for FAQ only, a few English keywords for the topic (e.g. "how to reload", "activate data package",
   "contact support"). Otherwise null.
 - summary: one neutral English sentence describing the complaint, without names or numbers not in the message. null if not a complaint.
+- customer_name: the first name the customer gave for themselves ("I'm Kamal", "mage nama Nimal", "en peyar Ravi").
+  Only a name they said; never guess. null otherwise.
 - ambiguities: list a field only when the customer seems to mean something specific but it is genuinely unclear
   (e.g. "last time I recharged" -> TIME_WINDOW; "that service" with several possibilities -> TARGET; unclear "not"/"didn't" -> NEGATION).
   Do not list a field just because it was not mentioned.
@@ -221,6 +230,9 @@ Examples (message -> key fields):
 "deweni eka danna" (packages_shown) -> PACKAGES, si
 "enakku nalla data package sollunga" -> PACKAGES, ta
 "package eka active da?" -> STATUS, si
+"hi, I'm Kamal" -> GREETING, customer_name "Kamal"
+"oya kauda? mokakda oyata karanna puluwan" -> GREETING, si
+"vanakkam, en peyar Ravi" -> GREETING, ta, customer_name "Ravi"
 "what's the weather in Colombo today?" -> OFF_TOPIC
 "write me a python script" -> OFF_TOPIC
 "customer care ekata call karanna number eka mokakda" -> FAQ, si, faq_query "contact support"

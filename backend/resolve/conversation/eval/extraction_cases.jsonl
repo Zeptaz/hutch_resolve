@@ -55,3 +55,8 @@
 {"id": "pkg-06", "variety": "english", "message": "can you activate a package for me", "expect": {"intent": "PACKAGES"}}
 {"id": "off-01", "variety": "english", "message": "who won the cricket match yesterday?", "expect": {"intent": "OFF_TOPIC"}}
 {"id": "off-02", "variety": "singlish", "message": "mage maths homework ekata udaw karanna", "expect": {"intent": "OFF_TOPIC", "detected_language": "si"}}
+{"id": "greet-01", "variety": "english", "message": "hi, I'm Kamal", "expect": {"intent": "GREETING"}}
+{"id": "greet-02", "variety": "singlish", "message": "oya kauda?", "expect": {"intent": "GREETING", "detected_language": "si"}}
+{"id": "greet-03", "variety": "english", "message": "introduce yourself", "expect": {"intent": "GREETING"}}
+{"id": "greet-04", "variety": "tanglish", "message": "vanakkam, naan Ravi", "expect": {"intent": "GREETING", "detected_language": "ta"}}
+{"id": "greet-05", "variety": "sinhala_script", "message": "ආයුබෝවන්, මගේ නම නිමල්", "expect": {"intent": "GREETING", "detected_language": "si"}}

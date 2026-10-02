@@ -34,7 +34,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -241,6 +241,37 @@ class HybridFacade:
 
 # --- wiring ---------------------------------------------------------------------------
 
+RUN_ID = conftest.SANDBOX  # the fixture run; hybrid mode switches to the database's active run
+
+
+def main_database_urls() -> tuple[str, str]:
+    """App-role and sandbox-role URLs for the compose PostgreSQL, from the repo's .env (defaults as in compose.yaml)."""
+    from urllib.parse import quote
+
+    env = {}
+    path = REPO / ".env"
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            key, sep, value = line.partition("=")
+            if sep and not key.strip().startswith("#"):
+                env[key.strip()] = value.strip().strip('"').strip("'")
+    get = lambda key, default: os.environ.get(key) or env.get(key) or default  # noqa: E731
+    host = f"127.0.0.1:{get('POSTGRES_PORT', '55432')}/{get('POSTGRES_DB', 'hutch_resolve')}"
+    app = f"{quote(get('RESOLVE_DB_USER', 'hutch_resolve_app'))}:{quote(get('RESOLVE_DB_PASSWORD', 'resolve-local-change-me'))}"
+    box = f"{quote(get('SANDBOX_DB_USER', 'hutch_sandbox'))}:{quote(get('SANDBOX_DB_PASSWORD', 'sandbox-local-change-me'))}"
+    return f"postgresql+psycopg://{app}@{host}", f"postgresql+psycopg://{box}@{host}"
+
+
+def active_run(engine) -> UUID:
+    """The newest ACTIVE sandbox run (Harry's reset retires older ones); the fixture run if none is marked."""
+    from sqlalchemy import text
+
+    with engine.connect() as connection:
+        found = connection.execute(text(
+            "SELECT id FROM sandbox.sandbox_runs WHERE run_status='ACTIVE' ORDER BY created_at DESC LIMIT 1")).scalar_one_or_none()
+    return UUID(str(found)) if found else conftest.SANDBOX
+
+
 load_dotenv(REPO / ".env")
 if MODE == "real":
     sys.exit("RESOLVE_BACKEND=real is not available yet: it needs Harry's turn storage and conversation routes.")
@@ -264,9 +295,15 @@ if MODE == "hybrid":
     from resolve.conversation.resolve_adapter import ResolveFacadeAdapter
 
     db_url, sandbox_url = os.environ.get("RESOLVE_DEV_DATABASE_URL"), os.environ.get("RESOLVE_DEV_SANDBOX_URL")
+    if os.environ.get("RESOLVE_DEV_DB") == "main":  # the repo's compose PostgreSQL, credentials from .env (never printed)
+        db_url, sandbox_url = main_database_urls()
     if not (db_url and sandbox_url):
-        sys.exit("hybrid needs RESOLVE_DEV_DATABASE_URL and RESOLVE_DEV_SANDBOX_URL (a throwaway migrated database)")
+        sys.exit("hybrid needs RESOLVE_DEV_DB=main or RESOLVE_DEV_DATABASE_URL and RESOLVE_DEV_SANDBOX_URL (a migrated database)")
     app_engine, sandbox_engine = create_engine(db_url), create_engine(sandbox_url)
+    RUN_ID = active_run(sandbox_engine)
+    if RUN_ID != conftest.SANDBOX:
+        # Harry's seed_run.py derives every fixture ID of a new run as uuid5(run, original ID).
+        ACCOUNTS.update({line: uuid5(RUN_ID, str(account)) for line, account in ACCOUNTS.items() if line != "DEMO"})
     faults = os.environ.get("RESOLVE_DEV_FAULTS", "0") == "1"
     provider = PostgresSandboxProvider(app_engine, sandbox_engine if faults else None)  # main.py passes the sandbox engine
     harry_facade = ResolveFacade(app_engine, provider, cursor_secret=os.urandom(32))
@@ -331,7 +368,7 @@ def error(code: str, message: str = "") -> JSONResponse:
 
 def new_session(line: str) -> tuple[str, AuthContext]:
     token, session_id = uuid4().hex, uuid4()
-    ctx = AuthContext(session_id=session_id, principal_id=f"dev:{line}", role=Role.CUSTOMER, sandbox_id=conftest.SANDBOX,
+    ctx = AuthContext(session_id=session_id, principal_id=f"dev:{line}", role=Role.CUSTOMER, sandbox_id=RUN_ID,
                       account_id=ACCOUNTS[line], request_id=uuid4(), channel=Channel.TEXT)
     if harry_store is not None:
         import secrets
@@ -600,6 +637,6 @@ async def health():
 
 
 if __name__ == "__main__":
-    print(f"DEV BACKEND ({MODE}): default line {DEFAULT_LINE}, model={client.model_name if client else 'NONE (forms only)'}", flush=True)
+    print(f"DEV BACKEND ({MODE}): run {RUN_ID}, default line {DEFAULT_LINE}, model={client.model_name if client else 'NONE (forms only)'}", flush=True)
     print("Choose a line: http://localhost:5174/api/v1/dev", flush=True)
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
