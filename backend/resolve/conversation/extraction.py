@@ -18,10 +18,10 @@ from typing import Annotated, Any, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from .dto import ComplaintType, Language, MAX_TEXT_CHARS
+from .dto import ActionType, ComplaintType, Language, MAX_TEXT_CHARS
 from .model import ModelClient, ModelError, ModelReply
 
-PROMPT_VERSION = "extract-v2"
+PROMPT_VERSION = "extract-v3"
 TOTAL_BUDGET_SECONDS = 6.0
 MAX_WINDOW = timedelta(days=30)
 # Sri Lanka observes no DST; a fixed offset avoids a tzdata dependency.
@@ -92,6 +92,7 @@ class Extraction(BaseModel):
 
     intent: Intent
     decision: SpokenDecision | None
+    action_choice: ActionType | None
     detected_language: Language
     script: Script
     complaint_type: ComplaintType | None
@@ -122,6 +123,7 @@ RESPONSE_SCHEMA: dict[str, Any] = {
     "properties": {
         "intent": _enum(Intent),
         "decision": _nullable(_enum(SpokenDecision)),
+        "action_choice": _nullable(_enum(ActionType)),
         "detected_language": _enum(Language),
         "script": _enum(Script),
         "complaint_type": _nullable(_enum(ComplaintType)),
@@ -143,7 +145,7 @@ RESPONSE_SCHEMA: dict[str, Any] = {
         "ambiguities": {"type": "array", "items": _enum(Ambiguity)},
     },
     "required": [
-        "intent", "decision", "detected_language", "script", "complaint_type", "time_reference",
+        "intent", "decision", "action_choice", "detected_language", "script", "complaint_type", "time_reference",
         "amount_lkr", "recharge_reference", "faq_query", "summary", "ambiguities",
     ],
 }
@@ -173,6 +175,10 @@ decision (only for ACTION_DECISION, else null):
 - ACCEPT only for a clear, unconditional yes to the offered action: e.g. "yes", "ok go ahead", "ow", "hari", "karanna", "aama", "sari", "seri".
 - DECLINE only for a clear no: e.g. "no", "don't", "epa", "naha", "karanna epa", "vendam", "illai".
 - UNCLEAR for anything else: questions, conditions ("yes but first..."), mixed yes and no, sarcasm, or a yes about something else.
+
+action_choice (only when conversation.actions_offered lists several actions and the customer picks one, else null):
+DEACTIVATE_VAS (stop/cancel the service or its renewal), SEND_SETTINGS_INSTRUCTIONS (phone/internet settings),
+CREATE_REVIEW_TICKET (review, a person, or checking the past charge). Picking an option is not consent.
 
 complaint_type (only for NEW_COMPLAINT or CORRECTION, else null):
 BALANCE_RECHARGE (balance dropped, recharge missing, money deducted), DATA_DEPLETION (data finished too fast),
@@ -212,6 +218,7 @@ class ExtractionContext:
     candidate_complaint_type: ComplaintType | None = None
     active_case_complaint_type: ComplaintType | None = None
     has_pending_proposal: bool = False
+    actions_offered: tuple[str, ...] = ()
 
 
 def build_prompt(text: str, context: ExtractionContext) -> str:
@@ -222,6 +229,7 @@ def build_prompt(text: str, context: ExtractionContext) -> str:
             "complaint_being_collected": context.candidate_complaint_type,
             "active_case_type": context.active_case_complaint_type,
             "action_offer_open": context.has_pending_proposal,
+            "actions_offered": list(context.actions_offered),
         },
         "message": text[:MAX_TEXT_CHARS],
     }

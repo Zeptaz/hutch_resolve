@@ -81,7 +81,7 @@ from .ports import (
     ResolveFacade,
     TurnDraft,
 )
-from .state import Candidate, DialogueState, PendingProposalRef
+from .state import ActionChoice, Candidate, DialogueState, PendingProposalRef
 
 MAX_WINDOW = timedelta(days=30)
 
@@ -90,6 +90,7 @@ Q_CHOOSE_COMPLAINT = "CHOOSE_COMPLAINT_TYPE"
 Q_COMPLAINT_DETAILS = "COMPLAINT_DETAILS"
 Q_LOGIN_REQUIRED = "LOGIN_REQUIRED"
 Q_CONFIRM_ACTION = "CONFIRM_ACTION"
+Q_CHOOSE_ACTION = "CHOOSE_ACTION"
 # Text only: a details form carries its own complaint type and could override the one being collected.
 Q_CLARIFY = {
     Ambiguity.TIME_WINDOW: ("CLARIFY_TIME_WINDOW", "clarify_time_window", ["text"]),
@@ -182,6 +183,9 @@ class ConversationService:
             return self._structured_fallback(ctx, state)
 
         intent = extraction.intent
+        choice = _match_choice(state, extraction)
+        if choice is not None:
+            return await self._choose_action(ctx, turn, choice, state)
         if intent is Intent.ACTION_DECISION:
             if state.pending_proposal is None:
                 return TurnDraft(reply_text=t.text("no_pending_action", state.language), case_id=state.active_case_id), state
@@ -233,6 +237,7 @@ class ConversationService:
             candidate_complaint_type=state.candidate.complaint_type if state.candidate else None,
             active_case_complaint_type=active_type,
             has_pending_proposal=state.pending_proposal is not None,
+            actions_offered=tuple(c.action_type.value for c in state.pending_choices),
         )
         outcome = await self._extractor.extract(text, context)
         await self._record_usage(ctx, turn, state, outcome)
@@ -369,12 +374,7 @@ class ConversationService:
         # Resolve invalidates proposals bound to the previous revision.
         proposal = await self._propose_single(ctx, turn, case.id, investigation)
         draft = _investigation_draft(investigation, proposal, lang)
-        new_state = state.evolve(
-            active_case_id=case.id,
-            candidate=None,
-            pending_question=draft.pending_question,
-            pending_proposal=_proposal_ref(proposal, turn) if proposal else None,
-        )
+        new_state = _after_investigation(state, turn, case.id, investigation, proposal, draft)
         return _prefixed(draft, t.text("rechecked", lang, window=t.format_window(start, end))), new_state
 
     async def _follow_up(self, ctx: AuthContext, state: DialogueState) -> Step:
@@ -507,13 +507,26 @@ class ConversationService:
         )
         proposal = await self._propose_single(ctx, turn, case.id, investigation)
         draft = _investigation_draft(investigation, proposal, state.language)
-        new_state = state.evolve(
-            active_case_id=case.id,
-            candidate=None,
-            pending_question=draft.pending_question,
-            pending_proposal=_proposal_ref(proposal, turn) if proposal else None,
+        return draft, _after_investigation(state, turn, case.id, investigation, proposal, draft)
+
+    async def _choose_action(self, ctx: AuthContext, turn: NormalizedTurn, choice: ActionChoice, state: DialogueState) -> Step:
+        """The customer picked one eligible action: request its proposal. Consent still comes later."""
+        current = await self._facade.get_case(ctx, choice.case_id)
+        proposal = await self._facade.propose_action(
+            ctx,
+            choice.case_id,
+            ProposalRequest(
+                expected_version=current.version,
+                investigation_id=choice.investigation_id,
+                action_type=choice.action_type,
+                target_id=choice.target_id,
+            ),
+            command_key(turn.conversation_id, turn.turn_id, "propose", f"{choice.action_type}:{choice.target_id}"),
         )
-        return draft, new_state
+        draft = _offer_draft(proposal, state.language, choice.case_id)
+        return draft, state.evolve(
+            pending_choices=[], pending_question=draft.pending_question, pending_proposal=_proposal_ref(proposal, turn)
+        )
 
     async def _propose_single(
         self, ctx: AuthContext, turn: NormalizedTurn, case_id, investigation: InvestigationResult
@@ -587,10 +600,12 @@ class ConversationService:
             return TurnDraft(reply_text=t.text("case_not_found", lang), case_id=state.active_case_id), state
 
         keep_proposal = state.pending_proposal if state.pending_proposal and state.pending_proposal.case_id == case.id else None
+        keep_choices = [c for c in state.pending_choices if c.case_id == case.id]
         state = state.evolve(
             active_case_id=case.id,
             pending_proposal=keep_proposal,
-            pending_question=state.pending_question if keep_proposal else None,
+            pending_choices=keep_choices,
+            pending_question=state.pending_question if keep_proposal or keep_choices else None,
             candidate=None,
         )
         reply = t.text("case_selected", lang, complaint=t.complaint_label(case.complaint_type, lang), status=t.case_status_label(case.status))
@@ -683,6 +698,7 @@ def _investigation_draft(inv: InvestigationResult, proposal: ProposalView | None
         parts.append(t.text("evidence_partial", lang, missing=missing))
     elif inv.evidence_state is EvidenceState.CONFLICTING:
         parts.append(t.text("evidence_conflicting", lang))
+    parts += inv.review_reasons  # Resolve's customer-facing limits, e.g. future renewal vs past dispute
 
     cards: list = [CalculationCard(data=calc) for calc in inv.calculations]
     cards += [FindingCard(data=finding) for finding in inv.findings]
@@ -695,9 +711,48 @@ def _investigation_draft(inv: InvestigationResult, proposal: ProposalView | None
         question = offer.pending_question
     elif len(inv.eligible_actions) > 1:
         options = "; ".join(f"{t.action_label(a.action_type, lang)} ({a.target_label})" for a in inv.eligible_actions)
-        parts.append(t.text("multiple_actions", lang, options=options))
+        reply = t.text("multiple_actions", lang, options=options)
+        parts.append(reply)
+        question = PendingQuestion(code=Q_CHOOSE_ACTION, text=reply, allowed_input_types=["text"])
 
     return TurnDraft(reply_text=" ".join(parts), case_id=inv.case_id, cards=cards, pending_question=question)
+
+
+def _after_investigation(
+    state: DialogueState,
+    turn: NormalizedTurn,
+    case_id,
+    investigation: InvestigationResult,
+    proposal: ProposalView | None,
+    draft: TurnDraft,
+) -> DialogueState:
+    choices = []
+    if proposal is None and len(investigation.eligible_actions) > 1:
+        choices = [
+            ActionChoice(
+                case_id=case_id,
+                investigation_id=investigation.id,
+                action_type=a.action_type,
+                target_id=a.target_id,
+                target_label=a.target_label,
+            )
+            for a in investigation.eligible_actions
+        ]
+    return state.evolve(
+        active_case_id=case_id,
+        candidate=None,
+        pending_question=draft.pending_question,
+        pending_proposal=_proposal_ref(proposal, turn) if proposal else None,
+        pending_choices=choices,
+    )
+
+
+def _match_choice(state: DialogueState, ex: Extraction) -> ActionChoice | None:
+    """Only an action Resolve listed for the active case can be chosen; the model cannot add one."""
+    if ex.action_choice is None:
+        return None
+    matches = [c for c in state.pending_choices if c.action_type is ex.action_choice and c.case_id == state.active_case_id]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _proposal_ref(proposal: ProposalView, turn: NormalizedTurn) -> PendingProposalRef:

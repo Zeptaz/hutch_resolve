@@ -199,6 +199,96 @@ class FakeKnowledgeRepository:
 
 SCENARIO_EXAMPLES = {"A": "a_sufficient", "D": "d_conflicting", "PARTIAL": "partial_evidence"}
 
+GB = 1_000_000_000
+_T = "2026-10-02T06:30:00Z"
+
+
+def _evidence(n: int, source: str, value, unit: str) -> dict:
+    return {
+        "id": f"91000000-0000-4000-8000-{n:012d}", "source": source, "source_record_id": f"rec-{n}",
+        "source_version": "1", "observed_at": _T, "fetched_at": _T, "value": value, "unit": unit, "source_payload": {},
+    }
+
+
+def _status(source: str, complete: bool = True, warnings: list[str] | None = None) -> dict:
+    return {
+        "source": source, "fetched_at": _T, "as_of": _T, "complete_through": _T, "source_version": "fixture-v2",
+        "complete": complete, "next_cursor": None, "warnings": warnings or [],
+    }
+
+
+def _result(complaint, state, findings, calculations, evidence, sources, missing, conflicts, eligible, reasons) -> dict:
+    return {
+        "id": "91000000-0000-4000-8000-000000000000", "case_id": "91000000-0000-4000-8000-000000000001", "revision": 1,
+        "complaint_type": complaint, "window_start": "2026-10-01T18:30:00Z", "window_end": _T, "evidence_state": state,
+        "findings": findings, "calculations": calculations, "evidence": evidence, "source_status": sources,
+        "missing": missing, "conflicts": conflicts, "eligible_actions": eligible, "review_reasons": reasons,
+        "created_at": _T, "simulation": True,
+    }
+
+
+def _ev_ids(*ns: int) -> list[str]:
+    return [f"91000000-0000-4000-8000-{n:012d}" for n in ns]
+
+
+SUBSCRIPTION_F = "91000000-0000-4000-8000-0000000000f1"
+ACCOUNT_TARGET = "91000000-0000-4000-8000-0000000000a1"
+
+# Stand-ins shaped by docs/mock-environment.md "Fixture index"; Harry's investigators own the real codes and text.
+SCENARIO_BUILDERS = {
+    "B": lambda: _result(
+        "DATA_DEPLETION", "SUFFICIENT",
+        [
+            {"code": "QUOTA_EXHAUSTED", "text": "Your 20 GB bundle was fully used: 11.4 GB, 5.2 GB and 3.4 GB.", "evidence_ids": _ev_ids(1, 2, 3, 4)},
+            {"code": "OUT_OF_BUNDLE_CHARGED", "text": "After the bundle ran out, 0.8 GB was charged separately as LKR 80.", "evidence_ids": _ev_ids(5)},
+        ],
+        [
+            {"code": "QUOTA_RECONCILIATION", "unit": "BYTES", "opening": 0,
+             "terms": [{"evidence_id": _ev_ids(1)[0], "label": "Bundle grant", "value": 20 * GB},
+                       {"evidence_id": _ev_ids(2)[0], "label": "Used", "value": -11_400_000_000},
+                       {"evidence_id": _ev_ids(3)[0], "label": "Used", "value": -5_200_000_000},
+                       {"evidence_id": _ev_ids(4)[0], "label": "Used", "value": -3_400_000_000}],
+             "expected": 0, "observed": 0, "delta": 0, "evidence_ids": _ev_ids(1, 2, 3, 4)},
+        ],
+        [_evidence(1, "quota", 20 * GB, "BYTES"), _evidence(2, "quota", -11_400_000_000, "BYTES"),
+         _evidence(3, "quota", -5_200_000_000, "BYTES"), _evidence(4, "quota", -3_400_000_000, "BYTES"),
+         _evidence(5, "charging", -8000, "LKR_MINOR")],
+        [_status("quota"), _status("charging")], ["usage_category"], [], [], [],
+    ),
+    "C": lambda: _result(
+        "CONNECTIVITY", "SUFFICIENT",
+        [
+            {"code": "ACCOUNT_AND_DATA_AVAILABLE", "text": "Your line is active and 9.7 GB of data remains.", "evidence_ids": _ev_ids(10)},
+            {"code": "REGIONAL_INCIDENT", "text": "A mobile data incident is reported for the South region. No restoration time has been provided.", "evidence_ids": _ev_ids(11)},
+        ],
+        [], [_evidence(10, "quota", 9_700_000_000, "BYTES"), _evidence(11, "service_assurance", "OPEN", None)],
+        [_status("service_assurance")], [], [],
+        [{"action_type": "SEND_SETTINGS_INSTRUCTIONS", "target_id": ACCOUNT_TARGET, "target_label": "Your phone"}], [],
+    ),
+    "E": lambda: _result(
+        "BALANCE_RECHARGE", "SUFFICIENT",
+        [{"code": "PAYMENT_NOT_CREDITED", "text": "Your LKR 500 payment was taken, but it has not been added to your balance yet; delivery is still pending.", "evidence_ids": _ev_ids(20)}],
+        [], [_evidence(20, "recharge", 50000, "LKR_MINOR")], [_status("recharge")], [], [],
+        [{"action_type": "CREATE_REVIEW_TICKET", "target_id": ACCOUNT_TARGET, "target_label": "Your account"}],
+        ["Please don't pay again; this payment is already being tracked."],
+    ),
+    "F": lambda: _result(
+        "VAS_DISPUTE", "PARTIAL",
+        [
+            {"code": "VAS_CHARGE_POSTED", "text": "LKR 60 was charged for Synthetic video alerts.", "evidence_ids": _ev_ids(30)},
+            {"code": "ACTIVATION_EVIDENCE_MISSING", "text": "There is no record showing how this service was activated.", "evidence_ids": []},
+        ],
+        [], [_evidence(30, "charging", -6000, "LKR_MINOR")], [_status("product")], ["activation_evidence"], [],
+        [{"action_type": "DEACTIVATE_VAS", "target_id": SUBSCRIPTION_F, "target_label": "Synthetic video alerts"},
+         {"action_type": "CREATE_REVIEW_TICKET", "target_id": ACCOUNT_TARGET, "target_label": "The past charge"}],
+        ["Stopping future renewals does not decide the past charge; that needs a review."],
+    ),
+}
+
+
+def scenario_result(name: str) -> dict:
+    return SCENARIO_BUILDERS[name]() if name in SCENARIO_BUILDERS else example(SCENARIO_EXAMPLES[name])
+
 
 class FakeResolveFacade:
     """Scenario per account: account_id -> "A" | "D" | "PARTIAL"."""
@@ -279,7 +369,7 @@ class FakeResolveFacade:
         self.investigation_requests.append((case_id, request))
         scenario = self._scenarios[ctx.account_id]
         revision = case.investigation.revision + 1 if case.investigation else 1
-        result = InvestigationResult.model_validate(example(SCENARIO_EXAMPLES[scenario])).model_copy(
+        result = InvestigationResult.model_validate(scenario_result(scenario)).model_copy(
             update={
                 "id": uuid4(),
                 "case_id": case_id,
@@ -322,9 +412,11 @@ class FakeResolveFacade:
             target_id=action.target_id,
             target_version=1,
             target_label=action.target_label,
-            consequences=example("proposal")["consequences"]
-            if action.action_type.value == "DEACTIVATE_VAS"
-            else "Send this case to human review in simulation. No account change is made.",
+            consequences={
+                "DEACTIVATE_VAS": example("proposal")["consequences"],
+                "SEND_SETTINGS_INSTRUCTIONS": "Send data settings instructions to your phone in simulation. This does not repair the network.",
+                "CREATE_REVIEW_TICKET": "Send this case to human review in simulation. No account change is made.",
+            }[action.action_type.value],
             proposal_hash=hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest(),
             expires_at=self._clock() + timedelta(minutes=5),
             simulation=True,
@@ -458,6 +550,7 @@ def extraction(**overrides) -> dict:
     base = {
         "intent": "NEW_COMPLAINT",
         "decision": None,
+        "action_choice": None,
         "detected_language": "en",
         "script": "LATIN",
         "complaint_type": None,

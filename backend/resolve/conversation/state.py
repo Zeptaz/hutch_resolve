@@ -50,6 +50,18 @@ class PendingProposalRef(BaseModel):
         return now >= self.expires_at
 
 
+class ActionChoice(BaseModel):
+    """One of several actions Resolve made eligible; choosing one only requests a proposal."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    case_id: UUID
+    investigation_id: UUID
+    action_type: ActionType
+    target_id: UUID
+    target_label: str
+
+
 class DialogueState(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -59,6 +71,7 @@ class DialogueState(BaseModel):
     pending_question: PendingQuestion | None = None
     candidate: Candidate | None = None
     pending_proposal: PendingProposalRef | None = None
+    pending_choices: list[ActionChoice] = []
 
     def evolve(self, **changes: object) -> "DialogueState":
         """Return a validated copy with changes applied."""

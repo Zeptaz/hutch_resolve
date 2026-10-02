@@ -28,6 +28,10 @@ SIM_END = datetime(2026, 10, 2, 6, 30, tzinfo=UTC)
 ACCOUNT_A = UUID("20000000-0000-0000-0000-000000000001")
 ACCOUNT_D = UUID("20000000-0000-0000-0000-000000000004")
 ACCOUNT_PARTIAL = UUID("20000000-0000-0000-0000-000000000099")
+ACCOUNT_B = UUID("20000000-0000-0000-0000-000000000002")
+ACCOUNT_C = UUID("20000000-0000-0000-0000-000000000003")
+ACCOUNT_E = UUID("20000000-0000-0000-0000-000000000005")
+ACCOUNT_F = UUID("20000000-0000-0000-0000-000000000006")
 SANDBOX = UUID("00000000-0000-0000-0000-000000000001")
 
 
@@ -63,7 +67,8 @@ class Harness:
         self.clock = Clock()
         self.repo = FakeConversationRepository(self.clock)
         self.facade = FakeResolveFacade(
-            self.clock, {ACCOUNT_A: "A", ACCOUNT_D: "D", ACCOUNT_PARTIAL: "PARTIAL"}
+            self.clock,
+            {ACCOUNT_A: "A", ACCOUNT_B: "B", ACCOUNT_C: "C", ACCOUNT_D: "D", ACCOUNT_E: "E", ACCOUNT_F: "F", ACCOUNT_PARTIAL: "PARTIAL"},
         )
         self.knowledge = FakeKnowledgeRepository()
         self.model = model
