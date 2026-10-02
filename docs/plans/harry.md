@@ -102,11 +102,11 @@ Acceptance: decline/expiry/stale target/stale investigation write nothing; concu
 - [x] H-05a Versioned PATCH appends a note and optionally changes review status. NEW -> IN_REVIEW -> CLOSED; CLOSED -> IN_REVIEW requires reopening reason. Closing requires a disposition and explanatory note. Notes-only patches increment case version. Stale writes fail; request replay is idempotent.
 - [x] H-05a Keep customer case status, investigation state, operation state, provider ticket delivery state and agent review disposition distinct. Closing a review does not alter evidence or account state.
 - [x] H-05a Persist local review history and audit atomically. Agent updates cannot trigger charging/product mutations.
-- [ ] H-05b If a mock ticket exists, queue its review-status/note synchronization using a stable provider key derived from review event ID; display pending sync until confirmed. Do not claim CRM success.
+- [x] H-05b If a delivered mock ticket exists, queue its review-status/note synchronization using a stable provider key derived from review event ID; display pending/unknown until confirmed. Do not alter provider ticket status. Isolated PostgreSQL test simulates committed-response-loss, retries same provider key, verifies a single ticket mutation/note, and confirms idempotent review replay reads SYNCED.
 
 Acceptance: customer/guest denied; wrong run denied; stale PATCH returns 409; simultaneous agents do not overwrite notes; review history survives restart; dashboard shows a pending handoff without needing CRM availability. No analytics/admin portal beyond this scope.
 
-Verification for H-05a: `python -m pytest -q` (19 passed), `python -m compileall -q backend`, `git diff --check`, and runtime OpenAPI generation show all three `/api/v1/agent/cases` routes. Isolated PostgreSQL service-level checks previously exercised queue pagination/tamper rejection, detail reads, review replay/conflict, close/reopen rules and audit persistence. Ticket review synchronization remains unimplemented; do not mark H-05 complete yet.
+Verification for H-05: `python -m pytest -q` (32 passed; opt-in DB tests skipped without env), `python -m compileall -q backend`, `git diff --check`, and runtime OpenAPI generation show all three `/api/v1/agent/cases` routes. Isolated PostgreSQL checks cover queue/detail/review behavior and review-sync committed-response-loss recovery with one mock ticket update and idempotent replay. Broader multi-worker/restart stress qualification remains part of H-09.
 
 ## H-06: remaining complaint and fault paths
 

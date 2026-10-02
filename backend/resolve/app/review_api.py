@@ -116,7 +116,7 @@ class ReviewResult(StrictModel):
     review_status: Literal["NEW", "IN_REVIEW", "CLOSED"]
     disposition: str | None
     note: ReviewNote | None
-    review_sync_state: Literal["NOT_APPLICABLE", "PENDING", "SYNCED", "FAILED"]
+    review_sync_state: Literal["NOT_APPLICABLE", "PENDING", "UNKNOWN", "SYNCED", "FAILED", "REVIEW_REQUIRED"]
     updated_at: datetime
 
 

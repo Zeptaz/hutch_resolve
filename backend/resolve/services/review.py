@@ -139,6 +139,8 @@ class AgentReviewService:
                 {"case": case_id}).scalars().all()
             delivery = connection.execute(text("SELECT * FROM resolve.escalation_deliveries WHERE case_id=:case ORDER BY updated_at DESC,id DESC LIMIT 1"),
                 {"case": case_id}).mappings().one_or_none()
+            sync_state = connection.execute(text("SELECT status FROM resolve.review_sync_jobs WHERE case_id=:case ORDER BY created_at DESC,id DESC LIMIT 1"),
+                {"case": case_id}).scalar_one_or_none()
             reviews = connection.execute(text("""
                 SELECT re.id,s.principal_id AS actor_id,re.note,re.created_at,re.visibility,re.review_status,re.disposition,re.case_version
                 FROM resolve.review_events re JOIN resolve.sessions s ON (s.sandbox_id,s.id)=(re.sandbox_id,re.actor_session_id)
@@ -176,7 +178,8 @@ class AgentReviewService:
             handoff = {"reference": delivery["operation_id"] or delivery["id"],
                 "queue": "BILLING_REVIEW" if case["complaint_type"] in {"BALANCE_RECHARGE", "VAS_DISPUTE"} else "TECHNICAL_SUPPORT",
                 "delivery_state": delivery["delivery_state"], "provider_ticket_id": delivery["provider_ticket_id"],
-                "review_sync_state": "NOT_APPLICABLE", "next_step": "A human agent should review this case."}
+                "review_sync_state": "NOT_APPLICABLE" if sync_state is None else sync_state,
+                "next_step": "A human agent should review this case."}
         return {"case": case_view, "account": account, "conversation": conversation,
             "investigations": investigations, "proposals": proposals,
             "confirmations": [dict(row) for row in confirmation_rows], "operations": operations,
@@ -207,6 +210,7 @@ class AgentReviewService:
         with self._engine.begin() as connection:
             replay = self._review_replay(connection, context, route_key, idempotency_key, request_hash)
             if replay is not None:
+                self._refresh_sync_state(connection, case_id, replay)
                 return replay
             case = connection.execute(text("SELECT id,version,review_status FROM resolve.cases WHERE id=:id AND sandbox_id=:sandbox FOR UPDATE"),
                 {"id": case_id, "sandbox": sandbox_id}).mappings().one_or_none()
@@ -214,6 +218,7 @@ class AgentReviewService:
                 raise ResolveError(404, "RESOURCE_NOT_FOUND", "Case was not found")
             replay = self._review_replay(connection, context, route_key, idempotency_key, request_hash)
             if replay is not None:
+                self._refresh_sync_state(connection, case_id, replay)
                 return replay
             if case["version"] != expected_version:
                 raise ResolveError(409, "STALE_VERSION", "Case changed; reload before updating review")
@@ -240,15 +245,41 @@ class AgentReviewService:
                 {"id": uuid4(), "actor": context.session_id, "case": case_id,
                  "details": json.dumps({"from": old_status, "to": new_status, "version": new_version,
                                         "disposition": disposition}), "now": now})
+            delivery = connection.execute(text("""
+                SELECT provider_ticket_id FROM resolve.escalation_deliveries
+                WHERE sandbox_id=:sandbox AND case_id=:case AND delivery_state='DELIVERED'
+                  AND provider_ticket_id IS NOT NULL ORDER BY updated_at DESC,id DESC LIMIT 1
+            """), {"sandbox": sandbox_id, "case": case_id}).scalar_one_or_none()
+            sync_state = "NOT_APPLICABLE"
+            if delivery is not None:
+                connection.execute(text("""
+                    INSERT INTO resolve.review_sync_jobs
+                      (id,sandbox_id,case_id,review_event_id,provider_ticket_id,status,created_at,updated_at)
+                    VALUES (:id,:sandbox,:case,:event,:ticket,'PENDING',:now,:now)
+                """), {"id": event_id, "sandbox": sandbox_id, "case": case_id,
+                    "event": event_id, "ticket": delivery, "now": now})
+                sync_state = "PENDING"
             result = {"case_id": case_id, "version": new_version, "review_status": new_status,
                 "disposition": disposition,
                 "note": {"id": event_id, "actor_id": context.principal_id, "note": stored_note,
                          "created_at": now, "visibility": "INTERNAL"} if note or reopen_reason else None,
-                "review_sync_state": "NOT_APPLICABLE", "updated_at": now}
+                "review_sync_state": sync_state, "updated_at": now}
             connection.execute(text("INSERT INTO resolve.idempotency_records(id,subject_id,route_key,idempotency_key,request_fingerprint,response_status,response_body,created_at,completed_at) VALUES (:id,:subject,:route,:key,:fingerprint,200,CAST(:body AS jsonb),:now,:now)"),
                 {"id": uuid4(), "subject": context.principal_id, "route": route_key, "key": idempotency_key,
                  "fingerprint": request_hash, "body": json.dumps(result, default=str), "now": now})
             return result
+
+    @staticmethod
+    def _refresh_sync_state(connection: Any, case_id: UUID, response: dict[str, Any]) -> None:
+        note = response.get("note")
+        if not note:
+            return
+        state = connection.execute(text("""
+            SELECT j.status FROM resolve.review_sync_jobs j
+            WHERE j.case_id=:case AND j.review_event_id=:event
+        """), {"case": case_id, "event": note["id"]}).scalar_one_or_none()
+        if state is not None:
+            response["review_sync_state"] = state
 
     @staticmethod
     def _review_replay(connection: Any, context: AuthContext, route_key: str,

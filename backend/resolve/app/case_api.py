@@ -137,7 +137,7 @@ class ReceiptHandoffView(StrictModel):
     queue: Literal["BILLING_REVIEW", "TECHNICAL_SUPPORT"]
     delivery_state: Literal["PENDING", "DELIVERED", "FAILED", "REVIEW_REQUIRED"]
     provider_ticket_id: str | None
-    review_sync_state: Literal["NOT_APPLICABLE", "PENDING", "SYNCED", "FAILED"]
+    review_sync_state: Literal["NOT_APPLICABLE", "PENDING", "UNKNOWN", "SYNCED", "FAILED", "REVIEW_REQUIRED"]
     next_step: str
 
 
