@@ -414,7 +414,7 @@ class ConversationService:
         if state.active_case_id is None:
             return _ask(state, Q_CHOOSE_COMPLAINT, t.text("no_active_case", lang), ["category_selection", "text"])
         case = await self._facade.get_case(ctx, state.active_case_id)
-        parts = [t.text("case_status", lang, complaint=t.complaint_label(case.complaint_type, lang), status=t.case_status_label(case.status))]
+        parts = [t.text("case_status", lang, complaint=t.complaint_label(case.complaint_type, lang), status=t.case_status_label(case.status, lang))]
         operation_ids = []
         if case.operation_ids:
             operation = await self._facade.get_operation(ctx, case.operation_ids[-1])
@@ -608,7 +608,7 @@ class ConversationService:
             pending_question=state.pending_question if keep_proposal or keep_choices else None,
             candidate=None,
         )
-        reply = t.text("case_selected", lang, complaint=t.complaint_label(case.complaint_type, lang), status=t.case_status_label(case.status))
+        reply = t.text("case_selected", lang, complaint=t.complaint_label(case.complaint_type, lang), status=t.case_status_label(case.status, lang))
         return TurnDraft(reply_text=reply, case_id=case.id, pending_question=state.pending_question), state
 
 

@@ -1,16 +1,22 @@
 """Manual check of live Gemini extraction (no database, no Resolve calls).
 
     GEMINI_API_KEY=... GEMINI_TEXT_MODEL=... python -m resolve.conversation.try_extract ["message" ...]
+    GEMINI_API_KEY=... GEMINI_TEXT_MODEL=... python -m resolve.conversation.try_extract --eval
 
-With no messages it runs a small multilingual sample. Output is for human
-review (T-04); it is not proof of language support.
+With messages it prints each extraction. With no messages it runs a small
+multilingual sample. `--eval` scores eval/extraction_cases.jsonl per language
+variety. Results are measurements for human review (T-04), not proof of
+native-language support; record the model, date and sample count with them.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from .extraction import ExtractionContext, Extractor
 from .model import GeminiModelClient
@@ -52,5 +58,76 @@ async def main(messages: list[str]) -> int:
     return 0
 
 
+EVAL_PATH = Path(__file__).with_name("eval") / "extraction_cases.jsonl"
+
+
+def load_cases(path: Path = EVAL_PATH) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def context_for(case: dict) -> ExtractionContext:
+    ctx = case.get("context", {})
+    return ExtractionContext(
+        now=SIMULATION_NOW,
+        has_pending_proposal=bool(ctx.get("action_offer_open")),
+        active_case_complaint_type=ctx.get("active_case_type"),
+    )
+
+
+def score(case: dict, extraction) -> list[str]:
+    """Return the names of expected fields the extraction got wrong."""
+    expect, wrong = case["expect"], []
+    if extraction is None:
+        return ["<no extraction>"]
+    actual = {
+        "intent": extraction.intent,
+        "complaint_type": extraction.complaint_type,
+        "decision": extraction.decision,
+        "detected_language": extraction.detected_language,
+        "time_kind": extraction.time_reference.kind,
+        "amount_lkr": extraction.amount_lkr,
+    }
+    for field, expected in expect.items():
+        if field == "intent_not":
+            if actual["intent"] in expected:
+                wrong.append("intent")
+        elif field == "amount_lkr":
+            if actual[field] is None or abs(actual[field] - expected) > 0.005:
+                wrong.append(field)
+        elif actual[field] != expected:
+            wrong.append(field)
+    return wrong
+
+
+async def run_eval() -> int:
+    client = GeminiModelClient.from_env()
+    if client is None:
+        print("Set GEMINI_API_KEY and GEMINI_TEXT_MODEL first.", file=sys.stderr)
+        return 2
+    extractor = Extractor(client)
+    totals: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    failures, fallbacks, latencies = [], 0, []
+    for case in load_cases():
+        outcome = await extractor.extract(case["message"], context_for(case))
+        latencies.append(outcome.latency_ms)
+        fallbacks += outcome.extraction is None
+        wrong = score(case, outcome.extraction)
+        totals[case["variety"]][0] += not wrong
+        totals[case["variety"]][1] += 1
+        if wrong:
+            failures.append((case["id"], wrong, outcome.failure))
+    print(f"model={client.model_name} prompt=extract cases={sum(t[1] for t in totals.values())} measured={datetime.now(timezone.utc):%Y-%m-%dT%H:%MZ}")
+    for variety, (ok, n) in sorted(totals.items()):
+        print(f"  {variety:16s} {ok}/{n}")
+    latencies.sort()
+    print(f"  fallbacks={fallbacks} median_latency_ms={latencies[len(latencies) // 2]} max_latency_ms={latencies[-1]}")
+    for case_id, wrong, failure in failures:
+        print(f"  MISS {case_id}: {', '.join(wrong)}{f' ({failure})' if failure else ''}")
+    return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main(sys.argv[1:] or SAMPLES)))
+    args = sys.argv[1:]
+    if args == ["--eval"]:
+        raise SystemExit(asyncio.run(run_eval()))
+    raise SystemExit(asyncio.run(main(args or SAMPLES)))

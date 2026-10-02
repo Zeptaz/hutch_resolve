@@ -1,13 +1,17 @@
-"""Deterministic reply templates used when no model is involved.
+"""Deterministic reply templates.
 
-Only English is populated. Sinhala and Tamil fall back to English until wording
-is written and checked by a fluent reviewer (T-04): the plan forbids claiming
-native-language support that was not demonstrated.
+English is authoritative and lives here. Sinhala and Tamil live in
+`locales/{si,ta}.json` and are used **only** when the file's status is
+`REVIEWED` by a fluent reviewer (T-04); otherwise replies fall back to English.
+The plan forbids claiming native-language support that was not demonstrated.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
+from pathlib import Path
 
 from .dto import ActionType, ComplaintType, DeliveryState, Handoff, Language, OperationStatus
 
@@ -84,6 +88,7 @@ _MISSING_LABELS_EN: dict[str, str] = {
     "opening_balance": "the starting balance",
     "closing_balance": "the latest balance",
     "activation_evidence": "proof the service was activated",
+    "usage_category": "the type of usage",
 }
 
 _DELIVERY_EN: dict[DeliveryState, str] = {
@@ -93,35 +98,6 @@ _DELIVERY_EN: dict[DeliveryState, str] = {
     DeliveryState.REVIEW_REQUIRED: "The handoff needs a person to check it. Your request is still recorded.",
 }
 
-TEMPLATES: dict[Language, dict[str, str]] = {Language.EN: _EN}
-
-
-def text(key: str, language: Language, **values: object) -> str:
-    table = TEMPLATES.get(language) or _EN
-    template = table.get(key) or _EN[key]
-    return template.format(**values)
-
-
-def action_label(action: ActionType, language: Language) -> str:
-    return _ACTION_LABELS_EN[action]
-
-
-def complaint_label(complaint: ComplaintType, language: Language) -> str:
-    return _COMPLAINT_LABELS_EN[complaint]
-
-
-def operation_status_text(status: OperationStatus, language: Language) -> str:
-    return _OPERATION_STATUS_EN[status]
-
-
-def handoff_text(handoff: Handoff, language: Language) -> str:
-    """Delivery state, plus a ticket number only when the provider actually issued one."""
-    parts = [_DELIVERY_EN[handoff.delivery_state]]
-    if handoff.provider_ticket_id:
-        parts.append(text("ticket_issued", language, ticket=handoff.provider_ticket_id))
-    return " ".join(parts)
-
-
 _CASE_STATUS_EN = {
     "OPEN": "open",
     "AWAITING_CUSTOMER": "waiting for more information",
@@ -130,12 +106,74 @@ _CASE_STATUS_EN = {
     "RESOLVED": "resolved",
 }
 
+ENGLISH: dict[str, dict[str, str]] = {
+    "strings": _EN,
+    "action_labels": {k.value: v for k, v in _ACTION_LABELS_EN.items()},
+    "complaint_labels": {k.value: v for k, v in _COMPLAINT_LABELS_EN.items()},
+    "operation_status": {k.value: v for k, v in _OPERATION_STATUS_EN.items()},
+    "missing_labels": _MISSING_LABELS_EN,
+    "delivery": {k.value: v for k, v in _DELIVERY_EN.items()},
+    "case_status": _CASE_STATUS_EN,
+}
+# Sent to Resolve as case data, not shown as a reply: always English.
+NOT_LOCALIZED = frozenset({"default_escalation_reason"})
+LOCALES_DIR = Path(__file__).with_name("locales")
+REVIEWED = "REVIEWED"
+
+
+@lru_cache(maxsize=None)
+def load_locale(language: Language) -> dict:
+    """The raw locale file (any status); empty for English or a missing file."""
+    path = LOCALES_DIR / f"{language.value}.json"
+    if language is Language.EN or not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def active_sections(language: Language) -> dict[str, dict[str, str]]:
+    locale = load_locale(language)
+    return locale.get("sections", {}) if locale.get("status") == REVIEWED else {}
+
+
+def _get(section: str, key: str, language: Language) -> str:
+    localized = active_sections(language).get(section, {})
+    if key in localized and not (section == "strings" and key in NOT_LOCALIZED):
+        return localized[key]
+    return ENGLISH[section][key]
+
+
+def text(key: str, language: Language, **values: object) -> str:
+    return _get("strings", key, language).format(**values)
+
+
+def action_label(action: ActionType, language: Language) -> str:
+    return _get("action_labels", action.value, language)
+
+
+def complaint_label(complaint: ComplaintType, language: Language) -> str:
+    return _get("complaint_labels", complaint.value, language)
+
+
+def operation_status_text(status: OperationStatus, language: Language) -> str:
+    return _get("operation_status", status.value, language)
+
+
+def handoff_text(handoff: Handoff, language: Language) -> str:
+    """Delivery state, plus a ticket number only when the provider actually issued one."""
+    parts = [_get("delivery", handoff.delivery_state.value, language)]
+    if handoff.provider_ticket_id:
+        parts.append(text("ticket_issued", language, ticket=handoff.provider_ticket_id))
+    return " ".join(parts)
+
+
+def case_status_label(status: str, language: Language = Language.EN) -> str:
+    if status in ENGLISH["case_status"]:
+        return _get("case_status", status, language)
+    return status.lower().replace("_", " ")
+
+
 # Display only: business data stays in UTC and minor units.
 _COLOMBO = timezone(timedelta(hours=5, minutes=30))
-
-
-def case_status_label(status: str) -> str:
-    return _CASE_STATUS_EN.get(status, status.lower().replace("_", " "))
 
 
 def format_lkr(amount_minor: int) -> str:
@@ -157,4 +195,6 @@ def format_window(start: datetime, end: datetime) -> str:
 
 
 def missing_label(code: str, language: Language) -> str:
-    return _MISSING_LABELS_EN.get(code, code.replace("_", " "))
+    if code in ENGLISH["missing_labels"]:
+        return _get("missing_labels", code, language)
+    return code.replace("_", " ")

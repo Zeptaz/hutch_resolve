@@ -12,7 +12,9 @@
 | `extraction.py` | T-02 model output schema, prompt, budgeted `Extractor` (6 s total, one repair), and code-side time-window resolution. |
 | `model.py` | `ModelClient` boundary and `GeminiModelClient` (google-genai, JSON-schema output, SDK retries off). |
 | `try_extract.py` | Manual live check: `python -m resolve.conversation.try_extract` with `GEMINI_API_KEY`/`GEMINI_TEXT_MODEL`. |
-| `templates.py` | Deterministic English replies. Sinhala/Tamil fall back to English until reviewed wording exists (T-04). |
+| `templates.py` | Deterministic replies. English is authoritative; Sinhala/Tamil load from `locales/*.json` only when marked `REVIEWED`. |
+| `locales/` | Machine-drafted, **unreviewed** Sinhala and Tamil wording (inactive). See `LANGUAGE_REVIEW.md`. |
+| `eval/extraction_cases.jsonl` | 41-case multilingual extraction set; `try_extract --eval` scores live Gemini per variety. |
 
 ## What Harry's implementations must do
 
@@ -31,7 +33,7 @@ Gemini classifies a message into one intent (`FAQ`, `ACCOUNT_ENQUIRY`, `NEW_COMP
 - never treats a typed or spoken "yes" as consent; the explicit `action_decision` control is required;
 - answers FAQs only from reviewed knowledge cards with citations; guests get FAQs only.
 
-Pending question codes for the UI: `CHOOSE_COMPLAINT_TYPE`, `COMPLAINT_DETAILS`, `CONFIRM_ACTION`, `LOGIN_REQUIRED`, and the four `CLARIFY_*` codes.
+Pending question codes for the UI: `CHOOSE_COMPLAINT_TYPE`, `COMPLAINT_DETAILS`, `CONFIRM_ACTION`, `CHOOSE_ACTION`, `LOGIN_REQUIRED`, and the four `CLARIFY_*` codes. The UI should choose forms from `allowed_input_types`; `CLARIFY_*` and `CHOOSE_ACTION` are text-only.
 
 **Needed from Harry:** `ConversationService(..., simulation_now=...)` must receive an async function returning the scoped run's `simulation_clock`. It is not in the facade contract yet.
 
@@ -42,6 +44,12 @@ Pending question codes for the UI: `CHOOSE_COMPLAINT_TYPE`, `COMPLAINT_DETAILS`,
 - Declines are always sent to Resolve so they are recorded. `CONFIRMATION_REQUIRED` keeps the offer open and asks again; expired/invalidated/not-allowed clear it.
 - Accepted review tickets report the request ID and the operation state. A ticket number is shown only when the operation outcome or receipt handoff actually carries `provider_ticket_id`; a CRM outage reads as "pending, no ticket number yet".
 - Knowledge replies cite the reviewed card. `SYNTHETIC` cards are prefixed as demo policy, separate from `PUBLIC` HUTCH facts.
+
+## Secondary paths and telemetry (T-04)
+
+- B/C/E/F run through the same paths. Resolve's `review_reasons` are added to the reply (e.g. future renewal vs past charge).
+- When Resolve makes **several** actions eligible, the reply lists them with pending question `CHOOSE_ACTION` (text only). A choice must match an action Resolve listed for the active case, and only requests a proposal; consent still needs the Accept control.
+- Each model attempt produces a `ModelCallRecord` (request/conversation/case IDs, purpose, prompt version, attempt, provider, model, outcome, latency, provider-reported tokens, error class). It has no field for prompt, transcript or output. **Harry:** implement `ModelTelemetry.record_model_call` into `resolve.model_calls`; telemetry failures are logged and never fail a turn.
 
 ## Fingerprint rule
 
