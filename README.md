@@ -16,7 +16,7 @@ Start with [context.md](context.md), the agent-maintained source of truth, and t
 
 ## Start the backend foundation
 
-The backend exposes process liveness/readiness, anonymous/demo session lifecycle, customer-scoped `GET /api/v1/account`, scoped case reads and idempotent investigation routes. It also exposes customer-only action proposal and confirmation routes. Confirmation records a durable `PENDING` operation but does not execute a sandbox mutation or claim success. An in-process facade supports conversation/case creation for Tevin’s conversation controller. Demo logins are disabled until `DEMO_IDENTITIES_JSON` is configured with credential hashes and fixed synthetic run/account IDs. Operation polling/execution, receipts, conversation HTTP routes and dashboard APIs remain under development. Replace the `.env.example` application secret before starting the server; use `APP_COOKIE_SECURE=true` under HTTPS.
+The backend exposes process liveness/readiness, anonymous/demo session lifecycle, customer-scoped account and case reads, persisted investigations, action proposal/confirmation, operation polling and Trust Receipt reads. Accepted actions run through an in-process leased worker and separate mock sandbox-write connection. The app remains unavailable for action execution until `SANDBOX_DATABASE_URL` is configured; accepted operations otherwise remain `PENDING` with no success claim. An in-process facade supports conversation/case creation for Tevin’s conversation controller. Demo logins are disabled until `DEMO_IDENTITIES_JSON` is configured with credential hashes and fixed synthetic run/account IDs. Conversation HTTP routes and dashboard APIs remain under development. Provider results are synthetic and never indicate a real HUTCH system change. Replace the `.env.example` application secret before starting the server; use `APP_COOKIE_SECURE=true` under HTTPS.
 
 ```powershell
 python -m venv .venv
@@ -25,7 +25,7 @@ python -m pip install -r requirements-dev.txt
 python -m uvicorn backend.resolve.app.main:app --host 127.0.0.1 --port 8080
 ```
 
-The application reads `DATABASE_URL` from `.env`; it uses the separate `hutch_resolve_app` local role for PostgreSQL. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0004_action_proposals`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003 without replaying CREATE TABLE statements, revisions 0002-0004 add lifecycle, immutable investigation, and proposal/confirmation persistence without replaying bootstrap DDL.
+The application reads `DATABASE_URL` and `SANDBOX_DATABASE_URL` from `.env`; Resolve uses `hutch_resolve_app` for business state and the provider adapter uses the separate `hutch_sandbox` role for synthetic writes. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0004_action_proposals`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003 without replaying CREATE TABLE statements, revisions 0002-0004 add lifecycle, immutable investigation, and proposal/confirmation persistence without replaying bootstrap DDL.
 
 Reset accepts an optional UUID: `scripts/reset.ps1 -RunId <uuid>`. Fixture IDs are deterministically derived under that run, so repeatable inputs produce repeatable records and different runs do not collide.
 

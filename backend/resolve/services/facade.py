@@ -48,9 +48,10 @@ def _validated_reported_facts(value: dict[str, Any] | None) -> dict[str, Any]:
 class ResolveFacade:
     """Typed in-process boundary consumed by the conversation controller."""
 
-    def __init__(self, engine: Engine, provider: BalanceProvider | AccountProvider | None = None) -> None:
+    def __init__(self, engine: Engine, provider: BalanceProvider | AccountProvider | None = None,
+                 *, provider_engine: Engine | None = None) -> None:
         self._engine = engine
-        self._provider = provider or PostgresSandboxProvider(engine)
+        self._provider = provider or PostgresSandboxProvider(provider_engine or engine)
 
     def create_conversation(self, context: AuthContext, language: str = "en") -> dict[str, Any]:
         if context.role not in {"GUEST", "CUSTOMER"}:
@@ -307,9 +308,21 @@ class ResolveFacade:
             result["eligible_actions"].append({"action_type": "CREATE_REVIEW_TICKET",
                                                 "target_id": context.account_id,
                                                 "target_label": account_target["label"]})
+        vas_targets: list[dict[str, Any]] = []
         if complaint_type == "VAS_DISPUTE" and result["evidence_state"] == "SUFFICIENT":
-            result["eligible_actions"].extend(self._provider.eligible_vas_targets(  # type: ignore[attr-defined]
-                context.sandbox_id, context.account_id))
+            vas_targets = self._provider.eligible_vas_targets(context.sandbox_id, context.account_id)  # type: ignore[attr-defined]
+            reported_subscription = facts.get("subscription_id")
+            for target in vas_targets:
+                evidence_id = uuid4()
+                result["evidence"].append({"id": evidence_id, "source": "PRODUCT_VAS",
+                    "source_record_id": str(target["target_id"]), "source_version": target["source_version"],
+                    "observed_at": target["as_of"], "fetched_at": datetime.now(UTC), "value": target["status"],
+                    "unit": None, "source_payload": {"offer_name": target["target_label"], "offer_kind": target["offer_kind"],
+                        "recurring": target["recurring"], "renew_enabled": target["renew_enabled"],
+                        "target_version": target["target_version"], "starts_at": target["starts_at"], "expires_at": target["expires_at"]}})
+                if reported_subscription is None or reported_subscription == str(target["target_id"]):
+                    result["eligible_actions"].append({"action_type": "DEACTIVATE_VAS", "target_id": target["target_id"],
+                                                        "target_label": target["target_label"]})
         investigation_id = uuid4()
         created_at = datetime.now(UTC)
         source_status = [{
@@ -322,6 +335,11 @@ class ResolveFacade:
             "next_cursor": None,
             "warnings": list(statement.warnings),
         }]
+        if vas_targets:
+            source_status.append({"source": "PRODUCT_VAS", "fetched_at": datetime.now(UTC),
+                "as_of": vas_targets[0]["as_of"], "complete_through": vas_targets[0]["as_of"],
+                "source_version": vas_targets[0]["source_version"], "complete": True,
+                "next_cursor": None, "warnings": []})
         with self._engine.begin() as connection:
             locked_case = connection.execute(
                 text("""
@@ -552,11 +570,48 @@ class ResolveFacade:
                      "key": f"confirmation:{confirmation_id}", "confirmation": json.dumps({"decision": decision, "proposal_hash": proposal_hash}),
                      "confirmation_id": confirmation_id, "fingerprint": fingerprint, "now": now})
                 connection.execute(text("UPDATE resolve.cases SET status='ACTION_PENDING',version=version+1,updated_at=:now WHERE id=:case"), {"now": now, "case": proposal["case_id"]})
+                if proposal["action_type"] == "CREATE_REVIEW_TICKET":
+                    connection.execute(text("INSERT INTO resolve.escalation_deliveries(id,sandbox_id,case_id,operation_id,delivery_state,request_key,updated_at) VALUES (:id,:sandbox,:case,:operation,'PENDING',:request_key,:now)"),
+                        {"id": uuid4(), "sandbox": context.sandbox_id, "case": proposal["case_id"],
+                         "operation": operation_id, "request_key": f"resolve-operation:{operation_id}", "now": now})
             connection.execute(text("INSERT INTO resolve.audit_events(id,session_id,case_id,event_type,details,created_at) VALUES (:id,:session,:case,'ACTION_CONFIRMED',CAST(:details AS jsonb),:now)"),
                 {"id": uuid4(), "session": context.session_id, "case": proposal["case_id"], "details": json.dumps({"confirmation_id": str(confirmation_id), "decision": decision, "operation_id": str(operation_id) if operation_id else None}), "now": now})
             return {"id": confirmation_id, "proposal_id": proposal_id, "proposal_hash": proposal_hash, "decision": decision,
                     "channel": context.channel, "client_turn_id": client_turn_id, "created_at": now,
                     "operation_id": operation_id, "operation_status": operation_status, "simulation": True}
+
+    def get_operation(self, context: AuthContext, operation_id: UUID) -> dict[str, Any]:
+        with self._engine.connect() as connection:
+            row = connection.execute(text("""
+                SELECT o.id,o.case_id,o.proposal_id,o.status,o.outcome,o.provider_operation_ref,o.created_at,o.updated_at,p.action_type
+                FROM resolve.operations o JOIN resolve.action_proposals p ON p.id=o.proposal_id AND p.case_id=o.case_id
+                WHERE o.id=:id
+            """), {"id": operation_id}).mappings().one_or_none()
+        if row is None:
+            raise ResolveError(404, "RESOURCE_NOT_FOUND", "Operation was not found")
+        self._scoped_case(context, row["case_id"])
+        status = row["status"]
+        next_step = ("Wait for the simulated provider result." if status in {"PENDING", "RUNNING", "UNKNOWN"}
+                     else "A human agent should review this operation." if status in {"FAILED", "REVIEW_REQUIRED"}
+                     else "Review the receipt for the completed simulated action.")
+        return {"id": row["id"], "case_id": row["case_id"], "proposal_id": row["proposal_id"],
+                "action_type": row["action_type"], "status": status, "created_at": row["created_at"],
+                "updated_at": row["updated_at"], "provider_operation_id": row["provider_operation_ref"],
+                "outcome": row["outcome"] or {"code": None, "message": None, "actual_target_status": None, "provider_ticket_id": None},
+                "next_step": next_step, "simulation": True}
+
+    def get_receipt(self, context: AuthContext, case_id: UUID, revision: int | None = None) -> dict[str, Any]:
+        self._scoped_case(context, case_id)
+        with self._engine.connect() as connection:
+            if revision is None:
+                row = connection.execute(text("SELECT receipt FROM resolve.receipts WHERE case_id=:case_id ORDER BY revision DESC LIMIT 1"),
+                    {"case_id": case_id}).scalar_one_or_none()
+            else:
+                row = connection.execute(text("SELECT receipt FROM resolve.receipts WHERE case_id=:case_id AND revision=:revision"),
+                    {"case_id": case_id, "revision": revision}).scalar_one_or_none()
+        if row is None:
+            raise ResolveError(404, "RESOURCE_NOT_FOUND", "Receipt was not found")
+        return row
 
     def _scoped_case(self, context: AuthContext, case_id: UUID) -> Any:
         with self._engine.connect() as connection:

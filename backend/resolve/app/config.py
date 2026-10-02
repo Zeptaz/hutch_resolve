@@ -24,6 +24,7 @@ class Settings:
     cookie_secure: bool
     session_minutes: int
     demo_identities: dict[str, DemoIdentity]
+    sandbox_database_url: str | None = None
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -32,6 +33,9 @@ class Settings:
             raise RuntimeError("DATABASE_URL must be configured")
         if not database_url.startswith("postgresql+psycopg://"):
             raise RuntimeError("DATABASE_URL must use the psycopg PostgreSQL driver")
+        sandbox_database_url = os.getenv("SANDBOX_DATABASE_URL", "").strip() or None
+        if sandbox_database_url and not sandbox_database_url.startswith("postgresql+psycopg://"):
+            raise RuntimeError("SANDBOX_DATABASE_URL must use the psycopg PostgreSQL driver")
         origins = frozenset(
             value.strip().rstrip("/")
             for value in os.getenv("APP_ORIGINS", "http://localhost:5173").split(",")
@@ -91,4 +95,5 @@ class Settings:
             cookie_secure=secure_setting == "true",
             session_minutes=30,
             demo_identities=identities,
+            sandbox_database_url=sandbox_database_url,
         )

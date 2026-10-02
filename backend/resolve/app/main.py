@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Protocol
 from uuid import UUID, uuid4
@@ -17,6 +18,7 @@ from .case_api import build_case_router
 from .config import Settings
 from .database import Database
 from backend.resolve.services.facade import ResolveFacade
+from backend.resolve.services.operations import OperationRunner
 
 logger = logging.getLogger("hutch_resolve")
 
@@ -38,6 +40,8 @@ def create_app(
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         active_database = database
         active_settings = settings
+        sandbox_database = None
+        operation_task = None
         if active_database is None:
             if active_settings is None:
                 load_dotenv()
@@ -56,12 +60,30 @@ def create_app(
         application.state.settings = active_settings
         application.state.auth_store = auth_store
         application.state.account_provider = account_provider
+        if active_settings.sandbox_database_url and hasattr(active_database, "engine") and resolve_facade is None:
+            sandbox_database = Database.connect(active_settings.sandbox_database_url)
+        elif resolve_facade is None:
+            logger.warning("Sandbox provider write URL is not configured; accepted operations will remain PENDING")
+        sandbox_engine = sandbox_database.engine if sandbox_database is not None else None
         application.state.resolve_facade = resolve_facade or (
-            ResolveFacade(active_database.engine) if hasattr(active_database, "engine") else None
+            ResolveFacade(active_database.engine, provider_engine=sandbox_engine) if hasattr(active_database, "engine") else None
         )
+        application.state.operation_runner = None
+        if sandbox_engine is not None and hasattr(active_database, "engine") and resolve_facade is None:
+            runner = OperationRunner(active_database.engine, sandbox_engine)
+            application.state.operation_runner = runner
+            operation_task = asyncio.create_task(_operation_loop(runner))
         try:
             yield
         finally:
+            if operation_task is not None:
+                operation_task.cancel()
+                try:
+                    await operation_task
+                except asyncio.CancelledError:
+                    pass
+            if sandbox_database is not None:
+                sandbox_database.close()
             active_database.close()
 
     application = FastAPI(
@@ -133,3 +155,13 @@ def create_app(
 
 
 app = create_app()
+
+
+async def _operation_loop(runner: OperationRunner) -> None:
+    while True:
+        try:
+            worked = await asyncio.to_thread(runner.run_once)
+        except Exception as exc:
+            logger.error("Operation worker iteration failed (%s)", type(exc).__name__)
+            worked = False
+        await asyncio.sleep(0.1 if worked else 1.0)

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Header, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import ResolveError, authenticated_context, authenticated_context_any_role
@@ -115,6 +115,51 @@ class CaseView(StrictModel):
     simulation: Literal[True]
 
 
+class ReceiptEvidenceReference(StrictModel):
+    id: UUID
+    source: str
+    source_record_id: str
+    observed_at: datetime
+
+
+class ReceiptActionView(StrictModel):
+    proposal_id: UUID
+    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"]
+    requested: bool
+    decision: Literal["ACCEPT", "DECLINE"] | None
+    operation_id: UUID | None
+    operation_status: Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "UNKNOWN", "REVIEW_REQUIRED"] | None
+    completed: bool
+
+
+class ReceiptHandoffView(StrictModel):
+    reference: UUID
+    queue: Literal["BILLING_REVIEW", "TECHNICAL_SUPPORT"]
+    delivery_state: Literal["PENDING", "DELIVERED", "FAILED", "REVIEW_REQUIRED"]
+    provider_ticket_id: str | None
+    review_sync_state: Literal["NOT_APPLICABLE", "PENDING", "SYNCED", "FAILED"]
+    next_step: str
+
+
+class ReceiptView(StrictModel):
+    id: UUID
+    case_id: UUID
+    revision: int = Field(ge=1)
+    issued_at: datetime
+    issue: str
+    window: dict[str, datetime]
+    findings: list[FindingView]
+    calculations: list[CalculationView]
+    evidence_references: list[ReceiptEvidenceReference]
+    missing: list[str]
+    conflicts: list[str]
+    actions: list[ReceiptActionView]
+    handoff: ReceiptHandoffView | None
+    next_step: str
+    simulation: Literal[True]
+    digest_sha256: str = Field(pattern="^[0-9a-f]{64}$")
+
+
 def _facade(request: Request):
     facade = request.app.state.resolve_facade
     if facade is None:
@@ -148,5 +193,10 @@ def build_case_router() -> APIRouter:
             window_end=body.window_end,
             reported_facts=body.reported_facts,
         )
+
+    @router.get("/cases/{case_id}/receipt", response_model=ReceiptView, tags=["Cases"])
+    def get_receipt(case_id: UUID, request: Request, revision: int | None = Query(default=None, ge=1)) -> dict[str, Any]:
+        context = authenticated_context_any_role(request, {"CUSTOMER", "AGENT"})
+        return _facade(request).get_receipt(context, case_id, revision)
 
     return router

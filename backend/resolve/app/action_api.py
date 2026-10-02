@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Header, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from .auth import ResolveError, authenticated_customer_mutation
+from .auth import ResolveError, authenticated_context_any_role, authenticated_customer_mutation
 
 
 class StrictModel(BaseModel):
@@ -54,6 +54,27 @@ class ConfirmationView(StrictModel):
     simulation: Literal[True]
 
 
+class OperationOutcome(StrictModel):
+    code: str | None
+    message: str | None
+    actual_target_status: str | None
+    provider_ticket_id: str | None
+
+
+class OperationView(StrictModel):
+    id: UUID
+    case_id: UUID
+    proposal_id: UUID
+    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"]
+    status: Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "UNKNOWN", "REVIEW_REQUIRED"]
+    created_at: datetime
+    updated_at: datetime
+    provider_operation_id: str | None
+    outcome: OperationOutcome
+    next_step: str
+    simulation: Literal[True]
+
+
 def _facade(request: Request):
     facade = request.app.state.resolve_facade
     if facade is None:
@@ -83,5 +104,10 @@ def build_action_router() -> APIRouter:
             decision=body.decision, client_turn_id=body.client_turn_id)
         response.status_code = 202 if result.get("operation_id") else 200
         return result
+
+    @router.get("/operations/{operation_id}", response_model=OperationView, tags=["Actions"])
+    def get_operation(operation_id: UUID, request: Request) -> dict[str, Any]:
+        context = authenticated_context_any_role(request, {"CUSTOMER", "AGENT"})
+        return _facade(request).get_operation(context, operation_id)
 
     return router

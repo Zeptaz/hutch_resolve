@@ -132,6 +132,20 @@ class MemoryCaseFacade:
                 "created_at": datetime.now(UTC), "operation_id": UUID(int=302) if kwargs["decision"] == "ACCEPT" else None,
                 "operation_status": "PENDING" if kwargs["decision"] == "ACCEPT" else None, "simulation": True}
 
+    def get_operation(self, context, operation_id):
+        return {"id": operation_id, "case_id": UUID(int=123), "proposal_id": UUID(int=300),
+                "action_type": "CREATE_REVIEW_TICKET", "status": "PENDING", "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC), "provider_operation_id": None,
+                "outcome": {"code": None, "message": None, "actual_target_status": None, "provider_ticket_id": None},
+                "next_step": "Wait for the simulated provider result.", "simulation": True}
+
+    def get_receipt(self, context, case_id, revision):
+        return {"id": UUID(int=500), "case_id": case_id, "revision": revision or 1, "issued_at": datetime.now(UTC),
+                "issue": "BALANCE_RECHARGE", "window": {"start": datetime(2026, 10, 2, tzinfo=UTC),
+                "end": datetime(2026, 10, 3, tzinfo=UTC)}, "findings": [], "calculations": [],
+                "evidence_references": [], "missing": [], "conflicts": [], "actions": [], "handoff": None,
+                "next_step": "A human agent should review this case.", "simulation": True, "digest_sha256": "a" * 64}
+
 
 def build_client() -> tuple[TestClient, MemoryAuthStore]:
     store = MemoryAuthStore()
@@ -341,6 +355,13 @@ def test_action_routes_require_customer_origin_csrf_and_return_pending_acceptanc
         confirmed = client.post(f"/api/v1/action-proposals/{proposal.json()['id']}/confirmations", json=confirm_body, headers=headers)
         assert confirmed.status_code == 202, confirmed.text
         assert confirmed.json()["operation_status"] == "PENDING"
+        operation_id = confirmed.json()["operation_id"]
+        operation = client.get(f"/api/v1/operations/{operation_id}")
+        assert operation.status_code == 200, operation.text
+        assert operation.json()["status"] == "PENDING"
+        receipt = client.get(f"/api/v1/cases/{case_id}/receipt")
+        assert receipt.status_code == 200, receipt.text
+        assert receipt.json()["simulation"] is True
         no_csrf = client.post(f"/api/v1/action-proposals/{proposal.json()['id']}/confirmations", json=confirm_body,
                               headers={"Origin": ORIGIN})
         assert no_csrf.status_code == 403

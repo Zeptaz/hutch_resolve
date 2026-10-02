@@ -258,14 +258,20 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
     def eligible_vas_targets(self, sandbox_id: UUID, account_id: UUID) -> list[dict[str, Any]]:
         with self._engine.connect() as connection:
             rows = connection.execute(text("""
-                SELECT s.id,o.name,s.version FROM sandbox.subscriptions s
+                SELECT s.id,o.name,s.version,s.status,s.renew_enabled,o.offer_kind,o.recurring,
+                       s.starts_at,s.expires_at,r.fixture_version,r.simulation_clock
+                FROM sandbox.subscriptions s
                 JOIN sandbox.offers o ON (o.sandbox_id,o.id)=(s.sandbox_id,s.offer_id)
                 JOIN sandbox.sandbox_runs r ON r.id=s.sandbox_id
                 WHERE s.sandbox_id=:sandbox AND s.account_id=:account AND s.status='ACTIVE'
                   AND s.renew_enabled AND o.recurring AND o.offer_kind='VAS' AND r.run_status='ACTIVE'
                 ORDER BY s.id
             """), {"sandbox": sandbox_id, "account": account_id}).mappings().all()
-        return [{"action_type": "DEACTIVATE_VAS", "target_id": row["id"], "target_label": row["name"]} for row in rows]
+        return [{"action_type": "DEACTIVATE_VAS", "target_id": row["id"], "target_label": row["name"],
+                 "target_version": row["version"], "status": row["status"], "renew_enabled": row["renew_enabled"],
+                 "offer_kind": row["offer_kind"], "recurring": row["recurring"], "starts_at": row["starts_at"],
+                 "expires_at": row["expires_at"], "source_version": f"fixture-v{row['fixture_version']}:subscription-v{row['version']}",
+                 "as_of": row["simulation_clock"]} for row in rows]
 
 
 def reconcile_statement(statement: LedgerStatement) -> dict[str, Any]:
