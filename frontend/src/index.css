@@ -175,3 +175,51 @@
     cursor: pointer;
   }
 }
+
+/* Chat motion. New replies rise in from their corner; the thinking indicator breathes. Off for reduced motion. */
+@layer utilities {
+  .animate-bubble-in {
+    animation: bubble-in 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .animate-typing-dot {
+    animation: typing-dot 1.2s ease-in-out infinite;
+  }
+  .animate-thinking-ring {
+    animation: thinking-ring 1.6s ease-out infinite;
+  }
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+}
+
+@keyframes typing-dot {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@keyframes thinking-ring {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 45%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 8px color-mix(in oklch, var(--primary) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-bubble-in,
+  .animate-typing-dot,
+  .animate-thinking-ring {
+    animation: none;
+  }
+}

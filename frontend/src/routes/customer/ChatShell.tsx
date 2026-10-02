@@ -41,6 +41,10 @@ export function ChatShell({ session }: { session: SessionView }) {
   const [attempt, setAttempt] = useState(0)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  // The customer's own words, shown straight away while the turn is in flight.
+  const [outgoing, setOutgoing] = useState<string | null>(null)
+  // Messages already there when the chat opened; only ones after this animate in.
+  const [openedWith, setOpenedWith] = useState<ReadonlySet<string> | null>(null)
   const [failed, setFailed] = useState<FailedTurn | null>(null)
   const [decisions, setDecisions] = useState<Record<string, ProposalState>>({})
   const [caseRefresh, setCaseRefresh] = useState(0)
@@ -73,6 +77,7 @@ export function ChatShell({ session }: { session: SessionView }) {
       .then((c) => {
         if (cancelled) return
         setConversation(c)
+        setOpenedWith(new Set(c.messages.map((m) => m.id)))
       })
       .catch((e) => !cancelled && setLoadError(e))
     return () => {
@@ -107,6 +112,7 @@ export function ChatShell({ session }: { session: SessionView }) {
     async (input: TurnInput, label: string, clientTurnId: string) => {
       if (!conversation) return false
       setSending(true)
+      setOutgoing(label)
       setFailed(null)
       try {
         await customerApi.sendMessage(conversation.id, {
@@ -126,6 +132,7 @@ export function ChatShell({ session }: { session: SessionView }) {
         return false
       } finally {
         setSending(false)
+        setOutgoing(null)
       }
     },
     [conversation, language, reload],
@@ -255,15 +262,21 @@ export function ChatShell({ session }: { session: SessionView }) {
                   {conversation.messages.map((m) => {
                     const result = m.speaker === 'ASSISTANT' ? m.result : null
                     const hasExtras = !!result && (result.cards.length > 0 || result.citations.length > 0 || result.operation_ids.length > 0)
+                    // Replies animate in; the customer's own message already did while it was sending.
+                    const animate = m.speaker === 'ASSISTANT' && !!openedWith && !openedWith.has(m.id)
+                    const enter = (i: number) =>
+                      animate ? { className: 'animate-bubble-in', style: { animationDelay: `${180 + i * 110}ms` } } : {}
                     return (
                       <div key={m.id} data-message-id={m.id} className="flex flex-col gap-2">
-                        <Bubble speaker={m.speaker} time={m.created_at}>
+                        <Bubble speaker={m.speaker} time={m.created_at} animate={animate}>
                           {m.body}
                         </Bubble>
                         {result && hasExtras && (
                           <div className="flex max-w-xl flex-col gap-2 sm:ml-9">
                             {result.cards.map((card, i) => (
-                              <ChatCard key={`${m.id}-${i}`} card={card} renderConfirmation={(c) => renderProposal(c.data)} />
+                              <div key={`${m.id}-${i}`} {...enter(i)}>
+                                <ChatCard card={card} renderConfirmation={(c) => renderProposal(c.data)} />
+                              </div>
                             ))}
                             {result.operation_ids.map((id) => (
                               <OperationTracker
@@ -292,6 +305,11 @@ export function ChatShell({ session }: { session: SessionView }) {
                         onAnswer={answer}
                       />
                     </div>
+                  )}
+                  {outgoing != null && (
+                    <Bubble speaker="USER" animate pending>
+                      {outgoing}
+                    </Bubble>
                   )}
                   {sending && <Typing />}
                   {failed && <FailedTurnNotice failed={failed} onRetry={retryFailed} t={t} />}
@@ -390,40 +408,89 @@ function Welcome() {
   return <Bubble speaker="ASSISTANT">{t('chat.welcome')}</Bubble>
 }
 
-function Bubble({ speaker, time, children }: { speaker: 'USER' | 'ASSISTANT'; time?: string; children: React.ReactNode }) {
+function Bubble({
+  speaker,
+  time,
+  animate,
+  pending,
+  children,
+}: {
+  speaker: 'USER' | 'ASSISTANT'
+  time?: string
+  /** Rise in from the speaker's corner (new messages only). */
+  animate?: boolean
+  /** The customer's message while it is still being sent. */
+  pending?: boolean
+  children: React.ReactNode
+}) {
   const { t } = useI18n()
   const mine = speaker === 'USER'
   return (
-    <div className={cn('flex max-w-[85%] gap-2', mine ? 'ml-auto flex-row-reverse' : 'mr-auto')}>
-      {!mine && (
-        <span aria-hidden className="mt-1 grid size-7 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
-          <Bot className="size-4" />
-        </span>
+    <div
+      className={cn(
+        'flex max-w-[85%] gap-2',
+        mine ? 'ml-auto origin-bottom-right flex-row-reverse' : 'mr-auto origin-bottom-left',
+        animate && 'animate-bubble-in',
       )}
+    >
+      {!mine && <BotAvatar />}
       <div className={cn('flex flex-col gap-1', mine && 'items-end')}>
         <span className="sr-only">{mine ? t('chat.youSaid') : t('chat.assistantSaid')}</span>
         <div
           className={cn(
-            'rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap',
+            'rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap transition-opacity',
             mine ? 'rounded-br-md bg-primary text-primary-foreground' : 'rounded-bl-md bg-muted',
+            pending && 'opacity-80',
           )}
         >
           {children}
         </div>
-        {time && <time className="text-[11px] text-muted-foreground">{formatTime(time)}</time>}
+        {pending ? (
+          <span className="text-[11px] text-muted-foreground">{t('chat.sending')}</span>
+        ) : (
+          time && <time className="text-[11px] text-muted-foreground">{formatTime(time)}</time>
+        )}
       </div>
     </div>
   )
 }
 
+function BotAvatar({ thinking }: { thinking?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'mt-1 grid size-7 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground',
+        thinking && 'animate-thinking-ring',
+      )}
+    >
+      <Bot className="size-4" />
+    </span>
+  )
+}
+
+const STILL_WORKING_MS = 3500
+
+/** Resolve is working on a reply. After a few seconds a short note says it hasn't stalled. */
 function Typing() {
   const { t } = useI18n()
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    const id = window.setTimeout(() => setSlow(true), STILL_WORKING_MS)
+    return () => window.clearTimeout(id)
+  }, [])
   return (
-    <div role="status" className="mr-auto flex items-center gap-1 rounded-2xl bg-muted px-4 py-3">
-      <span className="sr-only">{t('chat.typing')}</span>
-      {[0, 150, 300].map((d) => (
-        <span key={d} className="size-1.5 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: `${d}ms` }} />
-      ))}
+    <div role="status" className="mr-auto flex origin-bottom-left animate-bubble-in gap-2">
+      <BotAvatar thinking />
+      <div className="flex flex-col gap-1">
+        <span className="sr-only">{t('chat.typing')}</span>
+        <div className="flex h-10 items-center gap-1.5 rounded-2xl rounded-bl-md bg-muted px-4">
+          {[0, 160, 320].map((d) => (
+            <span key={d} className="size-2 animate-typing-dot rounded-full bg-muted-foreground" style={{ animationDelay: `${d}ms` }} />
+          ))}
+        </div>
+        {slow && <span className="animate-bubble-in text-[11px] text-muted-foreground">{t('chat.stillWorking')}</span>}
+      </div>
     </div>
   )
 }
