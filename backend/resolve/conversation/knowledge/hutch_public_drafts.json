@@ -1,6 +1,6 @@
 {
  "status": "DRAFT_FOR_TEAM_REVIEW",
- "purpose": "Proposed additions to database/knowledge_seed.sql (Harry). Paraphrased from public HUTCH pages fetched 2026-10-02; every fact must be re-checked against the cited page before it is marked reviewed. Used by the dev backend only.",
+ "purpose": "Proposed additions to database/knowledge_seed.sql (Harry). Paraphrased from public HUTCH pages fetched 2026-10-02; every fact must be re-checked against the cited page before it is marked reviewed. Used by the dev backend only. Cards with scope SYNTHETIC (vas-charges) describe this demo, not HUTCH policy.",
  "fetched_at": "2026-10-02",
  "cards": [
   {
@@ -51,6 +51,14 @@
    "url": "https://hutch.lk/faq-online-web-recharge/",
    "content": "After an online reload the payment site shows whether it succeeded or failed, and a successful reload is confirmed by an SMS with the credited amount. A taken payment and a credited balance are different things, so do not pay again while a reload is pending; contact HUTCH customer support on 1788 or by WhatsApp on 0788 777 111 with your payment details.",
    "aliases": ["reload not received", "recharge failed", "reload awe na", "reload watila na", "not credited", "payment failed"]
+  },
+  {
+   "article_key": "vas-charges",
+   "scope": "SYNTHETIC",
+   "title": "Value-added services (VAS) and their charges",
+   "url": "https://hutch.lk/",
+   "content": "Value-added services (VAS) are optional extras on a prepaid line, such as alert or content services. They are charged on top of packages and usually renew automatically until they are stopped. In this demo, the assistant can show the services on your line, check a service charge you did not expect, and stop a service from renewing after you confirm. Stopping a renewal does not refund past charges; a past charge you dispute is sent to human review.",
+   "aliases": ["vas", "value added", "value-added", "vas charges", "service charge", "services", "subscription", "subscriptions", "alerts", "video alerts", "vas eka", "service eka"]
   }
  ]
 }

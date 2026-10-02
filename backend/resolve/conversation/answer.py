@@ -28,7 +28,7 @@ from .extraction import Script
 from .model import ModelClient, ModelError, ModelReply
 from .rewrite import STYLE, _numbers, has_magnitude, soften_singlish_k
 
-ANSWER_PROMPT_VERSION = "answer-v3"
+ANSWER_PROMPT_VERSION = "answer-v4"
 ANSWER_BUDGET_SECONDS = 6.0
 
 _DOMAIN = re.compile(r"\b(?:[a-z0-9-]+\.)+(?:lk|com|net|org)\b", re.IGNORECASE)
@@ -50,6 +50,7 @@ Rules:
 - This chat cannot reload, buy packages, pay or change the account. If the customer asked the chat to do it, add one
   short line saying they can do it themselves as above. Do not start the answer with what you cannot do.
 - If an account fact is given and it is relevant, mention it in one short sentence.
+- An article with scope SYNTHETIC describes how this demo works, not official HUTCH policy: say "in this demo" when you use it.
 - If the articles do not answer the question, say you don't have that information; suggest HUTCH support only if a
   support article is provided.
 - Keep it short: at most about 8 lines. Friendly and natural, like a helpful person texting.
@@ -140,7 +141,7 @@ class GroundedAnswerer:
         payload = {
             "target_style": self.style_for(language, script),
             "question": question,
-            "articles": [{"article_key": c.article_key, "title": c.title, "content": c.content} for c in cards],
+            "articles": [{"article_key": c.article_key, "scope": c.scope, "title": c.title, "content": c.content} for c in cards],
             "account_fact": account_fact,
         }
         timeout = self._budget if budget_seconds is None else max(0.0, min(self._budget, budget_seconds))

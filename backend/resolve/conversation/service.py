@@ -101,6 +101,8 @@ _DEADLINE: ContextVar[float | None] = ContextVar("turn_deadline", default=None)
 _CHANNEL: ContextVar[Channel] = ContextVar("turn_channel", default=Channel.TEXT)
 # Knowledge topics where a signed-in customer's current balance is useful context.
 _BALANCE_TOPICS = {"how-to-reload", "check-balance-how", "reload-not-received", "prepaid-recharge"}
+# ...and where the customer's own value-added services are.
+_SERVICE_TOPICS = {"vas-charges"}
 _CODE = re.compile(r"[A-Z0-9_]+")
 
 # Pending question codes shared with the frontend.
@@ -498,6 +500,10 @@ class ConversationService:
             t.text("account_balance", lang, wallet=b.wallet.lower(), amount=t.format_lkr(b.amount_minor), as_of=t.format_time(b.as_of))
             for b in account.balances
         ] or [t.text("account_no_balance", lang)]
+        vas = [s for s in account.subscriptions if s.kind == "VAS" and s.status == "ACTIVE"]
+        if vas:
+            names = ", ".join(f"{s.name} ({t.text('renews' if s.renewal else 'not_renewing', lang)})" for s in vas)
+            parts.append(t.text("account_services", lang, services=names))
         if any(not s.complete for s in account.source_status):
             parts.append(t.text("account_incomplete", lang))
         return TurnDraft(reply_text=" ".join(parts), case_id=state.active_case_id, cards=[AccountCard(data=account)]), state.evolve(
@@ -573,12 +579,17 @@ class ConversationService:
     ) -> TurnDraft | None:
         """Model-written answer from the cards only (code-checked); None falls back to the card text."""
         account_fact, extra_cards = None, []
-        if _is_customer(ctx) and cards[0].article_key in _BALANCE_TOPICS:
+        topic = cards[0].article_key
+        if _is_customer(ctx) and topic in _BALANCE_TOPICS | _SERVICE_TOPICS:
             try:
                 account = await self._facade.get_account(ctx)
-                main = next((b for b in account.balances if b.wallet.upper() == "MAIN"), None)
-                if main is not None:
-                    account_fact = f"The customer's current main balance is {t.format_lkr(main.amount_minor)} (as of {t.format_time(main.as_of)})."
+                if topic in _BALANCE_TOPICS:
+                    main = next((b for b in account.balances if b.wallet.upper() == "MAIN"), None)
+                    if main is not None:
+                        account_fact = f"The customer's current main balance is {t.format_lkr(main.amount_minor)} (as of {t.format_time(main.as_of)})."
+                else:
+                    account_fact = _services_fact(account)
+                if account_fact:
                     extra_cards = [AccountCard(data=account)]
             except ResolveError:
                 pass
@@ -1028,6 +1039,14 @@ class _PackageTools:
         cards = await self._service._knowledge.search(self._ctx, query, self._lang, limit=2)
         self.help_cards += [c for c in cards if c not in self.help_cards]
         return {"articles": [{"title": c.title, "content": c.content} for c in cards]}
+
+
+def _services_fact(account) -> str | None:
+    vas = [s for s in account.subscriptions if s.kind == "VAS" and s.status == "ACTIVE"]
+    if not vas:
+        return "The customer has no active value-added services."
+    listed = "; ".join(f"{s.name}, {'renews automatically' if s.renewal else 'does not renew'}" for s in vas)
+    return f"The customer's active value-added services: {listed}."
 
 
 def _package_fallback(data: dict, lang: Language) -> str:

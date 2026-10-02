@@ -135,7 +135,7 @@ def load_knowledge() -> list[tuple[KnowledgeCard, set[str]]]:
     for i, d in enumerate(drafts["cards"]):  # proposed additions for Harry's seed; dev only
         card = KnowledgeCard(article_id=UUID(int=0x91000000_0000_4000_8000_000000000100 + i), article_key=d["article_key"],
                              language="en", title=d["title"], content=d["content"], url=d["url"],
-                             reviewed_at=drafts["fetched_at"], version=1, scope="PUBLIC")
+                             reviewed_at=drafts["fetched_at"], version=1, scope=d.get("scope", "PUBLIC"))
         terms = {w for a in d["aliases"] for w in re.findall(r"[a-z]+", a.lower())} | set(re.findall(r"[a-z]+", d["title"].lower()))
         cards.append((card, terms))
     return cards

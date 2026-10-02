@@ -174,7 +174,8 @@ def test_account_enquiry_shows_scoped_account(hm: Harness) -> None:
     ctx = customer(ACCOUNT_A)
     conv = hm.open(ctx)
     result = hm.send(ctx, hm.turn(conv, text("what is my balance")))
-    assert result.reply_text == "Your main balance is LKR 420.00 (as of 2 Oct, 12:00)."
+    assert result.reply_text.startswith("Your main balance is LKR 420.00 (as of 2 Oct, 12:00).")
+    assert "Value-added services on your line: Synthetic video alerts (renews automatically)." in result.reply_text
     assert result.cards[0].type == "account" and result.cards[0].data.id == ACCOUNT_A
 
 

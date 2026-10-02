@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .dto import CONTRACT_ACTION_TYPES, ActionType, ComplaintType, Language, MAX_TEXT_CHARS
 from .model import ModelClient, ModelError, ModelReply
 
-PROMPT_VERSION = "extract-v6"
+PROMPT_VERSION = "extract-v7"
 TOTAL_BUDGET_SECONDS = 6.0
 MAX_WINDOW = timedelta(days=30)
 # Sri Lanka observes no DST; a fixed offset avoids a tzdata dependency.
@@ -169,7 +169,8 @@ intent:
 - NEW_COMPLAINT: a problem with balance/recharge, data running out, no connection, or an unexpected service charge.
 - FOLLOW_UP: a question about findings already given for the active case.
 - CORRECTION: the customer changes facts (time, amount, which service) of the active case.
-- ACCOUNT_ENQUIRY: asks for their own balance, packages or account state without reporting a problem.
+- ACCOUNT_ENQUIRY: asks for their own balance, packages, value-added services (VAS) or their charges, or account state,
+  without reporting a problem ("what VAS do I have", "what are my VAS charges", "mata thiyena services monawada").
 - FAQ: a general question about services, OR the customer wants to do something themselves and needs to know how:
   reload/recharge/top up, activate a package or data plan themselves, use the app, check balance in general,
   contact support or register a complaint. A greeting before the request ("hi, ...") does not change this. Set faq_query.
@@ -220,6 +221,8 @@ Examples (message -> key fields):
 "en balance kuraindhu pochu" -> NEW_COMPLAINT, ta, LATIN, BALANCE_RECHARGE
 "Why am I charged for video alerts? I never subscribed" -> NEW_COMPLAINT, en, LATIN, VAS_DISPUTE
 "what is my balance" -> ACCOUNT_ENQUIRY
+"what are the VAS charges on my line?" -> ACCOUNT_ENQUIRY
+"what is a VAS?" -> FAQ, faq_query "value added services"
 "how do I activate a package" -> FAQ, faq_query "package activation"
 "hi mata reload ekak danna one" -> FAQ, si, faq_query "how to reload"
 "reload karanne kohomada" -> FAQ, si, faq_query "how to reload"

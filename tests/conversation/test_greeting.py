@@ -76,3 +76,45 @@ def test_spoken_offer_still_asks_and_states_the_consequences() -> None:
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, text("why am I charged for video alerts"), channel=Channel.VOICE))
     assert "Shall I go ahead?" in result.reply_text and "card" not in result.reply_text
+
+
+def test_vas_charge_question_shows_the_customers_own_services() -> None:
+    h = harness()
+    h.model.on("What are the VAS Charges ?", extraction(intent="ACCOUNT_ENQUIRY"))
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    result = h.send(ctx, h.turn(conv, text("What are the VAS Charges ?")))
+    assert "Synthetic video alerts (renews automatically)" in result.reply_text
+    assert "tell me and I'll check it, or I can stop a service from renewing" in result.reply_text
+    assert result.cards[0].type == "account"
+
+
+def test_general_vas_question_uses_the_demo_card_and_the_customers_services() -> None:
+    import json
+    from pathlib import Path
+    from uuid import uuid4
+
+    from resolve.conversation.answer import GroundedAnswerer
+    from resolve.conversation.dto import KnowledgeCard
+    from test_answer import AnswerModel
+
+    drafts = json.loads((Path(__file__).resolve().parents[2] / "backend/resolve/conversation/knowledge/hutch_public_drafts.json").read_text())
+    vas = next(c for c in drafts["cards"] if c["article_key"] == "vas-charges")
+    card = KnowledgeCard(article_id=uuid4(), article_key=vas["article_key"], language="en", title=vas["title"], content=vas["content"],
+                         url=vas["url"], reviewed_at=drafts["fetched_at"], version=1, scope=vas["scope"])
+
+    class OneCard:
+        async def search(self, ctx, query, language, limit=3):
+            return [card]
+
+    model = AnswerModel(lambda p: {"answer": "In this demo, VAS are optional extras. You have Synthetic video alerts, which renews automatically.",
+                                   "used_articles": ["vas-charges"]})
+    h = harness()
+    h.service._knowledge, h.service._answerer = OneCard(), GroundedAnswerer(model)
+    h.model.on("what is a VAS?", extraction(intent="FAQ", faq_query="value added services"))
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    result = h.send(ctx, h.turn(conv, text("what is a VAS?")))
+    assert model.payloads[0]["account_fact"] == "The customer's active value-added services: Synthetic video alerts, renews automatically."
+    assert model.payloads[0]["articles"][0]["scope"] == "SYNTHETIC"
+    assert result.reply_text.startswith("In this demo") and result.cards[0].type == "account"
