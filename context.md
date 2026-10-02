@@ -77,7 +77,10 @@ Development: frontend `http://localhost:5173` proxies `/api` to Resolve `http://
 - [x] BASE-02 Existing PostgreSQL running state and seed counts checked read-only.
 - [x] BASE-03 Existing 15-test Voice suite run; runtime defects investigated separately.
 - [ ] H-01 Correct/version fixtures, add migration lifecycle and safe readiness/reset. Owner Harry.
+- [x] H-01a Fixture version 2 corrects B/C/E inputs and has SQL drift assertions. Owner Harry; verified on an isolated fresh PostgreSQL volume.
+- [x] H-01b Alembic non-destructively adopts the legacy SQL schemas 001-003 as revision 0001. Verified current-head lookup and readiness with the app role against the isolated volume. Future schema revisions and reset/run revocation remain open.
 - [ ] H-02 Compose application, authentication, scoped repositories and shared facade. Owner Harry; depends H-01.
+- [x] H-02a FastAPI liveness/readiness starter uses synchronous SQLAlchemy/Psycopg and checks the Alembic revision. Verified fake-probe tests and actual PostgreSQL integration. Auth, APIs and business services remain open.
 - [ ] H-03 Implement provider reads/faults, cases and A/D deterministic investigation. Owner Harry; depends H-02.
 - [ ] H-04 Implement all permitted proposals, confirmations, durable operations/recovery and receipts. Owner Harry; depends H-03.
 - [ ] H-05 Implement review queue/detail/update APIs and audited permissions. Owner Harry; depends H-02/H-03.
@@ -131,3 +134,4 @@ Current blockers/risks: missing Resolve application and both frontends; reproduc
 | --- | --- | --- | --- |
 | 2026-10-02 | Audited both repositories, master architecture and submission materials; confirmed two-day/one-process choices | Clean Git/remote checks, existing Voice suite, ephemeral streaming reproduction, read-only database queries | All unchecked implementation tasks above |
 | 2026-10-02 | Prepared owner plans, AGENTS instructions, API specification and proposed browser interruption event | Python/jsonschema checks: 96 schemas, 340 refs, 43 examples, 5 rejection cases, 26 operations; receipt digest; Voice schema/model parity; 34 local links all pass | Application tasks remain unchecked; publication commits are discoverable in each repository's Git history |
+| 2026-10-02 | Harry started on local `ReolveDev` from `cba91f0`: fixture v2 corrections/checks, Alembic baseline adoption, FastAPI health/readiness and ignored .venv | Fresh isolated PostgreSQL bootstrap; `scripts/check-sandbox.sql` passes including A/B/C/D/E invariants; Alembic upgrade is repeatable at `0001_sandbox_baseline`; app-role `/api/v1/readyz` returns200; Resolve suite 5 passed; compileall passed | Alembic forward schema revisions; reset/session revocation; app authentication/providers/business APIs; Voice defects; UI and conversation modules |

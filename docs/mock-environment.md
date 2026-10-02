@@ -35,8 +35,8 @@ Amounts are signed `bigint` minor LKR units (100 = LKR 1.00); usage and quota us
 | Case | Seed evidence | Expected safe interpretation |
 | --- | --- | --- |
 | A | LKR 0 opening; +1,000 recharge, −499 package, −60 VAS, −21 rated use; LKR 420 close | Exact ledger tie-out. A future VAS deactivation can be proposed; historic dispute remains review work. |
-| B | 20 GB grant, 11.4 + 5.2 + 3.4 GB consumed, zero remaining; 0.8 GB out of bundle linked to LKR 80 | Quota movements explain exhaustion; don't count usage or its linked money posting twice. Category is unknown. |
-| C | Active account/package, 9.7 GB remaining, fresh data enabled check, South region mobile-data incident | Report only supplied evidence; no repair claim or invented ETA. |
+| B | 20 GB grant, 11.4 + 5.2 + 3.4 GB consumed, zero remaining; LKR 100 opening balance minus LKR 80 out-of-bundle charge gives LKR 20 | Quota movements explain exhaustion; don't count usage or its linked money posting twice. Usage category is unspecified. |
+| C | Synthetic 10 GB offer/grant, 0.3 GB consumed and 9.7 GB remaining, fresh data-enabled check, South region mobile-data incident | Report only supplied evidence; no repair claim or invented ETA. |
 | D | Same postings as A, closing snapshot LKR 350 | LKR 70 conflict blocks a conclusive diagnosis and account mutation; route for review. |
 | E | LKR 500 payment captured, fulfilment pending, no credit entry; balance LKR 100 | Payment is not an account credit. Do not request another payment/recharge. |
 | F | Active recurring VAS, posted charge, no activation evidence | Report missing evidence without asserting consent; confirmed future deactivation does not decide a past dispute. |
@@ -56,6 +56,10 @@ The eventual in-process providers should expose typed bounded reads for account,
 
 Fault profiles cover late/duplicate posts, linked reversal, missing opening snapshot, pending payment, incomplete usage page, stale source, wrong unit, CRM outage, rejected writes, committed writes with lost responses, duplicate/stale confirmation and operation lookup failure. These rows configure a future simulator; they do not execute faults today.
 
+## Fixture version 2
+
+The checked-in `database/seed.sql` is now fixture version 2. It corrects B's signed debit and closing snapshot, links B's 20 GB quota bucket to a package subscription, removes unsupported app/category labels, gives C a separate matching 10 GB offer, and removes E's duplicate same-time opening snapshot. These are synthetic simulation choices. Existing initialized volumes retain their version 1 rows; generate version 2 in a new fixture run. `scripts/check-sandbox.sql` now raises an SQL exception when these selected invariants drift. The first Alembic revision validates and adopts schemas 001-003 on an already bootstrapped database; it does not replay DDL or change existing rows.
+
 ## Local commands
 
-Fresh volume initialization runs migrations 001, 002 and 003, then the baseline fixtures and knowledge cards. `scripts/reset.ps1` inserts a new fixture run without dropping history. `database/seed.sql` is the baseline; `scripts/seed_run.py` re-keys it for a requested run UUID using only Python's standard library. To discard all history, explicitly remove the Compose volume with `docker compose down -v`.
+Fresh volume initialization runs SQL migrations 001, 002 and 003, then baseline fixture version 2 and knowledge cards. Run `python -m alembic upgrade head` after the DB is ready to validate/adopt the SQL baseline and track future application migrations. `scripts/reset.ps1` inserts a new fixture run without dropping history. `database/seed.sql` is the baseline; `scripts/seed_run.py` re-keys it for a requested run UUID using only Python's standard library. Run `Get-Content scripts/check-sandbox.sql | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U hutch_admin -d hutch_resolve` in PowerShell to assert the selected fixture invariants. To discard all history, explicitly remove the Compose volume with `docker compose down -v`.

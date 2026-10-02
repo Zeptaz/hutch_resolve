@@ -110,5 +110,6 @@ Existing Voice read timeout is eight seconds; conversation processing must retur
 | Date | Task | Evidence | Remaining |
 | --- | --- | --- | --- |
 | 2026-10-02 | Baseline | 15 existing Voice tests pass; ephemeral streaming reproduction fails; live DB healthy; seed defects confirmed read-only | H-01 through H-09 remain unchecked |
+| 2026-10-02 | H-01 fixture corrections + H-01 baseline adoption + H-02 readiness starter | Fixture v2 checked in isolated fresh PostgreSQL; full SQL assertions pass; Alembic upgrade run twice, current is `0001_sandbox_baseline`; app-role `/api/v1/readyz` returns200; project-venv tests 5 passed; compileall passed | H-01 reset/session revocation, forward migrations and reversal fixture; H-02 auth/facade/repositories; H-03 onward |
 
 Work order and time boxes are in context.md. Harry owns the critical path; publish interfaces early and integrate one vertical text slice before secondary features.
