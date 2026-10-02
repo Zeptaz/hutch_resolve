@@ -126,7 +126,8 @@ class AgentReviewService:
                 {"case": case_id}).mappings().all()
             confirmation_rows = connection.execute(text("""
                 SELECT cf.id,cf.proposal_id,cf.proposal_hash,cf.decision,cf.source_channel AS channel,cf.client_turn_id,
-                       cf.recorded_at AS created_at,o.id AS operation_id,o.status AS operation_status
+                       cf.recorded_at AS created_at,o.id AS operation_id,o.status AS operation_status,
+                       TRUE AS simulation
                 FROM resolve.confirmations cf LEFT JOIN resolve.operations o ON o.confirmation_id=cf.id
                 WHERE cf.case_id=:case ORDER BY cf.recorded_at,cf.id
             """), {"case": case_id}).mappings().all()
