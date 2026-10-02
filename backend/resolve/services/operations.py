@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid5, NAMESPACE_URL
@@ -10,6 +12,30 @@ from uuid import UUID, uuid5, NAMESPACE_URL
 from sqlalchemy import Engine, text
 
 logger = logging.getLogger("hutch_resolve.operations")
+_LOG_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+
+
+def _worker_event(*, event: str, case_id: UUID, attempt: int, started_at: float,
+                  operation_id: UUID | None = None, review_event_id: UUID | None = None,
+                  action_type: str | None = None, status: str, error_code: str | None = None) -> str:
+    """Build a bounded worker event with IDs/state only, never customer/provider payloads."""
+    safe_code = error_code if error_code and _LOG_CODE.fullmatch(error_code) else None
+    record: dict[str, Any] = {
+        "event": event,
+        "case_id": str(case_id),
+        "attempt": int(attempt),
+        "status": status,
+        "elapsed_ms": round(max(0.0, (time.perf_counter() - started_at) * 1000), 3),
+    }
+    if operation_id is not None:
+        record["operation_id"] = str(operation_id)
+    if review_event_id is not None:
+        record["review_event_id"] = str(review_event_id)
+    if action_type is not None:
+        record["action_type"] = action_type
+    if status in {"UNKNOWN", "FAILED", "REVIEW_REQUIRED"}:
+        record["error_code"] = safe_code or "WORKER_ERROR"
+    return json.dumps(record, separators=(",", ":"), sort_keys=True)
 
 
 class ProviderUnavailable(Exception):
@@ -54,6 +80,12 @@ class MockSandboxWriter:
             existing = connection.execute(text("SELECT request_hash,status,result FROM sandbox.provider_operations WHERE sandbox_id=:sandbox AND provider=:provider AND idempotency_key=:key"),
                 {"sandbox": sandbox_id, "provider": provider, "key": str(operation_id)}).mappings().one_or_none()
         if existing:
+            # A provider-side operation lookup only matters during recovery,
+            # after the stable idempotency key has already committed. Simulate
+            # that read failing without allowing the retry to issue a new write.
+            lookup_fault = self._fault(sandbox_id, "operations", "lookup", account_id)
+            if lookup_fault in {"PROVIDER_UNAVAILABLE", "LOOKUP_UNAVAILABLE"}:
+                raise ProviderUnavailable(lookup_fault)
             if existing["request_hash"] != request_hash:
                 return "FAILED", {"code": "IDEMPOTENCY_CONFLICT", "message": "Provider key was reused with different input", "actual_target_status": None, "provider_ticket_id": None}
             result = existing["result"] or {}
@@ -209,6 +241,7 @@ class OperationRunner:
             operation = dict(row)
             operation["attempt_count"] = row["attempt_count"] + 1
         operation_id = operation["id"]
+        started_at = time.perf_counter()
         request_hash = hashlib.sha256(json.dumps({"operation_id": str(operation_id), "case_id": str(operation["case_id"]),
             "action_type": operation["action_type"], "target_id": str(operation["target_id"]),
             "target_version": operation["target_version"], "investigation_id": str(operation["investigation_id"])},
@@ -226,6 +259,10 @@ class OperationRunner:
             result = {"code": str(exc), "message": "Provider outcome is not yet confirmed; no success is claimed.",
                       "actual_target_status": None, "provider_ticket_id": None}
             self._complete(operation, status, result, None, retry_after)
+            logger.info(_worker_event(event="resolve_action", case_id=operation["case_id"],
+                operation_id=operation_id, action_type=operation["action_type"],
+                attempt=operation["attempt_count"], started_at=started_at, status=status,
+                error_code=result["code"]))
             return True
         except Exception as exc:
             logger.error("Mock provider operation failed (%s)", type(exc).__name__)
@@ -236,8 +273,16 @@ class OperationRunner:
             result = {"code": "PROVIDER_OUTCOME_UNAVAILABLE", "message": "The provider outcome is not confirmed; no success is claimed.",
                       "actual_target_status": None, "provider_ticket_id": None}
             self._complete(operation, status, result, None, retry_after)
+            logger.info(_worker_event(event="resolve_action", case_id=operation["case_id"],
+                operation_id=operation_id, action_type=operation["action_type"],
+                attempt=operation["attempt_count"], started_at=started_at, status=status,
+                error_code=result["code"]))
             return True
         self._complete(operation, status, result, str(operation_id), None)
+        logger.info(_worker_event(event="resolve_action", case_id=operation["case_id"],
+            operation_id=operation_id, action_type=operation["action_type"],
+            attempt=operation["attempt_count"], started_at=started_at, status=status,
+            error_code=result.get("code") if status != "SUCCEEDED" else None))
         return True
 
     def _run_review_sync_once(self) -> bool:
@@ -262,6 +307,7 @@ class OperationRunner:
             """), {"id": row["id"], "now": now, "until": now + timedelta(seconds=15)})
             job = dict(row)
             job["attempt_count"] += 1
+        started_at = time.perf_counter()
         try:
             provider_status, result = self._writer.sync_review(sandbox_id=job["sandbox_id"],
                 account_id=job["account_id"], ticket_id=UUID(job["provider_ticket_id"]),
@@ -273,6 +319,9 @@ class OperationRunner:
             recovery = None if terminal else datetime.now(UTC) + timedelta(seconds=2 if job["attempt_count"] == 1 else 10)
             result = {"code": str(exc), "message": "CRM review update is unconfirmed; local review remains saved."}
             self._complete_review_sync(job, state, result, recovery)
+            logger.info(_worker_event(event="resolve_review_sync", case_id=job["case_id"],
+                review_event_id=job["review_event_id"], attempt=job["attempt_count"],
+                started_at=started_at, status=state, error_code=result["code"]))
             return True
         except Exception as exc:
             logger.error("Mock CRM review sync failed (%s)", type(exc).__name__)
@@ -281,9 +330,16 @@ class OperationRunner:
             recovery = None if terminal else datetime.now(UTC) + timedelta(seconds=2 if job["attempt_count"] == 1 else 10)
             result = {"code": "PROVIDER_OUTCOME_UNAVAILABLE", "message": "CRM review update is unconfirmed; local review remains saved."}
             self._complete_review_sync(job, state, result, recovery)
+            logger.info(_worker_event(event="resolve_review_sync", case_id=job["case_id"],
+                review_event_id=job["review_event_id"], attempt=job["attempt_count"],
+                started_at=started_at, status=state, error_code=result["code"]))
             return True
         state = "SYNCED" if provider_status == "SUCCEEDED" else "FAILED"
         self._complete_review_sync(job, state, result, None)
+        logger.info(_worker_event(event="resolve_review_sync", case_id=job["case_id"],
+            review_event_id=job["review_event_id"], attempt=job["attempt_count"],
+            started_at=started_at, status=state,
+            error_code=result.get("code") if state == "FAILED" else None))
         return True
 
     def _complete_review_sync(self, job: dict[str, Any], state: str, result: dict[str, Any],
