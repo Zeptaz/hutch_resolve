@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import Engine, text
 
 from backend.resolve.app.auth import AuthContext, ResolveError
-from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_quota, reconcile_statement
+from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_quota, reconcile_service_status, reconcile_statement
 from .review import AgentReviewService
 
 ALLOWED_LANGUAGES = {"en", "si", "ta"}
@@ -277,7 +277,7 @@ class ResolveFacade:
     ) -> dict[str, Any]:
         if context.role != "CUSTOMER" or context.account_id is None or context.sandbox_id is None:
             raise ResolveError(403, "ROLE_FORBIDDEN", "A customer account session is required to investigate a case")
-        if complaint_type not in {"BALANCE_RECHARGE", "VAS_DISPUTE", "DATA_DEPLETION"}:
+        if complaint_type not in {"BALANCE_RECHARGE", "VAS_DISPUTE", "DATA_DEPLETION", "CONNECTIVITY"}:
             raise ResolveError(422, "ACTION_NOT_ALLOWED", "This investigation path is not implemented yet")
         if window_start.tzinfo is None or window_end.tzinfo is None or window_end <= window_start or window_end - window_start > timedelta(days=30):
             raise ResolveError(422, "VALIDATION_ERROR", "A valid investigation window of at most 30 days is required")
@@ -305,7 +305,28 @@ class ResolveFacade:
         if case_scope["version"] != expected_version:
             raise ResolveError(409, "STALE_VERSION", "Case changed; reload before investigating")
 
-        if complaint_type == "DATA_DEPLETION":
+        if complaint_type == "CONNECTIVITY":
+            service_statement = self._provider.get_service_statement(context.sandbox_id, context.account_id)  # type: ignore[attr-defined]
+            if service_statement is None:
+                raise ResolveError(404, "RESOURCE_NOT_FOUND", "Account service evidence was not found")
+            result = reconcile_service_status(service_statement)
+            observed_at = service_statement.simulation_clock
+            alternate_source_status = [
+                {"source": "SERVICE_ASSURANCE", "fetched_at": service_statement.fetched_at,
+                 "as_of": observed_at, "complete_through": observed_at,
+                 "source_version": service_statement.source_version, "complete": service_statement.complete,
+                 "next_cursor": None, "warnings": [] if service_statement.complete else ["PAGE_LIMIT_EXCEEDED"]},
+                {"source": "SERVICE_CHECK", "fetched_at": service_statement.fetched_at,
+                 "as_of": observed_at, "complete_through": observed_at,
+                 "source_version": service_statement.source_version, "complete": service_statement.complete,
+                 "next_cursor": None, "warnings": [] if service_statement.checks else ["NO_CHECK_RECORDS"]},
+                {"source": "PRODUCT_CATALOG", "fetched_at": service_statement.fetched_at,
+                 "as_of": observed_at, "complete_through": observed_at,
+                 "source_version": service_statement.source_version, "complete": True,
+                 "next_cursor": None, "warnings": []},
+            ]
+            statement = None
+        elif complaint_type == "DATA_DEPLETION":
             quota_sources = self._provider.get_quota_statements(context.sandbox_id, context.account_id, window_start, window_end)  # type: ignore[attr-defined]
             quota_results = [reconcile_quota(source, usage, fetched_at=datetime.now(UTC)) for source, usage in quota_sources]
             if quota_results:
@@ -318,7 +339,7 @@ class ResolveFacade:
                     "missing": sorted({value for item in quota_results for value in item["missing"]}),
                     "conflicts": sorted({value for item in quota_results for value in item["conflicts"]}),
                     "eligible_actions": [], "review_reasons": sorted({value for item in quota_results for value in item["review_reasons"]})}
-                quota_source_status = [{"source": "QUOTA_LEDGER", "fetched_at": datetime.now(UTC),
+                alternate_source_status = [{"source": "QUOTA_LEDGER", "fetched_at": datetime.now(UTC),
                     "as_of": source.as_of, "complete_through": source.as_of,
                     "source_version": source.source_version, "complete": source.complete,
                     "next_cursor": None, "warnings": [] if source.complete else ["PAGE_LIMIT_EXCEEDED"]}
@@ -338,7 +359,7 @@ class ResolveFacade:
                     result["evidence_state"] = "CONFLICTING"
                 elif "PARTIAL" in {result["evidence_state"], charge_result["evidence_state"]}:
                     result["evidence_state"] = "PARTIAL"
-                quota_source_status.append({"source": "CHARGING_LEDGER", "fetched_at": charge_statement.fetched_at,
+                alternate_source_status.append({"source": "CHARGING_LEDGER", "fetched_at": charge_statement.fetched_at,
                     "as_of": charge_statement.closing.as_of if charge_statement.closing else None,
                     "complete_through": charge_statement.closing.as_of if charge_statement.closing else None,
                     "source_version": charge_statement.source_version, "complete": charge_statement.complete,
@@ -348,7 +369,7 @@ class ResolveFacade:
                     "text": "No quota bucket evidence is available for the reported period.", "evidence_ids": []}],
                     "calculations": [], "evidence": [], "missing": ["QUOTA_BUCKETS_MISSING"], "conflicts": [],
                     "eligible_actions": [], "review_reasons": ["QUOTA_BUCKETS_MISSING"]}
-                quota_source_status = [{"source": "QUOTA_LEDGER", "fetched_at": datetime.now(UTC),
+                alternate_source_status = [{"source": "QUOTA_LEDGER", "fetched_at": datetime.now(UTC),
                     "as_of": None, "complete_through": None, "source_version": None,
                     "complete": False, "next_cursor": None, "warnings": ["NO_BUCKETS"]}]
             statement = None
@@ -385,7 +406,7 @@ class ResolveFacade:
                                                         "target_label": target["target_label"]})
         investigation_id = uuid4()
         created_at = datetime.now(UTC)
-        source_status = quota_source_status if statement is None else [{
+        source_status = alternate_source_status if statement is None else [{
             "source": "CHARGING_LEDGER", "fetched_at": statement.fetched_at,
             "as_of": statement.closing.as_of if statement.closing else None,
             "complete_through": statement.closing.as_of if statement.closing else None,

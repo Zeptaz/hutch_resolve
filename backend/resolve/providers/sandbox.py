@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -76,6 +76,19 @@ class QuotaBucketStatement:
     entries: tuple[QuotaEntry, ...]
     complete: bool
     source_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceStatement:
+    account_id: UUID
+    region: str
+    simulation_clock: datetime
+    package_active: bool
+    checks: tuple[dict[str, Any], ...]
+    incidents: tuple[dict[str, Any], ...]
+    complete: bool
+    source_version: str
+    fetched_at: datetime
 
 
 class AccountProvider(Protocol):
@@ -317,6 +330,39 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
                 usages = tuple(QuotaUsage(**row) for row in usage_rows[:500])
                 output.append((statement, usages))
         return output
+
+    def get_service_statement(self, sandbox_id: UUID, account_id: UUID,
+                              service: str = "MOBILE_DATA") -> ServiceStatement | None:
+        fetched_at = datetime.now(UTC)
+        with self._engine.connect() as connection:
+            account = connection.execute(text("""
+                SELECT a.region_code,r.fixture_version,r.simulation_clock,
+                  EXISTS(SELECT 1 FROM sandbox.subscriptions s JOIN sandbox.offers o
+                    ON (o.sandbox_id,o.id)=(s.sandbox_id,s.offer_id)
+                    WHERE s.sandbox_id=a.sandbox_id AND s.account_id=a.id AND s.status='ACTIVE'
+                      AND o.offer_kind='PACKAGE' AND s.starts_at<=r.simulation_clock
+                      AND (s.expires_at IS NULL OR s.expires_at>r.simulation_clock)) AS package_active
+                FROM sandbox.accounts a JOIN sandbox.sandbox_runs r ON r.id=a.sandbox_id
+                WHERE a.sandbox_id=:sandbox AND a.id=:account AND r.run_status='ACTIVE'
+            """), {"sandbox": sandbox_id, "account": account_id}).mappings().one_or_none()
+            if account is None:
+                return None
+            checks = connection.execute(text("""
+                SELECT id,check_type,result,origin,observed_at,expires_at,detail
+                FROM sandbox.service_checks WHERE sandbox_id=:sandbox AND account_id=:account
+                  AND check_type IN (:service,'DATA_PROVISIONING')
+                ORDER BY observed_at DESC,id LIMIT 501
+            """), {"sandbox": sandbox_id, "account": account_id, "service": service}).mappings().all()
+            incidents = connection.execute(text("""
+                SELECT id,region_code,service,status,starts_at,ends_at,updated_at,eta
+                FROM sandbox.incidents WHERE sandbox_id=:sandbox AND region_code=:region AND service=:service
+                ORDER BY updated_at DESC,id LIMIT 501
+            """), {"sandbox": sandbox_id, "region": account["region_code"], "service": service}).mappings().all()
+        complete = len(checks) <= 500 and len(incidents) <= 500
+        return ServiceStatement(account_id, account["region_code"], account["simulation_clock"],
+            account["package_active"], tuple(dict(row) for row in checks[:500]),
+            tuple(dict(row) for row in incidents[:500]), complete,
+            f"fixture-v{account['fixture_version']}:assurance", fetched_at)
 
     def get_action_target(
         self, sandbox_id: UUID, account_id: UUID, action_type: str, target_id: UUID
@@ -630,3 +676,79 @@ def reconcile_quota(statement: QuotaBucketStatement, usage: tuple[QuotaUsage, ..
         "evidence": evidence, "missing": sorted(set(missing)), "conflicts": sorted(set(conflicts)),
         "eligible_actions": [], "review_reasons": sorted(set(missing + conflicts)),
         "usage_bytes": observed_usage}
+
+
+def reconcile_service_status(statement: ServiceStatement, *, incident_freshness: timedelta = timedelta(minutes=30),
+                             check_freshness: timedelta = timedelta(minutes=5)) -> dict[str, Any]:
+    """Use only fresh, scoped assurance evidence; empty/stale feeds never mean healthy."""
+    evidence: list[dict[str, Any]] = []
+    missing: list[str] = []
+    active_incidents: list[dict[str, Any]] = []
+    failing_checks: list[dict[str, Any]] = []
+    fresh_enabled_checks: list[dict[str, Any]] = []
+
+    def add(source: str, item: dict[str, Any], observed_at: datetime, value: str,
+            payload: dict[str, Any]) -> UUID:
+        evidence_id = uuid4()
+        evidence.append({"id": evidence_id, "source": source, "source_record_id": str(item["id"]),
+            "source_version": statement.source_version, "observed_at": observed_at,
+            "fetched_at": statement.fetched_at, "value": value, "unit": None,
+            "source_payload": payload})
+        return evidence_id
+
+    evidence.append({"id": uuid4(), "source": "PRODUCT_CATALOG", "source_record_id": str(statement.account_id),
+        "source_version": statement.source_version, "observed_at": statement.simulation_clock,
+        "fetched_at": statement.fetched_at, "value": statement.package_active, "unit": None,
+        "source_payload": {"active_data_package": statement.package_active, "service": "MOBILE_DATA"}})
+
+    for incident in statement.incidents:
+        fresh = (incident["updated_at"] <= statement.simulation_clock
+                 and incident["updated_at"] >= statement.simulation_clock - incident_freshness
+                 and incident["starts_at"] <= statement.simulation_clock
+                 and (incident["ends_at"] is None or incident["ends_at"] > statement.simulation_clock))
+        payload = {"service": incident["service"], "region": incident["region_code"],
+            "status": incident["status"], "starts_at": incident["starts_at"].isoformat(),
+            "ends_at": incident["ends_at"].isoformat() if incident["ends_at"] else None,
+            "eta": incident["eta"].isoformat() if incident["eta"] else None, "fresh": fresh}
+        add("SERVICE_ASSURANCE", incident, incident["updated_at"], incident["status"], payload)
+        if fresh and incident["status"] in {"OUTAGE", "DEGRADED"}:
+            active_incidents.append(incident)
+
+    for check in statement.checks:
+        fresh = (check["observed_at"] <= statement.simulation_clock
+                 and check["observed_at"] >= statement.simulation_clock - check_freshness
+                 and check["expires_at"] > statement.simulation_clock)
+        payload = {"check_type": check["check_type"], "result": check["result"],
+            "origin": check["origin"], "expires_at": check["expires_at"].isoformat(),
+            "detail": check["detail"], "fresh": fresh}
+        add("SERVICE_CHECK", check, check["observed_at"], check["result"], payload)
+        if fresh and check["result"] not in {"ENABLED", "OK", "HEALTHY"}:
+            failing_checks.append(check)
+        elif fresh:
+            fresh_enabled_checks.append(check)
+
+    if active_incidents:
+        incident = active_incidents[0]
+        code = "NETWORK_INCIDENT_CONFIRMED"
+        message = (f"A current {incident['status'].lower()} incident affects {statement.region}."
+                   + (f" The supplied ETA is {incident['eta'].isoformat()}." if incident["eta"] else " No recovery ETA is available in the source."))
+        state = "SUFFICIENT"
+        support_ids = [item["id"] for item in evidence if item["source"] == "SERVICE_ASSURANCE"
+                       and item["source_payload"].get("fresh")]
+    elif failing_checks:
+        code, message, state = "SERVICE_CHECK_ISSUE", "A fresh service check reports a provisioning or connectivity issue.", "SUFFICIENT"
+        support_ids = [item["id"] for item in evidence if item["source"] == "SERVICE_CHECK"]
+    else:
+        if not statement.package_active:
+            missing.append("ACTIVE_DATA_PACKAGE_NOT_FOUND")
+        if fresh_enabled_checks:
+            missing.append("REPORTED_ISSUE_NOT_EXPLAINED_BY_CURRENT_CHECK")
+        else:
+            missing.append("FRESH_SERVICE_CHECK_MISSING")
+        if not statement.complete:
+            missing.append("SERVICE_SOURCE_INCOMPLETE")
+        code, message, state = "SERVICE_EVIDENCE_PARTIAL", "Current service evidence does not establish a cause; empty or stale incident feeds are not treated as proof of healthy service.", "PARTIAL"
+        support_ids = [item["id"] for item in evidence]
+    return {"evidence_state": state, "findings": [{"code": code, "text": message, "evidence_ids": support_ids}],
+        "calculations": [], "evidence": evidence, "missing": sorted(set(missing)), "conflicts": [],
+        "eligible_actions": [], "review_reasons": sorted(set(missing))}
