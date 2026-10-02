@@ -15,7 +15,7 @@ Keep one application process. Suggested module ownership: `backend/resolve/{api,
 - [x] Add forward persistence for retired runs, GUEST principals/CSRF metadata, language and dialogue state, leased turn claims, one confirmation per operation, idempotency results, review history and escalation delivery. Verified same-case/run foreign keys and append-only application grants on an isolated PostgreSQL 18 database.
 - [ ] Keep historical fixture runs immutable; seed corrected data into a new run. Add explicit linked reversal fixtures and metadata for fault tests. Never choose diagnoses by fixture name.
 - [ ] Run seed/knowledge exactly once during bootstrap and mark readiness only after all required initialization. Add LF checkout rules for shell bootstrap.
-- [ ] Reset creates a new explicit active run, expires prior active sessions and Voice bindings, and preserves historical evidence. Repeated requested run UUID fails clearly without partial data; no implicit newest-run lookup in authorization.
+- [x] Reset creates a new explicit active run, expires prior active sessions and Voice bindings, and preserves historical evidence. A lifecycle migration preflight blocks unsafe reset; duplicate run UUID fails with retirement/revocation rolled back. No implicit newest-run lookup is used for authorization.
 
 Forward schema additions (Harry owns all migrations):
 
@@ -163,6 +163,7 @@ Existing Voice read timeout is eight seconds; conversation processing must retur
 | 2026-10-02 | H-09a HTTP request observability | Four middleware tests and four Resolve app tests pass; logs correlate validated request IDs and use route templates, while excluding body/header/query data and exception messages. | Provider/action correlation IDs and protected diagnostics |
 | 2026-10-02 | H-04d action-fault + H-05c review-sync qualification | Isolated PostgreSQL through `0005`; 3 action fault tests, 2 review-sync restart/concurrency tests and 6 quota/provider tests passed across separate synthetic fixture runs. Full default suite: 37 passed, 11 opt-in skipped; compileall and diff checks pass. | Broader soak/schema-upgrade qualification; conversation controller/Tevin integration; Voice bridge and frontend integration |
 | 2026-10-02 | H-09b worker operation observability | Focused HTTP/worker observability checks 11 passed; full suite 40 passed, 14 opt-in PostgreSQL tests skipped; compileall and diff checks pass. | Protected diagnostics/metrics and production telemetry integration |
+| 2026-10-02 | H-01e atomic fixture reset lifecycle | Two reset renderer tests and one isolated PostgreSQL integration pass. Verified previous run retirement, session and Voice binding revocation, new run activation, and full rollback on duplicate run UUID. Migration readiness preflight returned true on the migrated database. | Broader setup/upgrade qualification remains under H-09 |
 
 
 Work order and time boxes are in context.md. Harry owns the critical path; publish interfaces early and integrate one vertical text slice before secondary features.

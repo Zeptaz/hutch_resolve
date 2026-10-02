@@ -12,7 +12,7 @@ Start with [context.md](context.md), the agent-maintained source of truth, and t
 2. Run `powershell -ExecutionPolicy Bypass -File scripts/start.ps1`.
 3. On a fresh Docker volume, PostgreSQL 18 applies both SQL migrations and loads the initial run automatically.
 4. Adopt the existing SQL baseline and application migrations with `python -m alembic upgrade head` (the migration connection uses `MIGRATION_DATABASE_URL`). Connect with any PostgreSQL client at `localhost:55432`, database `hutch_resolve`, user `hutch_admin`. The sandbox account is `hutch_sandbox`; the application account is `hutch_resolve_app`.
-5. Run `powershell -ExecutionPolicy Bypass -File scripts/reset.ps1` to add another isolated fixture run. Previous runs remain available. `scripts/stop.ps1` stops the database without removing its Docker volume.
+5. After migrations are current, run `powershell -ExecutionPolicy Bypass -File scripts/reset.ps1` to create a new active fixture run. The reset atomically retires earlier runs and revokes existing sessions/Voice bindings while retaining historical rows. `scripts/stop.ps1` stops the database without removing its Docker volume.
 
 ## Start the backend foundation
 
@@ -27,7 +27,7 @@ python -m uvicorn backend.resolve.app.main:app --host 127.0.0.1 --port 8080
 
 The application reads `DATABASE_URL` and `SANDBOX_DATABASE_URL` from `.env`; Resolve uses `hutch_resolve_app` for business state and the separate `hutch_sandbox` role for synthetic writes and configured one-shot fault controls. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0005_review_ticket_sync`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003 without replaying CREATE TABLE statements, revisions 0002-0005 add lifecycle, immutable investigation, proposal/confirmation and review-sync persistence without replaying bootstrap DDL. Opt-in PostgreSQL tests verify action recovery after an expired worker lease and one-claim behavior with concurrent runners.
 
-Reset accepts an optional UUID: `scripts/reset.ps1 -RunId <uuid>`. Fixture IDs are deterministically derived under that run, so repeatable inputs produce repeatable records and different runs do not collide.
+Reset accepts an optional UUID: `scripts/reset.ps1 -RunId <uuid>`. Fixture IDs are deterministically derived under that run, so repeatable inputs produce repeatable records and different runs do not collide. A duplicate run UUID fails transactionally without retiring the current run or revoking its sessions.
 HTTP logs are compact JSON with request ID, route template, method, status, elapsed time and a stable error code. Request/response bodies, headers, query values and exception text are omitted.
 
 The database volume is Docker-managed, outside the OneDrive-synced repository. `docker compose down -v` permanently removes local database history.
