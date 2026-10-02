@@ -66,6 +66,18 @@ PYTHON=~/.venvs/hutch/bin/python sh tests/conversation/run_integration.sh
 
 This starts a **throwaway** PostgreSQL on port 55433 (never the shared container), applies Harry's migrations, runs `tests/conversation/test_resolve_integration.py` against his real facade, and removes the container. Turn storage is still the in-memory fake until Harry's repository exists.
 
+## Dev backend (simulation for end-to-end testing)
+
+`tests/conversation/dev_backend.py` serves the `/api/v1` customer routes Jayith's chat uses in live mode, with this module and real Gemini behind them. It is a test tool, not Harry's API, and nothing in the app imports it.
+
+| `RESOLVE_BACKEND` | Resolve answers come from |
+| --- | --- |
+| `dummy` (default) | `tests/conversation/fakes.py`: contract examples for A/D, stand-ins for B/C/E/F, each line answering only its own complaint; simulated operation success and receipts |
+| `hybrid` | Harry's real facade (adapter) for balance and VAS complaints, offers, confirmations, his `OperationRunner` and receipts; the dummy for data and connection until H-06. Needs `sh tests/conversation/hybrid_db.sh start` (throwaway DB) |
+| `real` | Not available until Harry ships turn storage and the conversation routes |
+
+Start the frontend with the `frontend-live` launch entry, then open **http://localhost:5174/api/v1/dev** to choose demo line A to F. The same journeys run against the dummy and the real facade in `test_resolve_integration.py`; a pass on both is what keeps the dummy honest.
+
 ## Tests
 
 Dependencies used: `pydantic>=2.8,<3`, `google-genai` (tested with 2.27.0; imported only by `GeminiModelClient`), `pytest>=8`. Harry pins the app lock.

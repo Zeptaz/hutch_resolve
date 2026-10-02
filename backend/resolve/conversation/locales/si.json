@@ -52,7 +52,9 @@
    "user_details": "{complaint}: විස්තර යවා ඇත",
    "user_case_selection": "වෙනත් ගැටලුවකට මාරු වන්න",
    "user_accept": "ඔව්, ඉදිරියට යන්න.",
-   "user_decline": "නැහැ, එම වෙනස් කිරීම කරන්න එපා."
+   "user_decline": "නැහැ, එම වෙනස් කිරීම කරන්න එපා.",
+   "ack_complaint": "ඔබ ඔබේ {complaint} පිළිබඳ ගැටලුවක් ගැන කීවා.",
+   "ack_complaint_amount": "ඔබ ඔබේ {complaint} පිළිබඳ ගැටලුවක් ගැන කී අතර {amount} ක් සඳහන් කළා."
   },
   "action_labels": {
    "DEACTIVATE_VAS": "ඉදිරි අලුත් කිරීම් නැවැත්වීමට",

@@ -41,6 +41,9 @@ _EN: dict[str, str] = {
     "clarify_amount": "What amount did you notice, in rupees?",
     "clarify_target": "Which service or package do you mean?",
     "clarify_negation": "Just to be sure: did you subscribe to it or recharge yourself, or not?",
+    # Restates only what the customer reported (type, amount); never model-written text.
+    "ack_complaint": "You told me about a problem with your {complaint}.",
+    "ack_complaint_amount": "You told me about a problem with your {complaint} and mentioned {amount}.",
     "checked_window": "I checked {window}.",
     "checked_default_window": "You didn't mention a time, so I checked {window}.",
     "rechecked": "I re-checked with the corrected details ({window}).",

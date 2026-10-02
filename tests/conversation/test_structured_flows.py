@@ -38,7 +38,10 @@ def test_a_reconciles_and_offers_vas_proposal_from_resolve(h) -> None:
     result = h.send(ctx, h.turn(conv, details(amount_minor=100000)))
 
     # Reply text carries Resolve's finding verbatim; nothing is recomputed here.
-    assert result.reply_text.startswith("The posted recharge and subsequent deductions reconcile to LKR 420.")
+    assert result.reply_text.startswith(
+        "You told me about a problem with your balance or recharge and mentioned LKR 1,000.00. I checked 2 Oct, 08:00–12:00. "
+        "The posted recharge and subsequent deductions reconcile to LKR 420."
+    )
     kinds = [card.type for card in result.cards]
     assert kinds == ["calculation", "finding", "confirmation"]
     calc = result.cards[0].data

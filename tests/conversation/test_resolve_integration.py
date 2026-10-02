@@ -1,8 +1,10 @@
-"""Conversation module against Harry's REAL ResolveFacade and PostgreSQL (integration).
+"""The same customer journeys against BOTH backends: the dummy and Harry's real facade.
 
-Skipped unless RESOLVE_INTEGRATION_DATABASE_URL points at an isolated, migrated database
-(app role); RESOLVE_INTEGRATION_SANDBOX_URL is the sandbox-provider role. Never point it
-at a shared database: each test creates sessions, conversations and cases.
+"dummy" always runs (fakes.FakeResolveFacade in strict mode, as the dev backend uses it).
+"real" runs Harry's ResolveFacade on PostgreSQL and is skipped unless
+RESOLVE_INTEGRATION_DATABASE_URL (app role) and RESOLVE_INTEGRATION_SANDBOX_URL point at an
+isolated, migrated database. Never point them at a shared database. Passing on both is what
+makes swapping the dummy for the real backend safe; known intended differences are explicit.
 
 Turn storage is still the in-memory fake: Harry's ConversationRepository does not exist
 yet. Each test therefore creates its case on the first turn, while the fake's version and
@@ -24,7 +26,6 @@ import pytest
 
 DB_URL = os.environ.get("RESOLVE_INTEGRATION_DATABASE_URL")
 SANDBOX_URL = os.environ.get("RESOLVE_INTEGRATION_SANDBOX_URL")
-pytestmark = pytest.mark.skipif(not (DB_URL and SANDBOX_URL), reason="needs an isolated migrated Resolve database")
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
@@ -38,7 +39,7 @@ SIM_END = datetime(2026, 10, 2, 6, 30, tzinfo=UTC)
 
 
 @pytest.fixture(scope="module")
-def harry():
+def harry_real():
     from sqlalchemy import create_engine
 
     from backend.resolve.app.auth_store import AuthStore
@@ -50,8 +51,37 @@ def harry():
     sandbox_engine.dispose()
 
 
+@pytest.fixture(params=["dummy", pytest.param("real", marks=pytest.mark.skipif(
+    not (DB_URL and SANDBOX_URL), reason="needs an isolated migrated Resolve database"))])
+def harry(request):
+    return "dummy" if request.param == "dummy" else request.getfixturevalue("harry_real")
+
+
+def is_dummy(harry) -> bool:
+    return harry == "dummy"
+
+
+def dummy_journey(account_id: UUID):
+    from conftest import SANDBOX, customer
+    from fakes import FakeConversationRepository, FakeKnowledgeRepository, FakeResolveFacade
+    from resolve.conversation import ConversationService
+
+    ctx = customer(account_id).model_copy(update={"sandbox_id": SANDBOX})
+    names = {ACCOUNT_A: "A", ACCOUNT_D: "D"}
+    facade = FakeResolveFacade(lambda: datetime.now(UTC), {account_id: names[account_id]}, strict_complaints=True)
+    repo = FakeConversationRepository(lambda: datetime.now(UTC))
+    conversation_id = repo.create(ctx)
+
+    async def simulation_now(_ctx):
+        return SIM_END
+
+    return ctx, conversation_id, repo, ConversationService(facade, repo, FakeKnowledgeRepository(), None, simulation_now), facade
+
+
 def journey(harry, account_id: UUID):
     """A customer session created through Harry's AuthStore, plus a conversation in his database."""
+    if is_dummy(harry):
+        return dummy_journey(account_id)
     from backend.resolve.app.auth import AuthContext as HarryContext
     from fakes import FakeConversationRepository, FakeKnowledgeRepository
     from fakes import _Conversation
@@ -150,10 +180,15 @@ def test_vas_dispute_offers_resolve_listed_choices(harry) -> None:
         assert result.pending_question.code == "CHOOSE_ACTION"
 
 
-def test_unimplemented_complaint_paths_surface_as_errors(harry) -> None:
+def test_data_complaint_on_a_line_without_data_issue(harry) -> None:
+    """KNOWN DIFFERENCE until Harry's H-06: the dummy answers, the real facade refuses."""
     from resolve.conversation.errors import ResolveError
 
     ctx, conv, repo, service, _ = journey(harry, ACCOUNT_A)
+    if is_dummy(harry):
+        result = send(service, repo, ctx, conv, details("DATA_DEPLETION"))
+        assert "found nothing unusual" in result.reply_text
+        return
     with pytest.raises(ResolveError) as err:
         send(service, repo, ctx, conv, details("DATA_DEPLETION"))
     assert err.value.code == "ACTION_NOT_ALLOWED"  # Harry: "not implemented yet" (H-06)

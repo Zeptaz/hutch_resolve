@@ -341,8 +341,9 @@ class ConversationService:
         draft, new_state = await self._open_and_investigate(
             ctx, turn, candidate.complaint_type, start, end, candidate.reported_facts, state
         )
-        prefix = t.text("checked_default_window" if defaulted else "checked_window", lang, window=t.format_window(start, end))
-        return _prefixed(draft, prefix), new_state
+        checked = t.text("checked_default_window" if defaulted else "checked_window", lang, window=t.format_window(start, end))
+        ack = _acknowledgement(candidate.complaint_type, candidate.reported_facts, lang)
+        return _prefixed(draft, f"{ack} {checked}"), new_state
 
     async def _correct(self, ctx: AuthContext, turn: NormalizedTurn, ex: Extraction, state: DialogueState, now: datetime) -> Step:
         """Changed facts request a new investigation revision of the same case through Resolve."""
@@ -475,9 +476,11 @@ class ConversationService:
         if window_problem:
             candidate = Candidate(complaint_type=inp.complaint_type, reported_facts=inp.reported_facts, ambiguities=[Ambiguity.TIME_WINDOW])
             return _ask(state.evolve(candidate=candidate), Q_COMPLAINT_DETAILS, t.text(window_problem, lang), ["complaint_details", "text"])
-        return await self._open_and_investigate(
+        draft, new_state = await self._open_and_investigate(
             ctx, turn, inp.complaint_type, inp.window_start, inp.window_end, inp.reported_facts, state
         )
+        checked = t.text("checked_window", lang, window=t.format_window(inp.window_start, inp.window_end))
+        return _prefixed(draft, f"{_acknowledgement(inp.complaint_type, inp.reported_facts, lang)} {checked}"), new_state
 
     async def _open_and_investigate(
         self,
@@ -665,6 +668,14 @@ def _prefixed(draft: TurnDraft, prefix: str) -> TurnDraft:
         pending_question=draft.pending_question,
         operation_ids=draft.operation_ids,
     )
+
+
+def _acknowledgement(complaint_type: ComplaintType, facts: ReportedFacts, lang: Language) -> str:
+    """Repeat back what the customer reported, from typed fields only (no model text)."""
+    complaint = t.complaint_label(complaint_type, lang)
+    if facts.amount_minor is not None:
+        return t.text("ack_complaint_amount", lang, complaint=complaint, amount=t.format_lkr(facts.amount_minor))
+    return t.text("ack_complaint", lang, complaint=complaint)
 
 
 def _merge_facts(base: ReportedFacts, ex: Extraction) -> ReportedFacts:

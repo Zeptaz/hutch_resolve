@@ -286,6 +286,29 @@ SCENARIO_BUILDERS = {
 }
 
 
+# Complaint types each fixture line is about; used by the dummy backend's strict mode.
+SCENARIO_COMPLAINTS = {
+    "A": {"BALANCE_RECHARGE", "VAS_DISPUTE"},
+    "B": {"DATA_DEPLETION"},
+    "C": {"CONNECTIVITY"},
+    "D": {"BALANCE_RECHARGE"},
+    "E": {"BALANCE_RECHARGE"},
+    "F": {"VAS_DISPUTE"},
+    "PARTIAL": {"BALANCE_RECHARGE"},
+}
+
+
+def neutral_result(complaint: str) -> dict:
+    """Stand-in when a line's records hold nothing for the reported complaint."""
+    return _result(
+        complaint, "SUFFICIENT",
+        [{"code": "NO_ISSUE_FOUND", "text": "I checked the records for that period and found nothing unusual.", "evidence_ids": []}],
+        [], [], [_status("charging")], [], [],
+        [{"action_type": "CREATE_REVIEW_TICKET", "target_id": ACCOUNT_TARGET, "target_label": "Your account"}],
+        ["If the problem continues, a person can review it."],
+    )
+
+
 def scenario_result(name: str) -> dict:
     return SCENARIO_BUILDERS[name]() if name in SCENARIO_BUILDERS else example(SCENARIO_EXAMPLES[name])
 
@@ -293,9 +316,10 @@ def scenario_result(name: str) -> dict:
 class FakeResolveFacade:
     """Scenario per account: account_id -> "A" | "D" | "PARTIAL"."""
 
-    def __init__(self, clock: Clock, scenarios: dict[UUID, str]) -> None:
+    def __init__(self, clock: Clock, scenarios: dict[UUID, str], strict_complaints: bool = False) -> None:
         self._clock = clock
         self._scenarios = scenarios
+        self._strict = strict_complaints
         self.calls: Counter[str] = Counter()
         self.cases: dict[UUID, CaseView] = {}
         self.proposals: dict[UUID, ProposalView] = {}
@@ -369,7 +393,10 @@ class FakeResolveFacade:
         self.investigation_requests.append((case_id, request))
         scenario = self._scenarios[ctx.account_id]
         revision = case.investigation.revision + 1 if case.investigation else 1
-        result = InvestigationResult.model_validate(scenario_result(scenario)).model_copy(
+        payload = scenario_result(scenario)
+        if self._strict and request.complaint_type.value not in SCENARIO_COMPLAINTS[scenario]:
+            payload = neutral_result(request.complaint_type.value)
+        result = InvestigationResult.model_validate(payload).model_copy(
             update={
                 "id": uuid4(),
                 "case_id": case_id,

@@ -19,7 +19,9 @@ def test_singlish_complaint_without_time_checks_today_and_says_so(hm: Harness) -
     conv = hm.open(ctx)
     result = hm.send(ctx, hm.turn(conv, text("mage balance eka adu wela"), language="si"))
 
-    assert result.reply_text.startswith("You didn't mention a time, so I checked 2 Oct, 00:00–12:00.")
+    assert result.reply_text.startswith(
+        "You told me about a problem with your balance or recharge. You didn't mention a time, so I checked 2 Oct, 00:00–12:00."
+    )
     assert "reconcile to LKR 420" in result.reply_text
     case_id, request = hm.facade.investigation_requests[0]
     assert (request.window_start.isoformat(), request.window_end.isoformat()) == (
@@ -39,7 +41,9 @@ def test_reported_amount_and_time_are_passed_as_customer_facts(hm: Harness) -> N
     _, request = hm.facade.investigation_requests[0]
     assert request.reported_facts.amount_minor == 50000
     assert request.window_start.isoformat() == "2026-09-30T18:30:00+00:00"
-    assert result.reply_text.startswith("I checked 1 Oct, 00:00–24:00.")
+    assert result.reply_text.startswith(
+        "You told me about a problem with your balance or recharge and mentioned LKR 500.00. I checked 1 Oct, 00:00–24:00."
+    )
 
 
 def test_one_clarification_then_investigate_with_collected_facts(hm: Harness) -> None:
@@ -70,7 +74,7 @@ def test_each_clarification_is_asked_at_most_once(hm: Harness) -> None:
     conv = hm.open(ctx)
     assert hm.send(ctx, hm.turn(conv, text("data finished last time"))).pending_question.code == "CLARIFY_TIME_WINDOW"
     result = hm.send(ctx, hm.turn(conv, text("not sure")))
-    assert result.reply_text.startswith("You didn't mention a time")  # proceeds with the stated default
+    assert "You didn't mention a time" in result.reply_text  # proceeds with the stated default
     assert hm.facade.calls["investigate"] == 1
 
 
