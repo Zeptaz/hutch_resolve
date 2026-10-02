@@ -210,6 +210,63 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
             version += f":snapshot-seq-{closing.last_posting_seq}"
         return LedgerStatement(opening, closing, postings, complete, tuple(warnings), version, fetched_at)
 
+    def get_action_target(
+        self, sandbox_id: UUID, account_id: UUID, action_type: str, target_id: UUID
+    ) -> dict[str, Any] | None:
+        with self._engine.connect() as connection:
+            if action_type == "DEACTIVATE_VAS":
+                row = connection.execute(
+                    text("""
+                        SELECT s.id,s.version,s.status,s.renew_enabled,o.id AS offer_id,o.name,o.offer_kind,
+                               o.recurring,r.fixture_version,r.simulation_clock
+                        FROM sandbox.subscriptions s
+                        JOIN sandbox.offers o ON (o.sandbox_id,o.id)=(s.sandbox_id,s.offer_id)
+                        JOIN sandbox.sandbox_runs r ON r.id=s.sandbox_id
+                        WHERE s.sandbox_id=:sandbox_id AND s.account_id=:account_id AND s.id=:target_id
+                          AND r.run_status='ACTIVE'
+                    """),
+                    {"sandbox_id": sandbox_id, "account_id": account_id, "target_id": target_id},
+                ).mappings().one_or_none()
+                if row is None:
+                    return None
+                return {
+                    "id": row["id"], "label": row["name"], "version": row["version"],
+                    "status": row["status"], "renew_enabled": row["renew_enabled"],
+                    "offer_kind": row["offer_kind"], "recurring": row["recurring"],
+                    "source": "PRODUCT_VAS", "source_version": f"fixture-v{row['fixture_version']}:subscription-v{row['version']}",
+                    "as_of": row["simulation_clock"],
+                }
+            if action_type in {"SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"}:
+                row = connection.execute(
+                    text("""
+                        SELECT a.id,a.version,a.line_alias,a.status,r.fixture_version,r.simulation_clock
+                        FROM sandbox.accounts a JOIN sandbox.sandbox_runs r ON r.id=a.sandbox_id
+                        WHERE a.sandbox_id=:sandbox_id AND a.id=:target_id AND r.run_status='ACTIVE'
+                    """),
+                    {"sandbox_id": sandbox_id, "target_id": target_id},
+                ).mappings().one_or_none()
+                if row is None or row["id"] != account_id:
+                    return None
+                return {
+                    "id": row["id"], "label": row["line_alias"], "version": row["version"],
+                    "status": row["status"], "source": "CUSTOMER_REGISTRY",
+                    "source_version": f"fixture-v{row['fixture_version']}:account-v{row['version']}",
+                    "as_of": row["simulation_clock"],
+                }
+        return None
+
+    def eligible_vas_targets(self, sandbox_id: UUID, account_id: UUID) -> list[dict[str, Any]]:
+        with self._engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT s.id,o.name,s.version FROM sandbox.subscriptions s
+                JOIN sandbox.offers o ON (o.sandbox_id,o.id)=(s.sandbox_id,s.offer_id)
+                JOIN sandbox.sandbox_runs r ON r.id=s.sandbox_id
+                WHERE s.sandbox_id=:sandbox AND s.account_id=:account AND s.status='ACTIVE'
+                  AND s.renew_enabled AND o.recurring AND o.offer_kind='VAS' AND r.run_status='ACTIVE'
+                ORDER BY s.id
+            """), {"sandbox": sandbox_id, "account": account_id}).mappings().all()
+        return [{"action_type": "DEACTIVATE_VAS", "target_id": row["id"], "target_label": row["name"]} for row in rows]
+
 
 def reconcile_statement(statement: LedgerStatement) -> dict[str, Any]:
     safe_limit = 9_007_199_254_740_991

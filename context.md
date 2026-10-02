@@ -89,7 +89,8 @@ Development: frontend `http://localhost:5173` proxies `/api` to Resolve `http://
 - [x] H-03a Customer-only account endpoint and synthetic account/balance/subscription read; bounded charging statement reader and deterministic A/D reconciliation core. Verified on isolated seeded PostgreSQL: A exactly reconciles, D reports -7,000 conflict, incomplete evidence stays PARTIAL.
 - [x] H-03b Case-origin-turn deduplication and immutable persisted investigation revisions, including saved calculations/evidence/source status, command-key replay, audit events and review-required conflict state. Verified A/D results, replay, stale-version rejection and cross-account denial against isolated PostgreSQL.
 - [x] H-03c Public case detail and investigation endpoints match shared request/response DTOs, use customer/agent session scope and require stable `Idempotency-Key`; customer reports remain separate from evidence. Verified response models, replay/conflict and account/run access on isolated PostgreSQL.
-- [ ] H-04 Implement all permitted proposals, confirmations, durable operations/recovery and receipts. Owner Harry; depends H-03.
+- [ ] H-04 Implement all permitted proposals, confirmations, durable operations/recovery and receipts. Owner Harry; depends H-03. Execution/recovery/receipt remain open.
+- [x] H-04a Customer proposal and explicit confirmation boundary. Five-minute session/case/evidence/target-version-bound proposals, stable proposal replay, CSRF/origin-protected action routes, append-only confirmation and atomic accepted PENDING operation. Fresh isolated PostgreSQL integration plus 17-test suite verified. This phase does not execute provider writes or issue receipts.
 - [ ] H-05 Implement review queue/detail/update APIs and audited permissions. Owner Harry; depends H-02/H-03.
 - [ ] H-06 Implement B/C/E/F investigations and remaining failure profiles. Owner Harry; depends H-03.
 - [ ] H-07 Implement Resolve Voice bridge using the conversation service. Owner Harry; depends H-02/T-02.
@@ -133,7 +134,7 @@ Release acceptance: A exact money reconciliation and one confirmed VAS deactivat
 
 Cross-account/run access must fail for cases, evidence, operations, receipts and Voice bindings. Review updates must be scoped, versioned and audited. Text remains usable without Voice/model access. Voice must pass multi-turn automated tests and a real microphone journey, including interruption and continuation by text. Display simulated integration everywhere relevant.
 
-Current blockers/risks: missing Resolve application and both frontends; reproduced Voice defects; fixture/schema gaps; actual model/Voice credentials, quota and live availability not verified. No HUTCH integration access will be supplied; this is expected and not a blocker for the mock demo. Final submission guidelines require prototype/source/README, technical PDF, deck, demo, architecture, limitations, AI declaration/token assumptions, implementation lifecycle/Gantt and safe evaluator access.
+Current blockers/risks: remaining Resolve conversation/action-execution/receipt/dashboard APIs and both frontends; reproduced Voice defects; remaining fixture/provider-fault gaps; actual model/Voice credentials, quota and live availability not verified. No HUTCH integration access will be supplied; this is expected and not a blocker for the mock demo. Final submission guidelines require prototype/source/README, technical PDF, deck, demo, architecture, limitations, AI declaration/token assumptions, implementation lifecycle/Gantt and safe evaluator access.
 
 ## Progress log
 

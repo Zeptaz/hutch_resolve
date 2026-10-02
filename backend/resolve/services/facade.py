@@ -301,6 +301,15 @@ class ResolveFacade:
             if str(exc) == "LEDGER_VALUE_OUT_OF_RANGE":
                 raise ResolveError(422, "VALIDATION_ERROR", "Ledger value exceeds the safe response range") from exc
             raise
+        account_target = self._provider.get_action_target(context.sandbox_id, context.account_id,
+                                                         "CREATE_REVIEW_TICKET", context.account_id)  # type: ignore[attr-defined]
+        if account_target:
+            result["eligible_actions"].append({"action_type": "CREATE_REVIEW_TICKET",
+                                                "target_id": context.account_id,
+                                                "target_label": account_target["label"]})
+        if complaint_type == "VAS_DISPUTE" and result["evidence_state"] == "SUFFICIENT":
+            result["eligible_actions"].extend(self._provider.eligible_vas_targets(  # type: ignore[attr-defined]
+                context.sandbox_id, context.account_id))
         investigation_id = uuid4()
         created_at = datetime.now(UTC)
         source_status = [{
@@ -359,7 +368,7 @@ class ResolveFacade:
                  "calculations": json.dumps(result["calculations"], ensure_ascii=False, default=str),
                  "source_status": json.dumps(source_status, ensure_ascii=False, default=str),
                  "missing": result["missing"], "conflicts": result["conflicts"],
-                 "eligible_actions": json.dumps(result["eligible_actions"]),
+                 "eligible_actions": json.dumps(result["eligible_actions"], default=str),
                  "review_reasons": result["review_reasons"], "window_start": window_start,
                  "window_end": window_end, "command_key": command_key, "request_hash": request_hash},
             )
@@ -397,6 +406,157 @@ class ResolveFacade:
             "review_reasons": result["review_reasons"], "created_at": created_at,
             "simulation": True,
         }
+
+    def propose_action(self, context: AuthContext, *, case_id: UUID, expected_version: int,
+                       investigation_id: UUID, action_type: str, target_id: UUID,
+                       request_key: str) -> dict[str, Any]:
+        if context.role != "CUSTOMER" or not context.account_id or not context.sandbox_id:
+            raise ResolveError(403, "ROLE_FORBIDDEN", "A customer session is required to propose an action")
+        if action_type not in {"DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"}:
+            raise ResolveError(422, "ACTION_NOT_ALLOWED", "This action is not supported")
+        if not request_key or len(request_key) > 200:
+            raise ResolveError(422, "VALIDATION_ERROR", "A stable Idempotency-Key is required")
+        request_hash = _fingerprint({"case_id": str(case_id), "expected_version": expected_version,
+                                     "investigation_id": str(investigation_id), "action_type": action_type,
+                                     "target_id": str(target_id)})
+        case = self._scoped_case(context, case_id)
+        with self._engine.begin() as connection:
+            previous = connection.execute(text("SELECT * FROM resolve.action_proposals WHERE case_id=:case_id AND request_key=:key"),
+                                          {"case_id": case_id, "key": request_key}).mappings().one_or_none()
+            if previous:
+                if previous["request_hash"] != request_hash:
+                    raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Proposal key was used with different input")
+                target = self._provider.get_action_target(context.sandbox_id, context.account_id, previous["action_type"], previous["target_id"])  # type: ignore[attr-defined]
+                if target is None:
+                    raise ResolveError(409, "STALE_VERSION", "Action target is no longer available")
+                return self._proposal_view(previous, target["label"])
+            locked = connection.execute(text("SELECT * FROM resolve.cases WHERE id=:id AND sandbox_id=:sandbox_id AND account_id=:account_id FOR UPDATE"),
+                                        {"id": case_id, "sandbox_id": context.sandbox_id, "account_id": context.account_id}).mappings().one_or_none()
+            if locked is None:
+                raise ResolveError(404, "RESOURCE_NOT_FOUND", "Case was not found")
+            previous = connection.execute(text("SELECT * FROM resolve.action_proposals WHERE case_id=:case_id AND request_key=:key"),
+                                          {"case_id": case_id, "key": request_key}).mappings().one_or_none()
+            if previous:
+                if previous["request_hash"] != request_hash:
+                    raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Proposal key was used with different input")
+                target = self._provider.get_action_target(context.sandbox_id, context.account_id, previous["action_type"], previous["target_id"])  # type: ignore[attr-defined]
+                if target is None:
+                    raise ResolveError(409, "STALE_VERSION", "Action target is no longer available")
+                return self._proposal_view(previous, target["label"])
+            if locked["version"] != expected_version or case["version"] != expected_version:
+                raise ResolveError(409, "STALE_VERSION", "Case changed; reload before proposing an action")
+            investigation = connection.execute(text("SELECT * FROM resolve.investigations WHERE case_id=:case_id AND id=:id"),
+                                               {"case_id": case_id, "id": investigation_id}).mappings().one_or_none()
+            if investigation is None:
+                raise ResolveError(404, "RESOURCE_NOT_FOUND", "Investigation was not found")
+            latest = connection.execute(text("SELECT id,revision FROM resolve.investigations WHERE case_id=:case_id ORDER BY revision DESC LIMIT 1"),
+                                        {"case_id": case_id}).mappings().one()
+            if latest["id"] != investigation_id:
+                raise ResolveError(409, "STALE_VERSION", "A newer investigation invalidated this proposal")
+            eligible = investigation["eligible_actions"] or []
+            if not any(item.get("action_type") == action_type and str(item.get("target_id")) == str(target_id) for item in eligible):
+                raise ResolveError(422, "ACTION_NOT_ALLOWED", "The latest evidence does not permit this action")
+            target = self._provider.get_action_target(context.sandbox_id, context.account_id, action_type, target_id)  # type: ignore[attr-defined]
+            if target is None or (action_type == "DEACTIVATE_VAS" and (target["status"] != "ACTIVE" or not target["renew_enabled"] or not target["recurring"])):
+                raise ResolveError(409, "STALE_VERSION", "Action target is no longer eligible")
+            consequences = {
+                "DEACTIVATE_VAS": f"Stop future renewals for {target['label']}; past charges remain under investigation.",
+                "SEND_SETTINGS_INSTRUCTIONS": f"Send setup instructions for {target['label']}; this will not change network service.",
+                "CREATE_REVIEW_TICKET": f"Create a human review request for {target['label']}; no account change is made now.",
+            }[action_type]
+            proposal_id, now = uuid4(), datetime.now(UTC)
+            proposal_hash = _fingerprint({"id": str(proposal_id), "case_id": str(case_id), "investigation_id": str(investigation_id),
+                "revision": latest["revision"], "session_id": str(context.session_id), "action_type": action_type,
+                "target_id": str(target_id), "target_version": target["version"], "case_version": expected_version,
+                "consequences": consequences})
+            row = {"id": proposal_id, "case_id": case_id, "investigation_id": investigation_id,
+                   "action_type": action_type, "target_id": target_id, "target_version": target["version"],
+                   "target_label": target["label"], "consequences": consequences, "proposal_hash": proposal_hash,
+                   "expires_at": now + timedelta(minutes=5), "simulation": True}
+            connection.execute(text("""INSERT INTO resolve.action_proposals
+                 (id,case_id,investigation_id,action_type,target_id,target_version,target_label,consequences,proposal_hash,expires_at,
+                 sandbox_id,actor_session_id,evidence_revision,case_version,request_key,request_hash)
+                VALUES (:id,:case_id,:investigation_id,:action_type,:target_id,:target_version,:target_label,CAST(:consequences AS jsonb),
+                 :proposal_hash,:expires_at,:sandbox_id,:session_id,:revision,:case_version,:request_key,:request_hash)"""),
+                {**row, "target_label": target["label"], "consequences": json.dumps({"text": consequences}), "sandbox_id": context.sandbox_id,
+                 "session_id": context.session_id, "revision": latest["revision"], "case_version": expected_version,
+                 "request_key": request_key, "request_hash": request_hash})
+            connection.execute(text("INSERT INTO resolve.audit_events(id,session_id,case_id,event_type,details,created_at) VALUES (:id,:session_id,:case_id,'ACTION_PROPOSED',CAST(:details AS jsonb),:now)"),
+                {"id": uuid4(), "session_id": context.session_id, "case_id": case_id,
+                 "details": json.dumps({"proposal_id": str(proposal_id), "action_type": action_type, "target_id": str(target_id)}), "now": now})
+            return row
+
+    @staticmethod
+    def _proposal_view(row: Any, target_label: str | None = None) -> dict[str, Any]:
+        consequences = row["consequences"]
+        return {"id": row["id"], "case_id": row["case_id"], "investigation_id": row["investigation_id"],
+                "action_type": row["action_type"], "target_id": row["target_id"], "target_version": row["target_version"],
+                "target_label": target_label or row["target_label"],
+                "consequences": consequences.get("text", "Review the proposed action before confirming."),
+                "proposal_hash": row["proposal_hash"], "expires_at": row["expires_at"], "simulation": True}
+
+    def confirm_action(self, context: AuthContext, *, proposal_id: UUID, proposal_hash: str,
+                       decision: str, client_turn_id: UUID) -> dict[str, Any]:
+        if context.role != "CUSTOMER" or not context.account_id or not context.sandbox_id:
+            raise ResolveError(403, "ROLE_FORBIDDEN", "A customer session is required to confirm an action")
+        if decision not in {"ACCEPT", "DECLINE"}:
+            raise ResolveError(422, "VALIDATION_ERROR", "Decision must be ACCEPT or DECLINE")
+        fingerprint = _fingerprint({"proposal_id": str(proposal_id), "proposal_hash": proposal_hash, "decision": decision})
+        now = datetime.now(UTC)
+        with self._engine.begin() as connection:
+            prior = connection.execute(text("SELECT c.*,o.id AS operation_id,o.status AS operation_status FROM resolve.confirmations c LEFT JOIN resolve.operations o ON o.confirmation_id=c.id WHERE c.sandbox_id=:sandbox AND c.actor_session_id=:session AND c.client_turn_id=:turn"),
+                {"sandbox": context.sandbox_id, "session": context.session_id, "turn": client_turn_id}).mappings().one_or_none()
+            if prior:
+                if prior["request_fingerprint"] != fingerprint:
+                    raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Confirmation turn was used with different input")
+                return {"id": prior["id"], "proposal_id": prior["proposal_id"], "proposal_hash": prior["proposal_hash"],
+                        "decision": prior["decision"], "channel": prior["source_channel"], "client_turn_id": client_turn_id,
+                        "created_at": prior["recorded_at"], "operation_id": prior["operation_id"],
+                        "operation_status": prior["operation_status"], "simulation": True}
+            proposal = connection.execute(text("SELECT p.*,c.account_id,c.version AS current_case_version FROM resolve.action_proposals p JOIN resolve.cases c ON c.id=p.case_id AND c.sandbox_id=p.sandbox_id WHERE p.id=:id AND p.sandbox_id=:sandbox AND c.account_id=:account FOR UPDATE OF p"),
+                {"id": proposal_id, "sandbox": context.sandbox_id, "account": context.account_id}).mappings().one_or_none()
+            if proposal is None or proposal["actor_session_id"] != context.session_id:
+                raise ResolveError(404, "RESOURCE_NOT_FOUND", "Proposal was not found")
+            prior = connection.execute(text("SELECT c.*,o.id AS operation_id,o.status AS operation_status FROM resolve.confirmations c LEFT JOIN resolve.operations o ON o.confirmation_id=c.id WHERE c.sandbox_id=:sandbox AND c.actor_session_id=:session AND c.client_turn_id=:turn"),
+                {"sandbox": context.sandbox_id, "session": context.session_id, "turn": client_turn_id}).mappings().one_or_none()
+            if prior:
+                if prior["request_fingerprint"] != fingerprint:
+                    raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Confirmation turn was used with different input")
+                return {"id": prior["id"], "proposal_id": prior["proposal_id"], "proposal_hash": prior["proposal_hash"],
+                        "decision": prior["decision"], "channel": prior["source_channel"], "client_turn_id": client_turn_id,
+                        "created_at": prior["recorded_at"], "operation_id": prior["operation_id"],
+                        "operation_status": prior["operation_status"], "simulation": True}
+            if proposal["proposal_hash"] != proposal_hash:
+                raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Proposal confirmation does not match the presented proposal")
+            existing_operation = connection.execute(text("SELECT id FROM resolve.operations WHERE case_id=:case AND proposal_id=:proposal"),
+                {"case": proposal["case_id"], "proposal": proposal_id}).scalar_one_or_none()
+            if existing_operation:
+                raise ResolveError(409, "ACTION_ALREADY_CONFIRMED", "This proposal already has an accepted operation")
+            if proposal["invalidated_at"] or proposal["expires_at"] <= now or proposal["case_version"] != proposal["current_case_version"]:
+                raise ResolveError(409, "STALE_VERSION", "Proposal expired or case changed; request a fresh proposal")
+            target = self._provider.get_action_target(context.sandbox_id, context.account_id, proposal["action_type"], proposal["target_id"])  # type: ignore[attr-defined]
+            if target is None or target["version"] != proposal["target_version"]:
+                raise ResolveError(409, "STALE_VERSION", "Action target changed; request a fresh proposal")
+            confirmation_id = uuid4()
+            connection.execute(text("INSERT INTO resolve.confirmations(id,sandbox_id,case_id,proposal_id,proposal_hash,actor_session_id,source_channel,client_turn_id,decision,recorded_at,request_fingerprint) VALUES (:id,:sandbox,:case,:proposal,:hash,:session,:channel,:turn,:decision,:now,:fingerprint)"),
+                {"id": confirmation_id, "sandbox": context.sandbox_id, "case": proposal["case_id"], "proposal": proposal_id,
+                 "hash": proposal_hash, "session": context.session_id, "channel": context.channel,
+                 "turn": client_turn_id, "decision": decision, "now": now, "fingerprint": fingerprint})
+            operation_id = None
+            operation_status = None
+            if decision == "ACCEPT":
+                operation_id = uuid4()
+                operation_status = "PENDING"
+                connection.execute(text("INSERT INTO resolve.operations(id,case_id,proposal_id,idempotency_key,status,confirmation,outcome,confirmation_id,request_fingerprint,created_at,updated_at) VALUES (:id,:case,:proposal,:key,'PENDING',CAST(:confirmation AS jsonb),'{}'::jsonb,:confirmation_id,:fingerprint,:now,:now)"),
+                    {"id": operation_id, "case": proposal["case_id"], "proposal": proposal_id,
+                     "key": f"confirmation:{confirmation_id}", "confirmation": json.dumps({"decision": decision, "proposal_hash": proposal_hash}),
+                     "confirmation_id": confirmation_id, "fingerprint": fingerprint, "now": now})
+                connection.execute(text("UPDATE resolve.cases SET status='ACTION_PENDING',version=version+1,updated_at=:now WHERE id=:case"), {"now": now, "case": proposal["case_id"]})
+            connection.execute(text("INSERT INTO resolve.audit_events(id,session_id,case_id,event_type,details,created_at) VALUES (:id,:session,:case,'ACTION_CONFIRMED',CAST(:details AS jsonb),:now)"),
+                {"id": uuid4(), "session": context.session_id, "case": proposal["case_id"], "details": json.dumps({"confirmation_id": str(confirmation_id), "decision": decision, "operation_id": str(operation_id) if operation_id else None}), "now": now})
+            return {"id": confirmation_id, "proposal_id": proposal_id, "proposal_hash": proposal_hash, "decision": decision,
+                    "channel": context.channel, "client_turn_id": client_turn_id, "created_at": now,
+                    "operation_id": operation_id, "operation_status": operation_status, "simulation": True}
 
     def _scoped_case(self, context: AuthContext, case_id: UUID) -> Any:
         with self._engine.connect() as connection:

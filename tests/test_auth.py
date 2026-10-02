@@ -116,6 +116,22 @@ class MemoryCaseFacade:
             "simulation": True,
         }
 
+    def propose_action(self, context, **kwargs):
+        self.proposal_context = context
+        self.proposal_args = kwargs
+        now = datetime.now(UTC)
+        return {"id": UUID(int=300), "case_id": kwargs["case_id"], "investigation_id": kwargs["investigation_id"],
+                "action_type": kwargs["action_type"], "target_id": kwargs["target_id"], "target_version": 1,
+                "target_label": "SIM-LK-0001", "consequences": "Create a human review request.",
+                "proposal_hash": "a" * 64, "expires_at": now, "simulation": True}
+
+    def confirm_action(self, context, **kwargs):
+        self.confirmation_args = kwargs
+        return {"id": UUID(int=301), "proposal_id": kwargs["proposal_id"], "proposal_hash": kwargs["proposal_hash"],
+                "decision": kwargs["decision"], "channel": "TEXT", "client_turn_id": kwargs["client_turn_id"],
+                "created_at": datetime.now(UTC), "operation_id": UUID(int=302) if kwargs["decision"] == "ACCEPT" else None,
+                "operation_status": "PENDING" if kwargs["decision"] == "ACCEPT" else None, "simulation": True}
+
 
 def build_client() -> tuple[TestClient, MemoryAuthStore]:
     store = MemoryAuthStore()
@@ -305,3 +321,26 @@ def test_case_routes_use_auth_context_and_forward_stable_command_key():
         assert investigation.status_code == 200, investigation.text
         assert client.app.state.resolve_facade.kwargs["command_key"] == "turn-command-1"
         assert client.app.state.resolve_facade.context.account_id == ACCOUNT_ID
+
+
+def test_action_routes_require_customer_origin_csrf_and_return_pending_acceptance():
+    client, _ = build_client()
+    with client:
+        guest = client.post("/api/v1/sessions/anonymous", json={}, headers={"Origin": ORIGIN})
+        login = client.post("/api/v1/demo/sessions", json={"demo_identity": "customer", "credential": "customer-pass"},
+                            headers={"Origin": ORIGIN, "X-CSRF-Token": guest.json()["csrf_token"]})
+        assert login.status_code == 200
+        case_id, investigation_id = UUID(int=123), UUID(int=200)
+        proposal_body = {"expected_version": 2, "investigation_id": str(investigation_id),
+                         "action_type": "CREATE_REVIEW_TICKET", "target_id": str(ACCOUNT_ID)}
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"], "Idempotency-Key": "proposal-1"}
+        proposal = client.post(f"/api/v1/cases/{case_id}/action-proposals", json=proposal_body, headers=headers)
+        assert proposal.status_code == 201, proposal.text
+        assert client.app.state.resolve_facade.proposal_context.account_id == ACCOUNT_ID
+        confirm_body = {"proposal_hash": "a" * 64, "decision": "ACCEPT", "client_turn_id": str(UUID(int=400))}
+        confirmed = client.post(f"/api/v1/action-proposals/{proposal.json()['id']}/confirmations", json=confirm_body, headers=headers)
+        assert confirmed.status_code == 202, confirmed.text
+        assert confirmed.json()["operation_status"] == "PENDING"
+        no_csrf = client.post(f"/api/v1/action-proposals/{proposal.json()['id']}/confirmations", json=confirm_body,
+                              headers={"Origin": ORIGIN})
+        assert no_csrf.status_code == 403

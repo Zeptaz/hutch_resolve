@@ -62,6 +62,15 @@ Facade methods: `get_account`, `create_case`, `get_case`, `investigate`, `propos
 
 Acceptance: modifying seed values changes calculated outcomes; missing opening or incomplete pages cannot produce a conclusive ledger tie-out. A reconciles; D conflicts. Balance explanation alone never establishes consent/refund eligibility.
 
+### H-04a completed: proposal and confirmation boundary
+
+- [x] Add revision `0004_action_proposals`; bind proposals to sandbox/session/case/evidence revision/case version and stable request hash/key. Confirmation turns and operation confirmation IDs are unique. Runtime confirmation records remain append-only.
+- [x] Add customer-only proposal and confirmation routes with exact configured Origin and CSRF checks. Proposals expire after five minutes, require latest eligible evidence and re-read target version/status.
+- [x] Persist proposal/decline/accept audit. Acceptance atomically inserts the append-only confirmation and a unique durable `PENDING` operation. Same-turn replay returns the saved operation; a second acceptance is rejected.
+- [x] Offer CREATE_REVIEW_TICKET with every persisted investigation; offer DEACTIVATE_VAS only for a sufficient VAS dispute with an active recurring renewal-enabled target. Other action eligibility remains evidence-dependent.
+
+Verification: 17 pytest tests pass. Fresh isolated PostgreSQL bootstrap/Alembic through `0004_action_proposals` and a runtime-role facade integration verified scoped investigation, proposal replay, accepted PENDING operation, confirmation replay, and duplicate-accept rejection. `compileall` and `git diff --check` pass. The operation is not executed; no receipt or provider ticket is claimed.
+
 ## H-04: actions, receipts and handoff
 
 - [ ] Implement only DEACTIVATE_VAS, SEND_SETTINGS_INSTRUCTIONS and CREATE_REVIEW_TICKET. Explicitly reject refund, credit, purchase, SIM-change and network-repair requests.
@@ -123,5 +132,6 @@ Existing Voice read timeout is eight seconds; conversation processing must retur
 | 2026-10-02 | H-03 account read + deterministic ledger core | 15 tests pass; isolated PostgreSQL verified customer-scoped account read and seeded statements; A=42,000/0, D=42,000 expected and 35,000 observed/-7,000 delta; incomplete page stays provisional; unsafe JSON money integer rejected | Freshness/page fault controls, broader provider ports and other complaint paths |
 | 2026-10-02 | H-03 case/investigation facade | Isolated PostgreSQL revision 0003 verified session-owned conversation/case creation, immutable A investigation persistence, stable command replay, stale-version conflict, D review queue status and cross-account 404 | Public conversation routes, additional customer paths/providers/faults, action proposals/operations/receipts and dashboard APIs |
 | 2026-10-02 | H-03 public case API slice | 16 tests pass; fresh PostgreSQL validates case detail/investigation wire models, origin-scoped customer/agent reads, idempotent success replay and changed-body 409 | Public conversation/controller routes, other complaint providers, proposals, confirmations, operation runner, receipts and review queue |
+| 2026-10-02 | H-04a proposal/confirmation boundary | 17 tests pass; fresh isolated PostgreSQL migrated to revision 0004 and verified customer-scoped proposal/replay, accept/PENDING operation, confirmation replay, and duplicate accept rejection. HTTP test verifies CSRF and 202 response. | Provider operation runner/recovery, operation read, receipts, escalation delivery and action concurrency race test |
 
 Work order and time boxes are in context.md. Harry owns the critical path; publish interfaces early and integrate one vertical text slice before secondary features.
