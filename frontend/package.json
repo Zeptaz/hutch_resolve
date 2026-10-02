@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "gen:api": "npx --yes openapi-typescript@7 ../docs/contracts/openapi.json -o src/api/schema.d.ts",
+    "gen:api": "node scripts/gen-api.mjs",
     "typecheck": "tsc -b"
   },
   "dependencies": {

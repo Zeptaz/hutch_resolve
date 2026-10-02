@@ -568,27 +568,18 @@ export interface components {
             description?: string;
         };
         TextInput: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "TextInput";
+            /** @constant */
+            type: "text";
             text: string;
         };
         CategoryInput: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "CategoryInput";
+            /** @constant */
+            type: "category_selection";
             complaint_type: components["schemas"]["ComplaintType"];
         };
         DetailsInput: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "DetailsInput";
+            /** @constant */
+            type: "complaint_details";
             complaint_type: components["schemas"]["ComplaintType"];
             /** Format: date-time */
             window_start: string;
@@ -597,22 +588,16 @@ export interface components {
             reported_facts: components["schemas"]["ReportedFacts"];
         };
         DecisionInput: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "DecisionInput";
+            /** @constant */
+            type: "action_decision";
             /** Format: uuid */
             proposal_id: string;
             proposal_hash: string;
             decision: components["schemas"]["Decision"];
         };
         CaseSelectionInput: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "CaseSelectionInput";
+            /** @constant */
+            type: "case_selection";
             /** Format: uuid */
             case_id: string;
         };
@@ -947,61 +932,40 @@ export interface components {
             bytes: number | null;
         };
         AccountCard: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "AccountCard";
+            /** @constant */
+            type: "account";
             data: components["schemas"]["AccountView"];
         };
         TimelineCard: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "TimelineCard";
+            /** @constant */
+            type: "timeline";
             data: {
                 items: components["schemas"]["TimelineItem"][];
             };
         };
         CalculationCard: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "CalculationCard";
+            /** @constant */
+            type: "calculation";
             data: components["schemas"]["Calculation"];
         };
         FindingCard: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "FindingCard";
+            /** @constant */
+            type: "finding";
             data: components["schemas"]["Finding"];
         };
         ConfirmationCard: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "ConfirmationCard";
+            /** @constant */
+            type: "confirmation";
             data: components["schemas"]["ProposalView"];
         };
         TicketCard: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "TicketCard";
+            /** @constant */
+            type: "ticket";
             data: components["schemas"]["Handoff"];
         };
         ReceiptCard: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "ReceiptCard";
+            /** @constant */
+            type: "receipt";
             data: {
                 /** Format: uuid */
                 case_id: string;
@@ -1270,11 +1234,8 @@ export interface components {
         InvestigationCompleted: {
             /** Format: uuid */
             event_id: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            event_type: "InvestigationCompleted";
+            /** @constant */
+            event_type: "investigation.completed";
             /** @constant */
             schema_version: 1;
             /** Format: date-time */
@@ -1295,11 +1256,8 @@ export interface components {
         ProposalCreated: {
             /** Format: uuid */
             event_id: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            event_type: "ProposalCreated";
+            /** @constant */
+            event_type: "proposal.created";
             /** @constant */
             schema_version: 1;
             /** Format: date-time */
@@ -1319,11 +1277,8 @@ export interface components {
         ConfirmationRecorded: {
             /** Format: uuid */
             event_id: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            event_type: "ConfirmationRecorded";
+            /** @constant */
+            event_type: "confirmation.recorded";
             /** @constant */
             schema_version: 1;
             /** Format: date-time */
@@ -1345,11 +1300,8 @@ export interface components {
         OperationChanged: {
             /** Format: uuid */
             event_id: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            event_type: "OperationChanged";
+            /** @constant */
+            event_type: "operation.changed";
             /** @constant */
             schema_version: 1;
             /** Format: date-time */
@@ -1370,11 +1322,8 @@ export interface components {
         EscalationChanged: {
             /** Format: uuid */
             event_id: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            event_type: "EscalationChanged";
+            /** @constant */
+            event_type: "escalation.delivery_changed";
             /** @constant */
             schema_version: 1;
             /** Format: date-time */
@@ -1394,11 +1343,8 @@ export interface components {
         ReviewUpdated: {
             /** Format: uuid */
             event_id: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            event_type: "ReviewUpdated";
+            /** @constant */
+            event_type: "review.updated";
             /** @constant */
             schema_version: 1;
             /** Format: date-time */
@@ -1418,11 +1364,8 @@ export interface components {
         };
         DomainEvent: components["schemas"]["InvestigationCompleted"] | components["schemas"]["ProposalCreated"] | components["schemas"]["ConfirmationRecorded"] | components["schemas"]["OperationChanged"] | components["schemas"]["EscalationChanged"] | components["schemas"]["ReviewUpdated"];
         VoiceReady: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "VoiceReady";
+            /** @constant */
+            type: "ready";
             session_id: string;
             /** @constant */
             provider: "gemini_live";
@@ -1447,30 +1390,21 @@ export interface components {
             };
         };
         VoiceGreeting: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "VoiceGreeting";
+            /** @constant */
+            type: "greeting";
             text: string;
         };
         VoiceTranscript: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "VoiceTranscript";
+            /** @constant */
+            type: "transcript";
             /** @enum {string} */
             speaker: "user" | "assistant";
             text: string;
             final: boolean;
         };
         VoiceResolveResult: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "VoiceResolveResult";
+            /** @constant */
+            type: "resolve_result";
             response_id: string;
             case_id: string | null;
             reply_text: string;
@@ -1480,37 +1414,25 @@ export interface components {
             end_session: boolean;
         };
         VoiceProposalAck: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "VoiceProposalAck";
+            /** @constant */
+            type: "proposal_ack";
             accepted: boolean;
         };
         VoiceError: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "VoiceError";
+            /** @constant */
+            type: "error";
             code: string;
             message?: string;
         };
         VoiceEnded: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "VoiceEnded";
+            /** @constant */
+            type: "ended";
             reason: string;
         };
         /** @description Proposed additive event, not implemented at baseline. Clear queued audio and proposal presentation eligibility. */
         VoiceInterrupted: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "VoiceInterrupted";
+            /** @constant */
+            type: "interrupted";
             response_id: string | null;
         };
         VoicePresentation: {
