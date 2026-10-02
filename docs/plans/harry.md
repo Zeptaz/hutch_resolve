@@ -10,8 +10,9 @@ Keep one application process. Suggested module ownership: `backend/resolve/{api,
 
 ## H-01: database and fixture baseline
 
-- [ ] Establish Alembic migration lifecycle without replaying CREATE TABLE over existing data. Verify schemas 001-003 before stamping an existing installation; fresh installation applies the same baseline. Upgrade fresh and existing databases to the same head.
-- [ ] Introduce fixture version 2. Correct B's out-of-bundle posting to -8000 and closing to 2000; remove duplicate E opening; add a separate consistent 10 GB offer for C (preserving 9.7 GB remaining); link B's bucket to a valid 20 GB subscription; remove B's unsupported categories. Complete references used in explanations without inventing activation consent for F.
+- [x] Establish Alembic lifecycle without replaying CREATE TABLE over data. Validate schemas 001-003 before baseline adoption; on a fresh Compose database, upgrade through the same migration chain to `0002_domain_lifecycle`. Repeated upgrade is idempotent.
+- [x] Introduce fixture version 2. Correct B's out-of-bundle posting to -8000 and closing to 2000; remove duplicate E opening; add a separate consistent 10 GB offer for C (preserving 9.7 GB remaining); link B's bucket to a valid 20 GB subscription; remove B's unsupported categories. Complete references used in explanations without inventing activation consent for F.
+- [x] Add forward persistence for retired runs, GUEST principals/CSRF metadata, language and dialogue state, leased turn claims, one confirmation per operation, idempotency results, review history and escalation delivery. Verified same-case/run foreign keys and append-only application grants on an isolated PostgreSQL 18 database.
 - [ ] Keep historical fixture runs immutable; seed corrected data into a new run. Add explicit linked reversal fixtures and metadata for fault tests. Never choose diagnoses by fixture name.
 - [ ] Run seed/knowledge exactly once during bootstrap and mark readiness only after all required initialization. Add LF checkout rules for shell bootstrap.
 - [ ] Reset creates a new explicit active run, expires prior active sessions and Voice bindings, and preserves historical evidence. Repeated requested run UUID fails clearly without partial data; no implicit newest-run lookup in authorization.
@@ -110,6 +111,6 @@ Existing Voice read timeout is eight seconds; conversation processing must retur
 | Date | Task | Evidence | Remaining |
 | --- | --- | --- | --- |
 | 2026-10-02 | Baseline | 15 existing Voice tests pass; ephemeral streaming reproduction fails; live DB healthy; seed defects confirmed read-only | H-01 through H-09 remain unchecked |
-| 2026-10-02 | H-01 fixture corrections + H-01 baseline adoption + H-02 readiness starter | Fixture v2 checked in isolated fresh PostgreSQL; full SQL assertions pass; Alembic upgrade run twice, current is `0001_sandbox_baseline`; app-role `/api/v1/readyz` returns200; project-venv tests 5 passed; compileall passed | H-01 reset/session revocation, forward migrations and reversal fixture; H-02 auth/facade/repositories; H-03 onward |
+| 2026-10-02 | H-01 fixture corrections + H-01 migration phase + H-02 readiness starter | Fixture v2 SQL assertions pass on isolated bootstrap; Alembic fresh upgrade and repeated upgrade both pass at `0002_domain_lifecycle`; app-role `/api/v1/readyz` returns 200; PostgreSQL confirms all five new tables and denies UPDATE on review history while allowing INSERT; tests 5 passed, compileall and diff check pass | H-01 reset/session and Voice-binding revocation, reversal fixture, readiness-after-seed marker; H-02 authentication/facade/repositories and consistent errors; H-03 onward |
 
 Work order and time boxes are in context.md. Harry owns the critical path; publish interfaces early and integrate one vertical text slice before secondary features.

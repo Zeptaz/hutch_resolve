@@ -16,7 +16,7 @@ Start with [context.md](context.md), the agent-maintained source of truth, and t
 
 ## Start the backend foundation
 
-The starter exposes only process liveness and readiness for PostgreSQL plus the Alembic baseline; it does not yet implement Resolve business APIs.
+The starter exposes only process liveness and readiness for PostgreSQL plus Alembic schema revision `0002_domain_lifecycle`; it does not yet implement Resolve business APIs.
 
 ```powershell
 python -m venv .venv
@@ -37,7 +37,7 @@ The database volume is Docker-managed, outside the OneDrive-synced repository. `
 - `database/migrations/002_resolve.sql` and `003_scope_constraints.sql`: planned Resolve persistence and cross-run ownership constraints only; they do not implement API behavior.
 - `database/seed.sql`: fixture version 2 with six deterministic prepaid support cases and provider fault profiles.
 - `backend/resolve/app/`: FastAPI startup and health/readiness foundation.
-- `backend/resolve/migrations/`: Alembic migration environment and non-destructive legacy baseline adoption.
+- `backend/resolve/migrations/`: Alembic migration environment, non-destructive legacy baseline adoption and the first additive domain-lifecycle migration.
 - `scripts/`: start/stop/reset and fixture UUID generation.
 - `docs/mock-environment.md`: relationships, assumptions, failure modes and future provider contracts.
 

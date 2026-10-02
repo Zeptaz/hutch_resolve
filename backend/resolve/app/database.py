@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, create_engine, text
 
+EXPECTED_SCHEMA_REVISION = "0002_domain_lifecycle"
+
 
 class Database:
     def __init__(self, engine: Engine) -> None:
@@ -20,7 +22,7 @@ class Database:
             revision = connection.execute(
                 text("SELECT version_num FROM resolve.alembic_version")
             ).scalar_one_or_none()
-            return revision == "0001_sandbox_baseline"
+            return revision == EXPECTED_SCHEMA_REVISION
 
     def close(self) -> None:
         self._engine.dispose()
