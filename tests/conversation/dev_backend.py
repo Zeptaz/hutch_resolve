@@ -566,10 +566,12 @@ async def get_operation(operation_id: UUID, request: Request):
     ctx = session_of(request)
     if ctx is None:
         return error("UNAUTHENTICATED")
-    if operation_id in dummy.operations:
-        _simulate_dummy_completion(operation_id)
     try:
-        return (await facade.get_operation(ctx, operation_id)).model_dump(mode="json")
+        operation = await facade.get_operation(ctx, operation_id)  # scope check first: only the owner's poll counts
+        if operation_id in dummy.operations:
+            _simulate_dummy_completion(operation_id)
+            operation = await facade.get_operation(ctx, operation_id)
+        return operation.model_dump(mode="json")
     except ResolveError as err:
         return error(err.code)
 

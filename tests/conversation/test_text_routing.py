@@ -28,7 +28,9 @@ def test_singlish_complaint_without_time_checks_today_and_says_so(hm: Harness) -
         "2026-10-01T18:30:00+00:00",
         "2026-10-02T06:30:00+00:00",
     )
-    assert request.reported_facts.description == "Balance dropped unexpectedly."
+    # The customer's own words; the model's summary only as a labelled, unverified aid for reviewers.
+    assert request.reported_facts.description == (
+        'Customer\'s words: "mage balance eka adu wela"\nMachine summary (unverified): Balance dropped unexpectedly.')
     assert confirmation_card(result).data.action_type == "DEACTIVATE_VAS"
 
 
@@ -174,7 +176,7 @@ def test_account_enquiry_shows_scoped_account(hm: Harness) -> None:
     ctx = customer(ACCOUNT_A)
     conv = hm.open(ctx)
     result = hm.send(ctx, hm.turn(conv, text("what is my balance")))
-    assert result.reply_text.startswith("Your main balance is LKR 420.00 (as of 2 Oct, 12:00).")
+    assert result.reply_text.startswith("Your line is SIM-LK-0001. Your main balance is LKR 420.00 (as of 2 Oct, 12:00).")
     assert "Value-added services on your line: Synthetic video alerts (renews automatically)." in result.reply_text
     assert result.cards[0].type == "account" and result.cards[0].data.id == ACCOUNT_A
 
@@ -239,7 +241,8 @@ def test_human_request_prepares_review_proposal_for_active_case(hm: Harness) -> 
     result = hm.send(ctx, hm.turn(conv, text("mata manusayekuta katha karanna ona")))
     proposal = confirmation_card(result).data
     assert proposal.action_type == "CREATE_REVIEW_TICKET"
-    assert hm.facade.escalation_reasons == ["Customer wants a person."]
+    assert hm.facade.escalation_reasons == [
+        'Customer\'s words: "mata manusayekuta katha karanna ona"\nMachine summary (unverified): Customer wants a person.']
     assert hm.state(conv).pending_proposal.proposal_id == proposal.id
 
 

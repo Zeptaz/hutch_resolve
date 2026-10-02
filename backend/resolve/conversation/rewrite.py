@@ -89,6 +89,21 @@ def _numbers(text: str) -> set[str]:
     return {re.sub(r"[.,]", "", n).lstrip("0") or "0" for n in _NUMBER.findall(_ID.sub(" ", text))}
 
 
+_SCRIPT_RANGES = {
+    Language.SI: ((0x0D80, 0x0DFF),),
+    Language.TA: ((0x0B80, 0x0BFF),),
+    Language.EN: (),
+}
+# Latin incl. accents, general punctuation (incl. zero-width joiners used in Sinhala), currency and symbols.
+_ALWAYS = ((0x0000, 0x024F), (0x2000, 0x206F), (0x20A0, 0x20CF), (0x2100, 0x218F), (0x2190, 0x21FF))
+
+
+def foreign_script(text: str, language: Language) -> bool:
+    """True when the text contains a writing system the customer did not use (e.g. Arabic in a Tamil reply)."""
+    allowed = _ALWAYS + _SCRIPT_RANGES.get(language, ())
+    return any(not any(lo <= ord(ch) <= hi for lo, hi in allowed) for ch in text if not ch.isspace())
+
+
 def preserves_facts(source: str, rewrite: str) -> bool:
     """True when the rewrite keeps every number/ID of the source and introduces none."""
     if _numbers(source) != _numbers(rewrite):
@@ -148,6 +163,6 @@ class ReplyRewriter:
             candidate = soften_singlish_k(_Rewrite.model_validate_json(reply.text).reply.strip(), english)
         except ValidationError:
             return done(None, "INVALID_OUTPUT", reply)
-        if not preserves_facts(english, candidate):
+        if not preserves_facts(english, candidate) or foreign_script(candidate, language):
             return done(None, "FACT_CHECK", reply)
         return done(candidate, None, reply)

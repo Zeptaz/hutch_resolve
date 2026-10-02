@@ -32,6 +32,8 @@ class Candidate(BaseModel):
     # Critical uncertain fields still open, and those already asked once (never asked twice).
     ambiguities: list[Ambiguity] = []
     clarified: list[Ambiguity] = []
+    # What the customer asked us to do ("stop it" -> DEACTIVATE_VAS); offered first if Resolve allows it.
+    preferred_action: ActionType | None = None
 
 
 class PendingProposalRef(BaseModel):

@@ -717,6 +717,10 @@ def extraction(**overrides) -> dict:
         "summary": None,
         "ambiguities": [],
         "customer_name": None,
+        "account_topic": None,
+        "upset": False,
+        "about_other_line": False,
+        "also_complaint_type": None,
     }
     if "time" in overrides:
         base["time_reference"] = {**base["time_reference"], **overrides.pop("time")}

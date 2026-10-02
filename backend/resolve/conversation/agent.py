@@ -23,7 +23,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .answer import ungrounded_reason
-from .rewrite import soften_singlish_k
+from .rewrite import foreign_script, soften_singlish_k
 from .model import ModelClient, ModelError, ModelReply
 
 AGENT_PROMPT_VERSION = "packages-agent-v4"
@@ -145,7 +145,7 @@ class PackageAgent:
         self._monotonic = monotonic
 
     async def run(self, message: str, target_style: str, facts: dict, conversation: dict, tools: ToolBox,
-                  budget_seconds: float) -> AgentOutcome:
+                  budget_seconds: float, language=None) -> AgentOutcome:
         deadline = self._monotonic() + budget_seconds
         result = AgentOutcome(reply=None)
         for number in range(self._max_steps):
@@ -190,6 +190,8 @@ class PackageAgent:
             if not text:
                 return self._fail(result, "INVALID_OUTPUT", began, reply)
             reason = ungrounded_reason(text, self._allowed(facts, result))
+            if reason is None and language is not None and foreign_script(text, language):
+                reason = "SCRIPT"
             if reason is not None:
                 return self._fail(result, "NOT_GROUNDED", began, reply, reason)
             return self._done(result, began, reply, text, step)

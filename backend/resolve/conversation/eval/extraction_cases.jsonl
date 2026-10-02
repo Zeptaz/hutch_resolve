@@ -60,3 +60,11 @@
 {"id": "greet-03", "variety": "english", "message": "introduce yourself", "expect": {"intent": "GREETING"}}
 {"id": "greet-04", "variety": "tanglish", "message": "vanakkam, naan Ravi", "expect": {"intent": "GREETING", "detected_language": "ta"}}
 {"id": "greet-05", "variety": "sinhala_script", "message": "ආයුබෝවන්, මගේ නම නිමල්", "expect": {"intent": "GREETING", "detected_language": "si"}}
+{"id": "audit-01", "variety": "english", "message": "Can u remove all the active VAS charges", "expect": {"intent": "NEW_COMPLAINT", "complaint_type": "VAS_DISPUTE"}}
+{"id": "audit-02", "variety": "english", "message": "cancel my data package", "expect": {"intent": "FAQ"}}
+{"id": "audit-03", "variety": "english", "message": "refund my money for the video alerts", "expect": {"intent": "NEW_COMPLAINT", "complaint_type": "VAS_DISPUTE"}}
+{"id": "audit-04", "variety": "english", "message": "send me internet settings", "expect": {"intent": "NEW_COMPLAINT", "complaint_type": "CONNECTIVITY"}}
+{"id": "audit-05", "variety": "english", "message": "how much data do I have left?", "expect": {"intent": "ACCOUNT_ENQUIRY"}}
+{"id": "audit-06", "variety": "english", "message": "thanks, bye", "expect": {"intent": "CLOSING"}}
+{"id": "audit-07", "variety": "english", "message": "my NIC is [ID number removed], update my address", "expect": {"intent": "FAQ"}}
+{"id": "audit-08", "variety": "singlish", "message": "video alerts eka ain karanna", "expect": {"intent": "NEW_COMPLAINT", "complaint_type": "VAS_DISPUTE", "detected_language": "si"}}

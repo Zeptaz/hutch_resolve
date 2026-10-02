@@ -89,7 +89,7 @@ def test_typed_clear_yes_in_text_chat_still_needs_the_button(hm: Harness) -> Non
     conv = hm.open(ctx)
     hm.send(ctx, hm.turn(conv, details()))
     result = hm.send(ctx, hm.turn(conv, text("ow")))
-    assert "buttons on the offer" in result.reply_text
+    assert "on the offer above. I don't act on a typed yes" in result.reply_text
     assert hm.facade.calls["confirm_action"] == 0
 
 
@@ -175,4 +175,4 @@ def test_conflicting_evidence_still_allows_human_review(hm: Harness) -> None:
     hm.send(ctx, hm.turn(conv, details()))
     result = hm.send(ctx, hm.turn(conv, text("I want a person")))
     assert next(c for c in result.cards if c.type == "confirmation").data.action_type == "CREATE_REVIEW_TICKET"
-    assert hm.facade.escalation_reasons == ["Customer asked for a person to review this case."]
+    assert hm.facade.escalation_reasons == ['Customer\'s words: "I want a person"']

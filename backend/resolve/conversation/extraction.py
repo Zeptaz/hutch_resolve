@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .dto import CONTRACT_ACTION_TYPES, ActionType, ComplaintType, Language, MAX_TEXT_CHARS
 from .model import ModelClient, ModelError, ModelReply
 
-PROMPT_VERSION = "extract-v7"
+PROMPT_VERSION = "extract-v11"
 TOTAL_BUDGET_SECONDS = 6.0
 MAX_WINDOW = timedelta(days=30)
 # Sri Lanka observes no DST; a fixed offset avoids a tzdata dependency.
@@ -40,7 +40,16 @@ class Intent(StrEnum):
     PACKAGES = "PACKAGES"  # wants package suggestions, or wants the assistant to activate one (prototype)
     OFF_TOPIC = "OFF_TOPIC"  # nothing to do with their mobile service
     GREETING = "GREETING"  # hello / introduces themselves / asks who the assistant is or what it can do
+    CLOSING = "CLOSING"  # thanks, bye, that's all
     OTHER = "OTHER"
+
+
+class AccountTopic(StrEnum):
+    BALANCE = "BALANCE"
+    DATA = "DATA"  # data left, package, expiry
+    SERVICES = "SERVICES"  # value-added services
+    NUMBER = "NUMBER"  # their line/number
+    OVERVIEW = "OVERVIEW"
 
 
 class Script(StrEnum):
@@ -106,6 +115,10 @@ class Extraction(BaseModel):
     summary: Annotated[str, Field(max_length=300)] | None
     ambiguities: list[Ambiguity]
     customer_name: Annotated[str, Field(max_length=40)] | None = None
+    account_topic: AccountTopic | None = None
+    upset: bool = False
+    about_other_line: bool = False
+    also_complaint_type: ComplaintType | None = None
 
     @property
     def amount_minor(self) -> int | None:
@@ -148,10 +161,15 @@ RESPONSE_SCHEMA: dict[str, Any] = {
         "summary": _nullable({"type": "string", "maxLength": 300}),
         "ambiguities": {"type": "array", "items": _enum(Ambiguity)},
         "customer_name": _nullable({"type": "string", "maxLength": 40}),
+        "account_topic": _nullable(_enum(AccountTopic)),
+        "upset": {"type": "boolean"},
+        "about_other_line": {"type": "boolean"},
+        "also_complaint_type": _nullable(_enum(ComplaintType)),
     },
     "required": [
         "intent", "decision", "action_choice", "detected_language", "script", "complaint_type", "time_reference",
-        "amount_lkr", "recharge_reference", "faq_query", "summary", "ambiguities", "customer_name",
+        "amount_lkr", "recharge_reference", "faq_query", "summary", "ambiguities", "customer_name", "account_topic", "upset",
+        "about_other_line", "also_complaint_type",
     ],
 }
 
@@ -169,8 +187,10 @@ intent:
 - NEW_COMPLAINT: a problem with balance/recharge, data running out, no connection, or an unexpected service charge.
 - FOLLOW_UP: a question about findings already given for the active case.
 - CORRECTION: the customer changes facts (time, amount, which service) of the active case.
-- ACCOUNT_ENQUIRY: asks for their own balance, packages, value-added services (VAS) or their charges, or account state,
-  without reporting a problem ("what VAS do I have", "what are my VAS charges", "mata thiyena services monawada").
+- ACCOUNT_ENQUIRY: asks for their own balance, data left, package or its expiry, value-added services (VAS) or their
+  charges, their number, or account state, without reporting a problem ("how much data do I have left", "when does my
+  package expire", "what's my number", "what are my VAS charges", "mata thiyena services monawada"). Set account_topic:
+  BALANCE, DATA (data left, package, expiry), SERVICES (VAS), NUMBER, or OVERVIEW (several or general).
 - FAQ: a general question about services, OR the customer wants to do something themselves and needs to know how:
   reload/recharge/top up, activate a package or data plan themselves, use the app, check balance in general,
   contact support or register a complaint. A greeting before the request ("hi, ...") does not change this. Set faq_query.
@@ -185,16 +205,23 @@ intent:
   "nee yaar"). If the message also asks for something, use that intent instead ("hi mata reload ekak danna one" -> FAQ).
 - OFF_TOPIC: clearly unrelated to their mobile line or HUTCH (weather, homework, coding, news, jokes, other companies).
   Questions about the assistant itself are GREETING, not OFF_TOPIC.
-- OTHER: thanks, "ok", or anything else.
+- CLOSING: thanks or goodbye with nothing else asked ("thanks", "bye", "that's all", "sthuthiyi", "nandri").
+- OTHER: "ok", or anything else.
 
 decision (only for ACTION_DECISION, else null):
 - ACCEPT only for a clear, unconditional yes to the offered action: e.g. "yes", "ok go ahead", "ow", "hari", "karanna", "aama", "sari", "seri".
 - DECLINE only for a clear no: e.g. "no", "don't", "epa", "naha", "karanna epa", "vendam", "illai".
 - UNCLEAR for anything else: questions, conditions ("yes but first..."), mixed yes and no, sarcasm, or a yes about something else.
 
-action_choice (only when conversation.actions_offered lists several actions and the customer picks one, else null):
-DEACTIVATE_VAS (stop/cancel the service or its renewal), SEND_SETTINGS_INSTRUCTIONS (phone/internet settings),
-CREATE_REVIEW_TICKET (review, a person, or checking the past charge). Picking an option is not consent.
+action_choice (else null): the action the customer asks for, either picking one of conversation.actions_offered,
+or asking for it directly: DEACTIVATE_VAS (stop, cancel, remove, unsubscribe or deactivate a value-added service or its
+renewal), SEND_SETTINGS_INSTRUCTIONS (phone/internet/APN settings), CREATE_REVIEW_TICKET (review, a person, a refund,
+or checking the past charge). Asking or picking is not consent.
+A request to stop/cancel/remove a value-added service is NEW_COMPLAINT with complaint_type VAS_DISPUTE and
+action_choice DEACTIVATE_VAS, even if they don't dispute a charge. A refund request is CREATE_REVIEW_TICKET, not
+DEACTIVATE_VAS. A request for internet/APN settings is NEW_COMPLAINT, CONNECTIVITY, SEND_SETTINGS_INSTRUCTIONS.
+A data package is not a value-added service: "cancel my data package" is FAQ with faq_query "cancel package"
+(this chat cannot cancel packages); never DEACTIVATE_VAS.
 
 complaint_type (only for NEW_COMPLAINT or CORRECTION, else null):
 BALANCE_RECHARGE (balance dropped, recharge missing, money deducted), DATA_DEPLETION (data finished too fast),
@@ -207,6 +234,14 @@ Extract only what the customer actually said. Never guess numbers or dates.
 - faq_query: for FAQ only, a few English keywords for the topic (e.g. "how to reload", "activate data package",
   "contact support"). Otherwise null.
 - summary: one neutral English sentence describing the complaint, without names or numbers not in the message. null if not a complaint.
+- upset: true only when the customer is clearly frustrated or angry ("useless", "nothing works", "worst service",
+  insults, many exclamation marks). Otherwise false.
+- about_other_line: true when they ask about a number, line or person other than their own ("balance of 0771234567",
+  "my mother's number"). Otherwise false.
+- also_complaint_type: a second, different problem in the same message ("my reload didn't come and my data is gone"
+  -> complaint_type BALANCE_RECHARGE, also_complaint_type DATA_DEPLETION). null otherwise.
+- Requests to change personal or SIM details (address, name, NIC/ID, SIM replacement, ownership, PUK) are FAQ with
+  faq_query "update personal details"; this chat cannot change them.
 - customer_name: the first name the customer gave for themselves ("I'm Kamal", "mage nama Nimal", "en peyar Ravi").
   Only a name they said; never guess. null otherwise.
 - ambiguities: list a field only when the customer seems to mean something specific but it is genuinely unclear
@@ -223,6 +258,14 @@ Examples (message -> key fields):
 "what is my balance" -> ACCOUNT_ENQUIRY
 "what are the VAS charges on my line?" -> ACCOUNT_ENQUIRY
 "what is a VAS?" -> FAQ, faq_query "value added services"
+"Can u remove all the active VAS charges" -> NEW_COMPLAINT, VAS_DISPUTE, action_choice DEACTIVATE_VAS
+"video alerts eka nawaththanna" -> NEW_COMPLAINT, si, VAS_DISPUTE, action_choice DEACTIVATE_VAS
+"refund my money for the video alerts" -> NEW_COMPLAINT, VAS_DISPUTE, action_choice CREATE_REVIEW_TICKET
+"send me internet settings" -> NEW_COMPLAINT, CONNECTIVITY, action_choice SEND_SETTINGS_INSTRUCTIONS
+"how much data do I have left?" -> ACCOUNT_ENQUIRY, account_topic DATA
+"when does my package expire?" -> ACCOUNT_ENQUIRY, account_topic DATA
+"thanks, that's all" -> CLOSING
+"cancel my data package" -> FAQ, faq_query "cancel package"
 "how do I activate a package" -> FAQ, faq_query "package activation"
 "hi mata reload ekak danna one" -> FAQ, si, faq_query "how to reload"
 "reload karanne kohomada" -> FAQ, si, faq_query "how to reload"

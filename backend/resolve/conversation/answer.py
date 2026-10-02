@@ -26,9 +26,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .dto import KnowledgeCard, Language
 from .extraction import Script
 from .model import ModelClient, ModelError, ModelReply
-from .rewrite import STYLE, _numbers, has_magnitude, soften_singlish_k
+from .rewrite import STYLE, _numbers, foreign_script, has_magnitude, soften_singlish_k
 
-ANSWER_PROMPT_VERSION = "answer-v4"
+ANSWER_PROMPT_VERSION = "answer-v5"
 ANSWER_BUDGET_SECONDS = 6.0
 
 _DOMAIN = re.compile(r"\b(?:[a-z0-9-]+\.)+(?:lk|com|net|org)\b", re.IGNORECASE)
@@ -51,6 +51,8 @@ Rules:
   short line saying they can do it themselves as above. Do not start the answer with what you cannot do.
 - If an account fact is given and it is relevant, mention it in one short sentence.
 - An article with scope SYNTHETIC describes how this demo works, not official HUTCH policy: say "in this demo" when you use it.
+- Never open with "I don't have that information" when an article still tells them where to go (app, website,
+  support): give that instead.
 - If the articles do not answer the question, say you don't have that information; suggest HUTCH support only if a
   support article is provided.
 - Keep it short: at most about 8 lines. Friendly and natural, like a helpful person texting.
@@ -163,6 +165,7 @@ class GroundedAnswerer:
         used = [by_key[k] for k in dict.fromkeys(parsed.used_articles) if k in by_key]
         sources = " ".join([*(f"{c.title} {c.content}" for c in cards), account_fact or ""])
         text = soften_singlish_k(parsed.answer.strip(), sources)
-        if not used or any(k not in by_key for k in parsed.used_articles) or not grounded(text, sources):
+        if (not used or any(k not in by_key for k in parsed.used_articles) or not grounded(text, sources)
+                or foreign_script(text, language)):
             return done(failure="NOT_GROUNDED", reply=reply)
         return done(text, used, None, reply)
