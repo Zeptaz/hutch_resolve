@@ -1,7 +1,7 @@
 """Manual check of live Gemini extraction (no database, no Resolve calls).
 
     GEMINI_API_KEY=... GEMINI_TEXT_MODEL=... python -m resolve.conversation.try_extract ["message" ...]
-    GEMINI_API_KEY=... GEMINI_TEXT_MODEL=... python -m resolve.conversation.try_extract --eval
+    GEMINI_API_KEY=... GEMINI_TEXT_MODEL=... python -m resolve.conversation.try_extract --eval [--rpm 5] [--only singlish,sinhala_script]
 
 With messages it prints each extraction. With no messages it runs a small
 multilingual sample. `--eval` scores eval/extraction_cases.jsonl per language
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -36,6 +37,18 @@ SAMPLES = [
 
 # Fixture simulation clock: 2 October 2026, 12:00 Asia/Colombo.
 SIMULATION_NOW = datetime(2026, 10, 2, 12, 0, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+
+
+def load_dotenv(path: Path = Path(__file__).resolve().parents[3] / ".env") -> None:
+    """Read GEMINI_* settings from the repo's .env without overriding the real environment.
+    Values are never printed."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if sep and key.startswith("GEMINI_") and key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")
 
 
 async def main(messages: list[str]) -> int:
@@ -99,7 +112,9 @@ def score(case: dict, extraction) -> list[str]:
     return wrong
 
 
-async def run_eval() -> int:
+async def run_eval(rpm: float, varieties: set[str] | None = None) -> int:
+    """`rpm` paces requests under the project's quota (free tier: 5/min for some models).
+    A repair attempt counts as a second request, so pacing is per case with headroom."""
     client = GeminiModelClient.from_env()
     if client is None:
         print("Set GEMINI_API_KEY and GEMINI_TEXT_MODEL first.", file=sys.stderr)
@@ -107,8 +122,19 @@ async def run_eval() -> int:
     extractor = Extractor(client)
     totals: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     failures, fallbacks, latencies = [], 0, []
-    for case in load_cases():
+    errors: dict[str, int] = defaultdict(int)
+    interval = 60.0 / rpm if rpm > 0 else 0.0
+    cases = load_cases()
+    if varieties:
+        cases = [c for c in cases if c["variety"] in varieties]
+    print(f"{len(cases)} cases at <= {rpm:g} requests/min (about {len(cases) * interval / 60:.0f} min)", flush=True)
+    for index, case in enumerate(cases):
+        if index and interval:
+            await asyncio.sleep(interval)
         outcome = await extractor.extract(case["message"], context_for(case))
+        for attempt in outcome.attempts:
+            if attempt.outcome != "OK":
+                errors[f"{attempt.outcome}:{attempt.error_type or '-'}"] += 1
         latencies.append(outcome.latency_ms)
         fallbacks += outcome.extraction is None
         wrong = score(case, outcome.extraction)
@@ -121,13 +147,18 @@ async def run_eval() -> int:
         print(f"  {variety:16s} {ok}/{n}")
     latencies.sort()
     print(f"  fallbacks={fallbacks} median_latency_ms={latencies[len(latencies) // 2]} max_latency_ms={latencies[-1]}")
+    if errors:
+        print(f"  attempt errors: {dict(errors)}")
     for case_id, wrong, failure in failures:
         print(f"  MISS {case_id}: {', '.join(wrong)}{f' ({failure})' if failure else ''}")
     return 0
 
 
 if __name__ == "__main__":
+    load_dotenv()
     args = sys.argv[1:]
-    if args == ["--eval"]:
-        raise SystemExit(asyncio.run(run_eval()))
+    if args[:1] == ["--eval"]:
+        rpm = float(args[args.index("--rpm") + 1]) if "--rpm" in args else float(os.environ.get("GEMINI_RPM", "5"))
+        varieties = set(args[args.index("--only") + 1].split(",")) if "--only" in args else None
+        raise SystemExit(asyncio.run(run_eval(rpm, varieties)))
     raise SystemExit(asyncio.run(main(args or SAMPLES)))

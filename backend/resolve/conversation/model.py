@@ -34,11 +34,14 @@ class ModelClient(Protocol):
 class GeminiModelClient:
     """Gemini via the official google-genai SDK.
 
-    The caller (Extractor) owns the total 6 s budget, so SDK retries are disabled
-    and a per-request HTTP timeout is set as a backstop.
+    The caller (Extractor) owns the total 6 s budget and cancels the call itself,
+    so SDK retries are disabled. The HTTP timeout is only a backstop: the API
+    rejects deadlines under 10 s ("Minimum allowed deadline is 10s").
     """
 
-    def __init__(self, api_key: str, model: str, request_timeout_ms: int = 6000) -> None:
+    MIN_DEADLINE_MS = 10_000
+
+    def __init__(self, api_key: str, model: str, request_timeout_ms: int = MIN_DEADLINE_MS, thinking_level: str | None = "LOW") -> None:
         from google import genai
         from google.genai import types
 
@@ -46,18 +49,24 @@ class GeminiModelClient:
         self._model = model
         self.provider = "gemini"
         self.model_name = model
+        # Newer Gemini models think by default; keep it low so extraction fits the 6 s budget.
+        self._thinking = types.ThinkingConfig(thinking_level=thinking_level) if thinking_level else None
         self._client = genai.Client(
             api_key=api_key,
-            http_options=types.HttpOptions(timeout=request_timeout_ms, retry_options=types.HttpRetryOptions(attempts=1)),
+            http_options=types.HttpOptions(
+                timeout=max(request_timeout_ms, self.MIN_DEADLINE_MS), retry_options=types.HttpRetryOptions(attempts=1)
+            ),
         )
 
     @classmethod
     def from_env(cls) -> "GeminiModelClient | None":
-        """GEMINI_API_KEY + GEMINI_TEXT_MODEL (docs/contracts.md). None if not configured."""
+        """GEMINI_API_KEY + GEMINI_TEXT_MODEL (docs/contracts.md), optional GEMINI_THINKING_LEVEL
+        (MINIMAL/LOW/MEDIUM/HIGH; empty disables the setting). None if not configured."""
         key, model = os.environ.get("GEMINI_API_KEY"), os.environ.get("GEMINI_TEXT_MODEL")
         if not key or not model:
             return None
-        return cls(api_key=key, model=model)
+        thinking = os.environ.get("GEMINI_THINKING_LEVEL", "LOW").strip().upper() or None
+        return cls(api_key=key, model=model, thinking_level=thinking)
 
     async def generate_json(self, *, system: str, prompt: str, schema: dict[str, Any]) -> ModelReply:
         config = self._types.GenerateContentConfig(
@@ -66,6 +75,9 @@ class GeminiModelClient:
             response_json_schema=schema,
             temperature=0,
             max_output_tokens=1024,
+            thinking_config=self._thinking,
+            # Extraction never calls tools; also silences the SDK's AFC warning.
+            automatic_function_calling=self._types.AutomaticFunctionCallingConfig(disable=True),
         )
         try:
             response = await self._client.aio.models.generate_content(model=self._model, contents=prompt, config=config)
