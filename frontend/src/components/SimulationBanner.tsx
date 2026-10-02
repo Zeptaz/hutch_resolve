@@ -37,7 +37,7 @@ function MockControls({ realm }: { realm: Realm }) {
           <Wrench aria-hidden /> Mock controls
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="min-w-60">
         <DropdownMenuLabel>Exercise UI states</DropdownMenuLabel>
         {realm === 'customer' && (
           <DropdownMenuItem onSelect={() => run((c) => c.continueAsDemoLine())}>Continue as demo line A</DropdownMenuItem>

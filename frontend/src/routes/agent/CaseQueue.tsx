@@ -98,7 +98,7 @@ export function CaseQueue() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="relative min-h-0 flex-1 overflow-y-auto">
         {error != null && !data ? (
           <ErrorState title="Could not load the queue" error={error} onRetry={() => void refresh()} />
         ) : !data ? (

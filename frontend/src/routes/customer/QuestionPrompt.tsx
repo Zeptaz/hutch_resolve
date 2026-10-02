@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Signal, Smartphone, Wallet, Wifi } from 'lucide-react'
+import { Repeat, Signal, Smartphone, Wallet } from 'lucide-react'
 import type { ComplaintType, PendingQuestion, ReportedFacts, TurnInput } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,7 +13,7 @@ const COMPLAINT_ICON: Record<ComplaintType, React.ReactNode> = {
   BALANCE_RECHARGE: <Wallet />,
   DATA_DEPLETION: <Smartphone />,
   CONNECTIVITY: <Signal />,
-  VAS_DISPUTE: <Wifi />,
+  VAS_DISPUTE: <Repeat />,
 }
 
 const MAX_WINDOW_DAYS = 30
@@ -125,7 +125,7 @@ function DetailsForm({ disabled, onAnswer }: { disabled: boolean; onAnswer: (inp
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="q-amount">Recharge amount (LKR, optional)</Label>
-              <Input id="q-amount" inputMode="decimal" placeholder="1000" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <Input id="q-amount" inputMode="decimal" placeholder="e.g. 1000" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="q-ref">Recharge reference (optional)</Label>

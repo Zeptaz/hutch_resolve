@@ -43,7 +43,7 @@ function AgentGate() {
       </header>
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <CaseQueue />
-        <section aria-label="Case detail" className="min-h-0 flex-1 overflow-y-auto">
+        <section aria-label="Case detail" className="relative min-h-0 flex-1 overflow-y-auto">
           <Outlet />
         </section>
       </div>

@@ -47,7 +47,7 @@ export function CasePanel({
   const shown = active && active.id === activeId ? active : null
 
   return (
-    <aside aria-label="Your cases" className="hidden w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-sidebar p-4 lg:flex">
+    <aside aria-label="Your cases" className="relative hidden w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-sidebar p-4 lg:flex">
       <h2 className="text-sm font-semibold">Your cases</h2>
       {!conversation || conversation.cases.length === 0 ? (
         <p className="text-sm text-muted-foreground">

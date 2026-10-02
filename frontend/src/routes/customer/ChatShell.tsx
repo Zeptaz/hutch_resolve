@@ -45,11 +45,24 @@ export function ChatShell({ session }: { session: SessionView }) {
   const createKey = useRef(newId())
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Create the conversation once per session; the same Idempotency-Key makes a retry safe.
+  // Reopen this session's conversation after a page refresh, otherwise create one.
+  // The same Idempotency-Key makes a retried create safe.
   useEffect(() => {
     let cancelled = false
-    customerApi
-      .createConversation('en', createKey.current)
+    const open = async () => {
+      const savedId = readSavedConversation(session.id)
+      if (savedId) {
+        try {
+          return await customerApi.getConversation(savedId)
+        } catch (e) {
+          if (!(isApiError(e) && e.status === 404)) throw e
+        }
+      }
+      const created = await customerApi.createConversation('en', createKey.current)
+      saveConversation(session.id, created.id)
+      return created
+    }
+    open()
       .then((c) => {
         if (cancelled) return
         setConversation(c)
@@ -61,9 +74,20 @@ export function ChatShell({ session }: { session: SessionView }) {
     }
   }, [session.id, attempt])
 
+  // New reply: bring its start into view so long card stacks are read from the top.
+  // Typing indicator / failed turn: show the bottom of the thread.
+  const lastMessageId = conversation?.messages.at(-1)?.id
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
-  }, [conversation?.messages.length, sending, failed])
+    const el = scrollRef.current
+    if (!el) return
+    // Wait a frame so cards have laid out before measuring.
+    const frame = requestAnimationFrame(() => {
+      const latest = lastMessageId ? el.querySelector<HTMLElement>(`[data-message-id="${lastMessageId}"]`) : null
+      const top = latest && !sending && !failed ? latest.offsetTop - 16 : el.scrollHeight
+      el.scrollTo({ top, behavior: prefersSmoothScroll() ? 'smooth' : 'auto' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [lastMessageId, sending, failed])
 
   const reload = useCallback(async (id: string) => {
     try {
@@ -103,7 +127,7 @@ export function ChatShell({ session }: { session: SessionView }) {
 
   const submitText = () => {
     const text = draft.trim()
-    if (!text || sending) return
+    if (!text || sending || !conversation) return // keep the draft until the chat is ready
     setDraft('')
     void sendTurn({ type: 'text', text }, text, newId())
   }
@@ -177,7 +201,7 @@ export function ChatShell({ session }: { session: SessionView }) {
 
       <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
-          <div ref={scrollRef} className="flex-1 overflow-y-auto" aria-live="polite">
+          <div ref={scrollRef} className="relative flex-1 overflow-y-auto" aria-live="polite">
             <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 py-6">
               {loadError ? (
                 <ErrorState
@@ -197,7 +221,7 @@ export function ChatShell({ session }: { session: SessionView }) {
                     const result = m.speaker === 'ASSISTANT' ? m.result : null
                     const hasExtras = !!result && (result.cards.length > 0 || result.citations.length > 0 || result.operation_ids.length > 0)
                     return (
-                      <div key={m.id} className="flex flex-col gap-2">
+                      <div key={m.id} data-message-id={m.id} className="flex flex-col gap-2">
                         <Bubble speaker={m.speaker} time={m.created_at}>
                           {m.body}
                         </Bubble>
@@ -207,7 +231,14 @@ export function ChatShell({ session }: { session: SessionView }) {
                               <ChatCard key={`${m.id}-${i}`} card={card} renderConfirmation={(c) => renderProposal(c.data)} />
                             ))}
                             {result.operation_ids.map((id) => (
-                              <OperationTracker key={id} operationId={id} onSettled={() => setCaseRefresh((n) => n + 1)} />
+                              <OperationTracker
+                                key={id}
+                                operationId={id}
+                                onSettled={() => {
+                                  setCaseRefresh((n) => n + 1)
+                                  void reload(conversation.id)
+                                }}
+                              />
                             ))}
                             <CitationList citations={result.citations} />
                           </div>
@@ -253,7 +284,7 @@ export function ChatShell({ session }: { session: SessionView }) {
                 aria-label="Message"
                 rows={1}
                 className="max-h-40 min-h-11 resize-none rounded-xl"
-                disabled={!conversation || !textAllowed}
+                disabled={!textAllowed}
               />
               <Button type="submit" size="icon-lg" aria-label="Send" disabled={!conversation || sending || !draft.trim()}>
                 <SendHorizontal aria-hidden />
@@ -271,6 +302,29 @@ export function ChatShell({ session }: { session: SessionView }) {
       </div>
     </div>
   )
+}
+
+// Only the conversation ID is kept (per tab, per session) — never credentials or message content.
+const conversationKey = (sessionId: string) => `hutch-resolve.conversation.${sessionId}`
+
+function readSavedConversation(sessionId: string): string | null {
+  try {
+    return sessionStorage.getItem(conversationKey(sessionId))
+  } catch {
+    return null
+  }
+}
+
+function saveConversation(sessionId: string, conversationId: string) {
+  try {
+    sessionStorage.setItem(conversationKey(sessionId), conversationId)
+  } catch {
+    /* storage unavailable: a refresh will start a new conversation */
+  }
+}
+
+function prefersSmoothScroll() {
+  return document.visibilityState === 'visible' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
 function FailedTurnNotice({ failed, onRetry }: { failed: FailedTurn; onRetry: () => void }) {

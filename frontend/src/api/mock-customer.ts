@@ -2,6 +2,7 @@
 // It imitates the *shape* of Resolve/conversation responses so every chat state can be exercised.
 // The branching here is a test script, not product logic — the real decisions come from the backend.
 import type { RawResponse, RequestOptions } from './client'
+import { COMPLAINT_LABEL } from '@/lib/labels'
 import { example, fail, ok, randomHash, type MockState } from './mock-util'
 import type {
   AccountView,
@@ -197,7 +198,7 @@ function describeInput(input: TurnInput, conv: ConversationView): string {
     case 'category_selection':
       return labelFor(input.complaint_type)
     case 'complaint_details':
-      return `${labelFor(input.complaint_type)}: details submitted`
+      return `${labelFor(input.complaint_type)}: details sent`
     case 'case_selection':
       return `Switch to case ${conv.cases.find((c) => c.id === input.case_id) ? labelFor(conv.cases.find((c) => c.id === input.case_id)!.complaint_type) : ''}`.trim()
     case 'action_decision':
@@ -206,7 +207,14 @@ function describeInput(input: TurnInput, conv: ConversationView): string {
 }
 
 function labelFor(t: string) {
-  return t.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase())
+  return COMPLAINT_LABEL[t as keyof typeof COMPLAINT_LABEL] ?? t
+}
+
+function syncSummary(state: MockState, c: CaseView) {
+  for (const conv of Object.values(state.conversations)) {
+    const s = conv.cases.find((x) => x.id === c.id)
+    if (s) s.status = c.status
+  }
 }
 
 function plain(text: string): TurnReply {
@@ -245,12 +253,11 @@ function investigate(state: MockState, conv: ConversationView): TurnReply {
       type: 'timeline',
       data: {
         items: calc.terms.map((t, i) => {
-          const ev = inv.evidence.find((e) => e.id === t.evidence_id)
           const at = new Date(Date.parse(inv.window_start) + (i + 1) * 45 * 60 * 1000).toISOString()
           return {
             evidence_id: t.evidence_id,
             occurred_at: at,
-            recorded_at: ev?.fetched_at ?? at,
+            recorded_at: at,
             label: t.label,
             amount_minor: t.value,
             bytes: null,
@@ -313,6 +320,7 @@ function decide(
   if (c) {
     c.status = 'ACTION_PENDING'
     c.operation_ids = [...c.operation_ids, op.id]
+    syncSummary(state, c)
   }
 
   const isTicket = p.action_type === 'CREATE_REVIEW_TICKET'
@@ -356,6 +364,7 @@ function advanceOperation(state: MockState, entry: { op: OperationView; createdM
   if (c) {
     c.status = 'RESOLVED'
     issueReceipt(state, c)
+    syncSummary(state, c)
   }
   return op
 }

@@ -40,7 +40,7 @@ export function ConfirmationCard({
   return (
     <CardFrame
       icon={<ShieldCheck />}
-      title="Your confirmation is needed"
+      title={state.kind === 'open' || state.kind === 'submitting' ? (expired ? 'Offer expired' : 'Your confirmation is needed') : state.kind === 'decided' ? 'Your decision' : 'Suggested action'}
       className={actionable ? 'border-primary/40 ring-1 ring-primary/20' : undefined}
       aside={<StateBadge state={state} expired={expired} />}
     >

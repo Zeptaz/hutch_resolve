@@ -116,7 +116,7 @@ function TimelineCard({ data }: { data: CardOf<'timeline'>['data'] }) {
     <CardFrame icon={<ListOrdered />} title="What happened">
       <ol className="relative flex flex-col gap-3 border-l pl-4">
         {data.items.map((item) => {
-          const late = Date.parse(item.recorded_at) - Date.parse(item.occurred_at) > 60 * 60 * 1000
+          const recordedDiffers = item.recorded_at !== item.occurred_at
           return (
             <li key={item.evidence_id} className="relative">
               <span aria-hidden className="absolute top-1.5 -left-[21px] size-2.5 rounded-full border-2 border-background bg-primary" />
@@ -130,12 +130,15 @@ function TimelineCard({ data }: { data: CardOf<'timeline'>['data'] }) {
                 )}
                 {item.bytes != null && <span className="font-mono">{formatGb(item.bytes)}</span>}
               </div>
-              <time className="text-xs text-muted-foreground">{formatDateTime(item.occurred_at)}</time>
-              {late && (
-                <StatusBadge tone="warning" className="ml-2">
-                  Recorded later
-                </StatusBadge>
-              )}
+              <p className="text-xs text-muted-foreground">
+                <time dateTime={item.occurred_at}>{formatDateTime(item.occurred_at)}</time>
+                {recordedDiffers && (
+                  <>
+                    {' · recorded '}
+                    <time dateTime={item.recorded_at}>{formatDateTime(item.recorded_at)}</time>
+                  </>
+                )}
+              </p>
             </li>
           )
         })}
