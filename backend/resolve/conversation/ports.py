@@ -158,6 +158,40 @@ class ConversationRepository(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class ModelCallRecord:
+    """One model request for `resolve.model_calls` and logs.
+
+    Deliberately has no prompt, transcript or model output field: none of those
+    may be logged. Token counts are only what the provider reported (None if not).
+    """
+
+    request_id: UUID
+    conversation_id: UUID
+    case_id: UUID | None
+    purpose: str  # e.g. EXTRACTION
+    prompt_version: str
+    attempt: int
+    provider: str
+    model: str
+    outcome: str  # OK | INVALID_OUTPUT | TIMEOUT | MODEL_ERROR
+    latency_ms: int
+    input_tokens: int | None
+    output_tokens: int | None
+    error_type: str | None
+
+
+class ModelTelemetry(Protocol):
+    """Harry stores records (resolve.model_calls has provider/model/tokens/latency/outcome)."""
+
+    async def record_model_call(self, ctx: AuthContext, record: ModelCallRecord) -> None: ...
+
+
+class NullTelemetry:
+    async def record_model_call(self, ctx: AuthContext, record: ModelCallRecord) -> None:
+        return None
+
+
 class KnowledgeRepository(Protocol):
     """Bounded lexical lookup over the twelve reviewed knowledge cards."""
 

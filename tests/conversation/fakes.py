@@ -439,6 +439,17 @@ class FakeResolveFacade:
         )
 
 
+class RecordingTelemetry:
+    def __init__(self) -> None:
+        self.records: list = []
+        self.fail = False
+
+    async def record_model_call(self, ctx, record) -> None:
+        if self.fail:
+            raise RuntimeError("telemetry store down")
+        self.records.append(record)
+
+
 # --- ModelClient ----------------------------------------------------------------
 
 
@@ -464,6 +475,9 @@ def extraction(**overrides) -> dict:
 
 class FakeModel:
     """Scripted ModelClient: message text -> payload (dict), raw string, exception or delay."""
+
+    provider = "fake"
+    model_name = "fake-model"
 
     def __init__(self) -> None:
         self.script: dict[str, list[Any]] = {}

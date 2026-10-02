@@ -229,11 +229,26 @@ def build_prompt(text: str, context: ExtractionContext) -> str:
 
 
 @dataclass(frozen=True)
+class ModelAttempt:
+    """One model request. Carries no prompt or customer text."""
+
+    number: int  # 1 = first call, 2 = schema repair
+    outcome: str  # OK | INVALID_OUTPUT | TIMEOUT | MODEL_ERROR
+    latency_ms: int
+    reply: ModelReply | None = None
+    error_type: str | None = None  # provider error class name only, never its message
+
+
+@dataclass(frozen=True)
 class ExtractionOutcome:
     extraction: Extraction | None
     failure: str | None  # TIMEOUT | MODEL_ERROR | INVALID_OUTPUT
-    replies: list[ModelReply] = field(default_factory=list)
+    attempts: list[ModelAttempt] = field(default_factory=list)
     latency_ms: int = 0
+
+    @property
+    def replies(self) -> list[ModelReply]:
+        return [a.reply for a in self.attempts if a.reply is not None]
 
 
 class Extractor:
@@ -245,37 +260,44 @@ class Extractor:
         budget_seconds: float = TOTAL_BUDGET_SECONDS,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._client = client
+        self.client = client
         self._budget = budget_seconds
         self._monotonic = monotonic
 
     async def extract(self, text: str, context: ExtractionContext) -> ExtractionOutcome:
         started = self._monotonic()
         deadline = started + self._budget
-        replies: list[ModelReply] = []
+        attempts: list[ModelAttempt] = []
         prompt = build_prompt(text, context)
 
         def done(extraction: Extraction | None, failure: str | None) -> ExtractionOutcome:
             elapsed = int((self._monotonic() - started) * 1000)
-            return ExtractionOutcome(extraction, failure, replies, elapsed)
+            return ExtractionOutcome(extraction, failure, attempts, elapsed)
+
+        def record(number: int, began: float, outcome: str, reply: ModelReply | None = None, error: str | None = None) -> None:
+            attempts.append(ModelAttempt(number, outcome, int((self._monotonic() - began) * 1000), reply, error))
 
         for attempt in range(2):
-            remaining = deadline - self._monotonic()
+            number = attempt + 1
+            began = self._monotonic()
+            remaining = deadline - began
             if remaining <= 0:
                 return done(None, "TIMEOUT")
             try:
                 reply = await asyncio.wait_for(
-                    self._client.generate_json(system=SYSTEM_INSTRUCTION, prompt=prompt, schema=RESPONSE_SCHEMA),
+                    self.client.generate_json(system=SYSTEM_INSTRUCTION, prompt=prompt, schema=RESPONSE_SCHEMA),
                     timeout=remaining,
                 )
             except (asyncio.TimeoutError, TimeoutError):
+                record(number, began, "TIMEOUT")
                 return done(None, "TIMEOUT")
-            except ModelError:
+            except ModelError as err:
+                record(number, began, "MODEL_ERROR", error=str(err.args[0]) if err.args else None)
                 return done(None, "MODEL_ERROR")
-            replies.append(reply)
             try:
-                return done(Extraction.model_validate_json(reply.text), None)
+                extraction = Extraction.model_validate_json(reply.text)
             except ValidationError as err:
+                record(number, began, "INVALID_OUTPUT", reply)
                 if attempt == 1:
                     return done(None, "INVALID_OUTPUT")
                 problems = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in err.errors()[:10])
@@ -284,6 +306,9 @@ class Extractor:
                      "errors": problems, "original_request": json.loads(prompt)},
                     ensure_ascii=False,
                 )
+                continue
+            record(number, began, "OK", reply)
+            return done(extraction, None)
         return done(None, "INVALID_OUTPUT")
 
 

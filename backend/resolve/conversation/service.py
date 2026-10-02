@@ -14,6 +14,7 @@ the structured forms remain fully usable.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
@@ -60,15 +61,26 @@ from .extraction import (
     Ambiguity,
     Extraction,
     ExtractionContext,
+    ExtractionOutcome,
     Extractor,
     Intent,
+    PROMPT_VERSION,
     SpokenDecision,
     TimeKind,
     default_window,
     resolve_window,
 )
 from .identity import command_key, turn_fingerprint
-from .ports import ConversationRepository, KnowledgeRepository, Replay, ResolveFacade, TurnDraft
+from .ports import (
+    ConversationRepository,
+    KnowledgeRepository,
+    ModelCallRecord,
+    ModelTelemetry,
+    NullTelemetry,
+    Replay,
+    ResolveFacade,
+    TurnDraft,
+)
 from .state import Candidate, DialogueState, PendingProposalRef
 
 MAX_WINDOW = timedelta(days=30)
@@ -100,6 +112,8 @@ _CONTINUES_CANDIDATE = {Intent.NEW_COMPLAINT, Intent.CORRECTION, Intent.FOLLOW_U
 
 SimulationClock = Callable[[AuthContext], Awaitable[datetime]]
 
+log = logging.getLogger(__name__)
+
 
 async def _real_time(ctx: AuthContext) -> datetime:
     return datetime.now(UTC)
@@ -116,6 +130,7 @@ class ConversationService:
         knowledge: KnowledgeRepository,
         extractor: Extractor | None = None,
         simulation_now: SimulationClock = _real_time,
+        telemetry: ModelTelemetry | None = None,
     ) -> None:
         """`simulation_now` returns the scoped run's simulation clock (Harry); business
         windows use it, while auth and proposal expiry stay on real time in Resolve."""
@@ -124,6 +139,7 @@ class ConversationService:
         self._knowledge = knowledge
         self._extractor = extractor
         self._simulation_now = simulation_now
+        self._telemetry = telemetry or NullTelemetry()
 
     async def handle_turn(self, ctx: AuthContext, turn: NormalizedTurn) -> TurnResult:
         _check_trusted_fields(ctx, turn)
@@ -161,7 +177,7 @@ class ConversationService:
 
     async def _on_text(self, ctx: AuthContext, turn: NormalizedTurn, inp: TextInput, state: DialogueState) -> Step:
         now = await self._simulation_now(ctx)
-        extraction = await self._extract(ctx, inp.text, state, now)
+        extraction = await self._extract(ctx, turn, inp.text, state, now)
         if extraction is None:
             return self._structured_fallback(ctx, state)
 
@@ -199,7 +215,9 @@ class ConversationService:
                 return await self._collect_complaint(ctx, turn, extraction, state, Candidate(), now)
         return _ask(state, Q_CHOOSE_COMPLAINT, t.text("choose_complaint", state.language), ["category_selection", "text"])
 
-    async def _extract(self, ctx: AuthContext, text: str, state: DialogueState, now: datetime) -> Extraction | None:
+    async def _extract(
+        self, ctx: AuthContext, turn: NormalizedTurn, text: str, state: DialogueState, now: datetime
+    ) -> Extraction | None:
         if self._extractor is None:
             return None
         active_type = None
@@ -217,7 +235,33 @@ class ConversationService:
             has_pending_proposal=state.pending_proposal is not None,
         )
         outcome = await self._extractor.extract(text, context)
+        await self._record_usage(ctx, turn, state, outcome)
         return outcome.extraction
+
+    async def _record_usage(self, ctx: AuthContext, turn: NormalizedTurn, state: DialogueState, outcome: ExtractionOutcome) -> None:
+        """Usage telemetry must never block or fail a customer turn."""
+        client = self._extractor.client
+        for attempt in outcome.attempts:
+            reply = attempt.reply
+            record = ModelCallRecord(
+                request_id=ctx.request_id,
+                conversation_id=turn.conversation_id,
+                case_id=state.active_case_id,
+                purpose="EXTRACTION",
+                prompt_version=PROMPT_VERSION,
+                attempt=attempt.number,
+                provider=reply.provider if reply else client.provider,
+                model=reply.model if reply else client.model_name,
+                outcome=attempt.outcome,
+                latency_ms=attempt.latency_ms,
+                input_tokens=reply.input_tokens if reply else None,
+                output_tokens=reply.output_tokens if reply else None,
+                error_type=attempt.error_type,
+            )
+            try:
+                await self._telemetry.record_model_call(ctx, record)
+            except Exception:  # noqa: BLE001
+                log.warning("model telemetry write failed", extra={"request_id": str(ctx.request_id), "outcome": attempt.outcome})
 
     async def _spoken_decision(
         self, ctx: AuthContext, turn: NormalizedTurn, inp: TextInput, ex: Extraction, state: DialogueState

@@ -11,7 +11,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from fakes import FakeConversationRepository, FakeKnowledgeRepository, FakeModel, FakeResolveFacade  # noqa: E402
+from fakes import (  # noqa: E402
+    FakeConversationRepository,
+    FakeKnowledgeRepository,
+    FakeModel,
+    FakeResolveFacade,
+    RecordingTelemetry,
+)
 from resolve.conversation import ConversationService  # noqa: E402
 from resolve.conversation.extraction import Extractor  # noqa: E402
 from resolve.conversation.dto import AuthContext, Channel, Language, NormalizedTurn, Role  # noqa: E402
@@ -66,7 +72,8 @@ class Harness:
         async def simulation_now(ctx):
             return self.clock()
 
-        self.service = ConversationService(self.facade, self.repo, self.knowledge, extractor, simulation_now)
+        self.telemetry = RecordingTelemetry()
+        self.service = ConversationService(self.facade, self.repo, self.knowledge, extractor, simulation_now, self.telemetry)
 
     def open(self, ctx: AuthContext) -> UUID:
         return self.repo.create(ctx)

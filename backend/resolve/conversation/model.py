@@ -25,6 +25,9 @@ class ModelReply:
 
 
 class ModelClient(Protocol):
+    provider: str
+    model_name: str  # configured model; a reply may report a more specific version
+
     async def generate_json(self, *, system: str, prompt: str, schema: dict[str, Any]) -> ModelReply: ...
 
 
@@ -41,6 +44,8 @@ class GeminiModelClient:
 
         self._types = types
         self._model = model
+        self.provider = "gemini"
+        self.model_name = model
         self._client = genai.Client(
             api_key=api_key,
             http_options=types.HttpOptions(timeout=request_timeout_ms, retry_options=types.HttpRetryOptions(attempts=1)),
