@@ -17,8 +17,32 @@ MAX_SAFE_INTEGER = 9_007_199_254_740_991
 
 
 def _fingerprint(value: dict[str, Any]) -> str:
-    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _validated_reported_facts(value: dict[str, Any] | None) -> dict[str, Any]:
+    facts = value or {}
+    if not isinstance(facts, dict):
+        raise ResolveError(422, "VALIDATION_ERROR", "Reported facts must be a small JSON object")
+    allowed_fact_keys = {"amount_minor", "recharge_reference", "subscription_id", "description"}
+    if set(facts) - allowed_fact_keys:
+        raise ResolveError(422, "VALIDATION_ERROR", "Reported facts include unsupported fields")
+    try:
+        serialized = json.dumps(facts, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ResolveError(422, "VALIDATION_ERROR", "Reported facts must contain JSON-safe values") from exc
+    if len(serialized) > 4000:
+        raise ResolveError(422, "VALIDATION_ERROR", "Reported facts must be a small JSON object")
+    amount = facts.get("amount_minor")
+    if amount is not None and (not isinstance(amount, int) or isinstance(amount, bool) or abs(amount) > MAX_SAFE_INTEGER):
+        raise ResolveError(422, "VALIDATION_ERROR", "Reported amount must be a safe integer in minor units")
+    for field in ("recharge_reference", "subscription_id", "description"):
+        item = facts.get(field)
+        limit = 2000 if field == "description" else 128
+        if item is not None and (not isinstance(item, str) or len(item) > limit):
+            raise ResolveError(422, "VALIDATION_ERROR", f"Reported {field} is invalid")
+    return facts
 
 
 class ResolveFacade:
@@ -128,20 +152,7 @@ class ResolveFacade:
                 raise ResolveError(422, "VALIDATION_ERROR", "Investigation window must be ordered UTC timestamps")
             if window_end - window_start > timedelta(days=30):
                 raise ResolveError(422, "VALIDATION_ERROR", "Investigation window cannot exceed 30 days")
-        facts = reported_facts or {}
-        if not isinstance(facts, dict) or len(json.dumps(facts, ensure_ascii=False)) > 4000:
-            raise ResolveError(422, "VALIDATION_ERROR", "Reported facts must be a small JSON object")
-        allowed_fact_keys = {"amount_minor", "recharge_reference", "subscription_id", "description"}
-        if set(facts) - allowed_fact_keys:
-            raise ResolveError(422, "VALIDATION_ERROR", "Reported facts include unsupported fields")
-        amount = facts.get("amount_minor")
-        if amount is not None and (not isinstance(amount, int) or isinstance(amount, bool) or abs(amount) > MAX_SAFE_INTEGER):
-            raise ResolveError(422, "VALIDATION_ERROR", "Reported amount must be a safe integer in minor units")
-        for field in ("recharge_reference", "subscription_id", "description"):
-            value = facts.get(field)
-            limit = 2000 if field == "description" else 128
-            if value is not None and (not isinstance(value, str) or len(value) > limit):
-                raise ResolveError(422, "VALIDATION_ERROR", f"Reported {field} is invalid")
+        facts = _validated_reported_facts(reported_facts)
 
         request_body = {
             "complaint_type": complaint_type,
@@ -249,6 +260,7 @@ class ResolveFacade:
         complaint_type: str,
         window_start: datetime,
         window_end: datetime,
+        reported_facts: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if context.role != "CUSTOMER" or context.account_id is None or context.sandbox_id is None:
             raise ResolveError(403, "ROLE_FORBIDDEN", "A customer account session is required to investigate a case")
@@ -261,10 +273,12 @@ class ResolveFacade:
         case_scope = self._scoped_case(context, case_id)
         if case_scope["complaint_type"] != complaint_type:
             raise ResolveError(409, "STALE_VERSION", "Complaint type differs from the saved case")
+        facts = _validated_reported_facts(reported_facts)
         request_hash = _fingerprint({
             "complaint_type": complaint_type,
             "window_start": window_start.isoformat(),
             "window_end": window_end.isoformat(),
+            "reported_facts": facts,
         })
         with self._engine.connect() as connection:
             prior = connection.execute(
@@ -353,11 +367,13 @@ class ResolveFacade:
             connection.execute(
                 text("""
                     UPDATE resolve.cases SET version=version+1,status=:status,updated_at=:now,
-                      window_start=coalesce(window_start,:window_start),window_end=coalesce(window_end,:window_end)
+                      window_start=coalesce(window_start,:window_start),window_end=coalesce(window_end,:window_end),
+                      reported_facts=reported_facts || CAST(:reported_facts AS jsonb)
                     WHERE id=:case_id
                 """),
                 {"status": new_case_status, "now": created_at, "case_id": case_id,
-                 "window_start": window_start, "window_end": window_end},
+                 "window_start": window_start, "window_end": window_end,
+                 "reported_facts": json.dumps(facts, ensure_ascii=False)},
             )
             connection.execute(
                 text("""

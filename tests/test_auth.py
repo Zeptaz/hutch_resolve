@@ -75,6 +75,48 @@ class MemoryAccountProvider:
         }
 
 
+class MemoryCaseFacade:
+    def get_case(self, context, case_id):
+        return {
+            "id": case_id,
+            "conversation_id": UUID(int=100),
+            "account_id": context.account_id,
+            "complaint_type": "BALANCE_RECHARGE",
+            "status": "OPEN",
+            "review_status": "NEW",
+            "version": 1,
+            "created_at": datetime.now(UTC),
+            "updated_at": datetime.now(UTC),
+            "investigation": None,
+            "operation_ids": [],
+            "receipt": None,
+            "simulation": True,
+        }
+
+    def investigate(self, context, **kwargs):
+        self.context = context
+        self.kwargs = kwargs
+        return {
+            "id": UUID(int=200),
+            "case_id": kwargs["case_id"],
+            "revision": 1,
+            "complaint_type": kwargs["complaint_type"],
+            "window_start": kwargs["window_start"],
+            "window_end": kwargs["window_end"],
+            "evidence_state": "SUFFICIENT",
+            "findings": [],
+            "calculations": [],
+            "evidence": [],
+            "source_status": [],
+            "missing": [],
+            "conflicts": [],
+            "eligible_actions": [],
+            "review_reasons": [],
+            "created_at": datetime.now(UTC),
+            "simulation": True,
+        }
+
+
 def build_client() -> tuple[TestClient, MemoryAuthStore]:
     store = MemoryAuthStore()
     settings = Settings(
@@ -99,7 +141,7 @@ def build_client() -> tuple[TestClient, MemoryAuthStore]:
             ),
         },
     )
-    return TestClient(create_app(Probe(), settings, store, MemoryAccountProvider())), store
+    return TestClient(create_app(Probe(), settings, store, MemoryAccountProvider(), MemoryCaseFacade())), store
 
 
 def test_anonymous_session_requires_exact_origin_and_returns_csrf_cookie():
@@ -218,3 +260,48 @@ def test_account_read_uses_server_scoped_session_and_rejects_guest():
         assert account.status_code == 200
         assert account.json()["id"] == str(ACCOUNT_ID)
         assert account.json()["line_alias"] == "SIM-LK-0001"
+
+
+def test_case_routes_use_auth_context_and_forward_stable_command_key():
+    client, _ = build_client()
+    with client:
+        guest = client.post("/api/v1/sessions/anonymous", json={}, headers={"Origin": ORIGIN})
+        case_id = UUID(int=123)
+        denied = client.post(
+            f"/api/v1/cases/{case_id}/investigations",
+            json={
+                "expected_version": 1,
+                "complaint_type": "BALANCE_RECHARGE",
+                "window_start": "2026-10-02T08:00:00+05:30",
+                "window_end": "2026-10-02T12:00:00+05:30",
+                "reported_facts": {},
+            },
+            headers={"Origin": ORIGIN, "Idempotency-Key": "turn-command-1"},
+        )
+        assert guest.status_code == 201
+        assert denied.status_code == 403
+
+        login = client.post(
+            "/api/v1/demo/sessions",
+            json={"demo_identity": "customer", "credential": "customer-pass"},
+            headers={"Origin": ORIGIN, "X-CSRF-Token": guest.json()["csrf_token"]},
+        )
+        detail = client.get(f"/api/v1/cases/{case_id}")
+        assert detail.status_code == 200
+        assert detail.json()["account_id"] == str(ACCOUNT_ID)
+
+        investigation = client.post(
+            f"/api/v1/cases/{case_id}/investigations",
+            json={
+                "expected_version": 1,
+                "complaint_type": "BALANCE_RECHARGE",
+                "window_start": "2026-10-02T08:00:00+05:30",
+                "window_end": "2026-10-02T12:00:00+05:30",
+                "reported_facts": {},
+            },
+            headers={"Origin": ORIGIN, "Idempotency-Key": "turn-command-1"},
+        )
+        assert login.status_code == 200
+        assert investigation.status_code == 200, investigation.text
+        assert client.app.state.resolve_facade.kwargs["command_key"] == "turn-command-1"
+        assert client.app.state.resolve_facade.context.account_id == ACCOUNT_ID

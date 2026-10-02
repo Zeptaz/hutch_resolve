@@ -115,6 +115,12 @@ def authenticated_context(
     )
 
 
+def authenticated_context_any_role(request: Request, allowed_roles: set[str]) -> AuthContext:
+    if AGENT_COOKIE in request.cookies:
+        return authenticated_context(request, cookie_name=AGENT_COOKIE, allowed_roles=allowed_roles)
+    return authenticated_context(request, cookie_name=CUSTOMER_COOKIE, allowed_roles=allowed_roles)
+
+
 def _view(row: dict[str, Any], csrf_token: str) -> dict[str, Any]:
     result: dict[str, Any] = {
         "id": str(row["id"]),

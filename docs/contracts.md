@@ -1,6 +1,6 @@
 # Shared implementation contracts v1.0.0
 
-**Mixed implementation status.** Resolve currently implements health/readiness, session lifecycle, a customer-scoped account read, and an in-process facade for conversation/case creation, scoped case reads and persisted A/D ledger investigations. Other listed operations remain proposed in [OpenAPI 3.1](contracts/openapi.json). Existing external Voice interfaces are implemented but have known streaming failures. [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
+**Mixed implementation status.** Resolve currently implements health/readiness, session lifecycle, customer-scoped account reads, public scoped case reads/investigation routes, and an in-process facade for conversation/case creation and persisted A/D ledger investigations. Proposal/confirmation, operation, receipt, review and conversation routes remain proposed in [OpenAPI 3.1](contracts/openapi.json). Existing external Voice interfaces are implemented but have known streaming failures. [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
 
 ## Ownership and connections
 

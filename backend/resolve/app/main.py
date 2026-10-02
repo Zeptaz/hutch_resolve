@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from .account_api import build_account_router
 from .auth import ResolveError, build_auth_router
+from .case_api import build_case_router
 from .config import Settings
 from .database import Database
 from backend.resolve.services.facade import ResolveFacade
@@ -70,6 +71,7 @@ def create_app(
     )
     application.include_router(build_auth_router())
     application.include_router(build_account_router())
+    application.include_router(build_case_router())
 
     @application.middleware("http")
     async def request_id_middleware(request: Request, call_next):

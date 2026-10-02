@@ -16,7 +16,7 @@ Start with [context.md](context.md), the agent-maintained source of truth, and t
 
 ## Start the backend foundation
 
-The starter exposes process liveness/readiness, anonymous/demo session lifecycle, and a customer-scoped `GET /api/v1/account`. An in-process facade supports conversation/case creation, scoped case reads and persisted A/D balance investigations for the conversation backend. Demo logins are disabled until `DEMO_IDENTITIES_JSON` is configured with credential hashes and fixed synthetic run/account IDs. Public conversation, action, receipt and dashboard routes are not implemented yet. Replace the `.env.example` application secret before starting the server; use `APP_COOKIE_SECURE=true` under HTTPS.
+The starter exposes process liveness/readiness, anonymous/demo session lifecycle, customer-scoped `GET /api/v1/account`, scoped `GET /api/v1/cases/{id}`, and idempotent `POST /api/v1/cases/{id}/investigations`. An in-process facade supports conversation/case creation for Tevin’s conversation controller. Demo logins are disabled until `DEMO_IDENTITIES_JSON` is configured with credential hashes and fixed synthetic run/account IDs. Public conversation, action, receipt and dashboard routes are not implemented yet. Replace the `.env.example` application secret before starting the server; use `APP_COOKIE_SECURE=true` under HTTPS.
 
 ```powershell
 python -m venv .venv
