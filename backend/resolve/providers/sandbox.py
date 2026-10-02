@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+import json
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -122,8 +123,36 @@ class BalanceProvider(Protocol):
 class PostgresSandboxProvider(AccountProvider, BalanceProvider):
     """One PostgreSQL adapter behind distinct in-process provider ports."""
 
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, fault_engine: Engine | None = None) -> None:
         self._engine = engine
+        # Fault profiles are operator/test controls. Consume them only through
+        # the explicitly configured sandbox writer; normal reads stay read-only.
+        self._fault_engine = fault_engine
+
+    def _take_fault(self, sandbox_id: UUID, account_id: UUID, provider: str,
+                    operation: str) -> dict[str, Any] | None:
+        if self._fault_engine is None:
+            return None
+        with self._engine.connect() as connection:
+            alias = connection.execute(text("""
+                SELECT line_alias FROM sandbox.accounts WHERE sandbox_id=:sandbox AND id=:account
+            """), {"sandbox": sandbox_id, "account": account_id}).scalar_one_or_none()
+        account_number = alias.rsplit("-", 1)[-1] if alias else ""
+        account_label = chr(ord("A") + int(account_number) - 1) if account_number.isdigit() and 1 <= int(account_number) <= 26 else ""
+        with self._fault_engine.begin() as connection:
+            row = connection.execute(text("""
+                SELECT id,fault_type,parameters FROM sandbox.fault_profiles
+                WHERE sandbox_id=:sandbox AND provider=:provider AND operation=:operation
+                  AND remaining_uses>0
+                  AND (selector='{}'::jsonb OR selector @> CAST(:selector AS jsonb))
+                ORDER BY (selector='{}'::jsonb),id LIMIT 1 FOR UPDATE SKIP LOCKED
+            """), {"sandbox": sandbox_id, "provider": provider, "operation": operation,
+                "selector": json.dumps({"account": account_label})}).mappings().one_or_none()
+            if row is None:
+                return None
+            connection.execute(text("UPDATE sandbox.fault_profiles SET remaining_uses=remaining_uses-1 WHERE id=:id"),
+                {"id": row["id"]})
+            return {"fault_type": row["fault_type"], "parameters": row["parameters"] or {}}
 
     def get_account(self, sandbox_id: UUID, account_id: UUID) -> dict[str, Any] | None:
         fetched_at = datetime.now(UTC)
@@ -274,10 +303,38 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
                 complete = False
             if _has_snapshot_sequence_conflict(parsed_snapshots):
                 warnings.append("DUPLICATE_SNAPSHOT_SEQUENCE")
+        fault = self._take_fault(sandbox_id, account_id, "charging", "statement")
+        if fault is not None:
+            parameters = fault["parameters"]
+            if fault["fault_type"] == "LATE_POSTING":
+                candidates = [item for item in postings if item.reference == parameters.get("reference")]
+                if not candidates:
+                    candidates = list(postings[-1:])
+                delayed = candidates[-1] if candidates else None
+                if delayed is not None:
+                    postings = tuple(item for item in postings if item.id != delayed.id)
+                    warnings.append("LATE_POSTING_NOT_YET_VISIBLE")
+                    complete = False
+            elif fault["fault_type"] == "DUPLICATE_POSTING":
+                reference = parameters.get("duplicate_reference")
+                original = next((item for item in postings if item.reference == reference), None)
+                if original is not None:
+                    postings = (*postings, replace(original, id=uuid4()))
+                    warnings.append("DUPLICATE_POSTING_OBSERVED")
+            elif fault["fault_type"] == "MISSING_OPENING_SNAPSHOT":
+                opening = None
+                warnings.append("OPENING_SNAPSHOT_MISSING")
+            elif fault["fault_type"] == "REVERSAL_MISMATCH":
+                original = next((item for item in postings if item.reference == parameters.get("original_reference")), None)
+                target = next((item for item in postings if item.posting_seq == parameters.get("posting_seq")), None)
+                if original is not None and target is not None:
+                    postings = tuple(replace(item, amount_minor=parameters["reversal_amount_minor"],
+                        kind="REVERSAL", reversal_of=original.id) if item.id == target.id else item for item in postings)
+                    warnings.append("SIMULATED_REVERSAL_MISMATCH")
         version = f"fixture-v{run}"
         if closing is not None:
             version += f":snapshot-seq-{closing.last_posting_seq}"
-        return LedgerStatement(opening, closing, postings, complete, tuple(warnings), version, fetched_at)
+        return LedgerStatement(opening, closing, postings, complete, tuple(dict.fromkeys(warnings)), version, fetched_at)
 
     def get_quota_statements(self, sandbox_id: UUID, account_id: UUID, window_start: datetime,
                              window_end: datetime) -> list[tuple[QuotaBucketStatement, tuple[QuotaUsage, ...]]]:

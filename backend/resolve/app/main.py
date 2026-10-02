@@ -18,6 +18,7 @@ from .case_api import build_case_router
 from .review_api import build_review_router
 from .config import Settings
 from .database import Database
+from backend.resolve.providers.sandbox import PostgresSandboxProvider
 from backend.resolve.services.facade import ResolveFacade
 from backend.resolve.services.operations import OperationRunner
 
@@ -66,8 +67,12 @@ def create_app(
         elif resolve_facade is None:
             logger.warning("Sandbox provider write URL is not configured; accepted operations will remain PENDING")
         sandbox_engine = sandbox_database.engine if sandbox_database is not None else None
+        provider = account_provider
+        if provider is None and hasattr(active_database, "engine"):
+            provider = PostgresSandboxProvider(active_database.engine, sandbox_engine)
+        application.state.account_provider = provider
         application.state.resolve_facade = resolve_facade or (
-            ResolveFacade(active_database.engine, cursor_secret=active_settings.app_secret_key) if hasattr(active_database, "engine") else None
+            ResolveFacade(active_database.engine, provider, cursor_secret=active_settings.app_secret_key) if hasattr(active_database, "engine") else None
         )
         application.state.operation_runner = None
         if sandbox_engine is not None and hasattr(active_database, "engine") and resolve_facade is None:

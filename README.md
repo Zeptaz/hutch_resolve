@@ -25,7 +25,7 @@ python -m pip install -r requirements-dev.txt
 python -m uvicorn backend.resolve.app.main:app --host 127.0.0.1 --port 8080
 ```
 
-The application reads `DATABASE_URL` and `SANDBOX_DATABASE_URL` from `.env`; Resolve uses `hutch_resolve_app` for business state and the provider adapter uses the separate `hutch_sandbox` role for synthetic writes. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0004_action_proposals`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003 without replaying CREATE TABLE statements, revisions 0002-0004 add lifecycle, immutable investigation, and proposal/confirmation persistence without replaying bootstrap DDL.
+The application reads `DATABASE_URL` and `SANDBOX_DATABASE_URL` from `.env`; Resolve uses `hutch_resolve_app` for business state and the separate `hutch_sandbox` role for synthetic writes and configured one-shot fault controls. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0005_review_ticket_sync`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003 without replaying CREATE TABLE statements, revisions 0002-0005 add lifecycle, immutable investigation, proposal/confirmation and review-sync persistence without replaying bootstrap DDL.
 
 Reset accepts an optional UUID: `scripts/reset.ps1 -RunId <uuid>`. Fixture IDs are deterministically derived under that run, so repeatable inputs produce repeatable records and different runs do not collide.
 

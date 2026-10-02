@@ -1,15 +1,16 @@
 """Opt-in: QUOTA_IT_DATABASE_URL must reference a disposable DB with migrated seed.sql fixtures."""
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4, uuid5
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 from backend.resolve.app.auth import AuthContext
 from backend.resolve.app.auth_store import AuthStore
 from backend.resolve.app.case_api import InvestigationView
-from backend.resolve.providers.sandbox import PostgresSandboxProvider, reconcile_quota, reconcile_recharge_records, reconcile_service_status
+from backend.resolve.providers.sandbox import PostgresSandboxProvider, reconcile_quota, reconcile_recharge_records, reconcile_service_status, reconcile_statement
 from backend.resolve.services.facade import ResolveFacade
 
 
@@ -166,3 +167,62 @@ def test_seeded_vas_without_activation_evidence_keeps_past_dispute_open_and_futu
         assert "past charges remain under investigation" in proposal["consequences"]
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("QUOTA_IT_DATABASE_URL") or not os.getenv("QUOTA_IT_SANDBOX_DATABASE_URL"),
+    reason="requires disposable PostgreSQL read and sandbox-writer URLs")
+def test_charging_fault_profiles_are_consumed_as_partial_or_conflicting_evidence():
+    read_engine = create_engine(os.environ["QUOTA_IT_DATABASE_URL"])
+    write_engine = create_engine(os.environ["QUOTA_IT_SANDBOX_DATABASE_URL"])
+    run_id = UUID(os.getenv("QUOTA_IT_RUN_ID", "11111111-1111-4111-8111-111111111111"))
+    try:
+        provider = PostgresSandboxProvider(read_engine, write_engine)
+        with read_engine.connect() as connection:
+            accounts = dict(connection.execute(text("""
+                SELECT line_alias,id FROM sandbox.accounts WHERE sandbox_id=:run
+            """), {"run": run_id}).all())
+        a_id = next(value for alias, value in accounts.items() if alias.endswith("-0001"))
+        d_id = next(value for alias, value in accounts.items() if alias.endswith("-0004"))
+        start = datetime.fromisoformat("2026-10-02T08:00:00+05:30")
+        end = datetime.fromisoformat("2026-10-02T12:00:00+05:30")
+
+        def apply_fault(account_id, account_label, fault_type, parameters):
+            selector = json.dumps({"account": account_label})
+            fault_id = uuid4()
+            with write_engine.begin() as connection:
+                connection.execute(text("""
+                    UPDATE sandbox.fault_profiles SET remaining_uses=0
+                    WHERE sandbox_id=:run AND provider='charging' AND operation='statement'
+                      AND (selector='{}'::jsonb OR selector @> CAST(:selector AS jsonb))
+                """), {"run": run_id, "selector": selector})
+                connection.execute(text("""
+                    INSERT INTO sandbox.fault_profiles(id,sandbox_id,provider,operation,selector,fault_type,parameters,remaining_uses)
+                    VALUES (:id,:run,'charging','statement',CAST(:selector AS jsonb),:fault,CAST(:parameters AS jsonb),1)
+                """), {"id": fault_id, "run": run_id, "selector": selector,
+                    "fault": fault_type, "parameters": json.dumps(parameters)})
+            statement = provider.get_statement(run_id, account_id, "MAIN", start, end)
+            with write_engine.connect() as connection:
+                remaining = connection.execute(text("""
+                    SELECT remaining_uses FROM sandbox.fault_profiles
+                    WHERE id=:id
+                """), {"id": fault_id}).scalar_one()
+            assert remaining == 0
+            return statement
+
+        late = apply_fault(a_id, "A", "LATE_POSTING", {"reference": "SYN-RECHARGE-A", "delay_seconds": 120})
+        assert "LATE_POSTING_NOT_YET_VISIBLE" in late.warnings
+        assert not late.complete
+        assert reconcile_statement(late)["evidence_state"] == "PARTIAL"
+        missing_opening = apply_fault(a_id, "A", "MISSING_OPENING_SNAPSHOT", {})
+        assert missing_opening.opening is None
+        assert reconcile_statement(missing_opening)["evidence_state"] == "PARTIAL"
+        duplicate = apply_fault(a_id, "A", "DUPLICATE_POSTING", {"duplicate_reference": "SYN-RECHARGE-A"})
+        assert reconcile_statement(duplicate)["evidence_state"] == "CONFLICTING"
+        reversal = apply_fault(d_id, "D", "REVERSAL_MISMATCH", {"original_reference": "SYN-RECHARGE-D",
+            "posting_seq": 4, "reversal_amount_minor": -99999})
+        result = reconcile_statement(reversal)
+        assert result["evidence_state"] == "CONFLICTING"
+        assert "POSTING_REVERSAL_MISMATCH" in result["conflicts"]
+    finally:
+        read_engine.dispose()
+        write_engine.dispose()

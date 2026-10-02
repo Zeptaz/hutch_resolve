@@ -94,5 +94,6 @@ INSERT INTO sandbox.fault_profiles(id,sandbox_id,provider,operation,selector,fau
  ('87000000-0000-0000-0000-000000000009','00000000-0000-0000-0000-000000000001','vas','deactivate','{}','DUPLICATE_CONFIRMATION','{}',1),
  ('87000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000001','vas','deactivate','{}','STALE_TARGET_VERSION','{}',1),
  ('87000000-0000-0000-0000-000000000011','00000000-0000-0000-0000-000000000001','operations','lookup','{}','LOOKUP_UNAVAILABLE','{}',1),
- ('87000000-0000-0000-0000-000000000012','00000000-0000-0000-0000-000000000001','charging','statement','{}','DUPLICATE_POSTING','{"duplicate_reference":"SYN-RECHARGE-A"}',1);
+ ('87000000-0000-0000-0000-000000000012','00000000-0000-0000-0000-000000000001','charging','statement','{"account":"A"}','DUPLICATE_POSTING','{"duplicate_reference":"SYN-RECHARGE-A"}',1),
+ ('87000000-0000-0000-0000-000000000013','00000000-0000-0000-0000-000000000001','charging','statement','{"account":"D"}','REVERSAL_MISMATCH','{"original_reference":"SYN-RECHARGE-D","posting_seq":4,"reversal_amount_minor":-99999}',1);
 COMMIT;

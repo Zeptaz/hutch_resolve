@@ -116,11 +116,11 @@ Verification for H-05: `python -m pytest -q` (32 passed; opt-in DB tests skipped
 - [x] H-06d BALANCE_RECHARGE includes account-scoped payment/fulfilment/credit records. A captured-but-pending seeded E payment is surfaced without attributing it as an account credit or advising a duplicate payment. Credit links are checked against amount and posting kind. Repeated snapshots at the same sequence are only conflicting when their amount/currency differ.
 - [x] H-06e VAS_DISPUTE now includes activation-evidence presence. Missing activation evidence is recorded as missing and never treated as consent; a future renewal-stop proposal can remain eligible from a fresh active recurring VAS target, with consequences stating past charges remain unresolved. Seeded F PostgreSQL test validates partial investigation plus proposal creation without confirmation or mutation.
 - [x] H-06f Money ledger validates each in-window reversal against its referenced original amount/currency and flags duplicate external posting references. Related original postings are read for verification but are not double-counted in the balance calculation. Unit tests and fresh B/C/E/F PostgreSQL matrix pass.
-- [ ] B extension: consume all seeded late/duplicate/reversal fault profiles through provider reads and ensure each presents correct delayed/duplicate treatment. Missing/incomplete source stays PARTIAL.
+- [x] B extension: the provider consumes the seeded one-shot late, duplicate and reversal-mismatch charging profiles only through the configured sandbox writer. Late visibility makes a statement incomplete, duplicate references conflict, and invalid reversal amounts conflict. Isolated PostgreSQL test verifies all three and profile consumption; missing opening evidence remains partial.
 - [ ] C: account/package/quota checks, supplied service checks and matching fresh incident; no invented ETA or healthy-service inference from an empty feed.
 - [ ] E: captured/pending fulfilment is not credited money; never suggest another recharge as recovery.
 - [ ] F: activation evidence missing; future deactivation and past dispute have separate outcomes.
-- [ ] Execute existing fault-profile configuration: late/duplicate posting, reversal, missing opening, partial page, stale source, wrong unit, CRM outage, rejected mutation, lost response and failed operation lookup. Expose control only through operator tooling/test fixtures.
+- [ ] Execute remaining fault-profile configuration: missing opening, partial page, stale source, wrong unit, CRM outage, rejected mutation, lost response and failed operation lookup. Fault selection is private to fixtures/operator tooling and is not exposed to customers.
 
 ## H-07/H-08: Voice integration and qualification
 
