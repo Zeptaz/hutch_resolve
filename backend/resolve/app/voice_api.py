@@ -363,7 +363,7 @@ def build_voice_router() -> APIRouter:
         del body
         response.headers["Cache-Control"] = "no-store"
         conversation_id = id
-        context = authenticated_customer_mutation(request, origin, csrf_header)
+        context = await asyncio.to_thread(authenticated_customer_mutation, request, origin, csrf_header)
         if origin not in _settings(request).app_origins:
             raise ResolveError(403, "ORIGIN_FORBIDDEN", "Request origin is not allowed")
         if context.sandbox_id is None or context.account_id is None:
