@@ -118,10 +118,11 @@ Verification for H-05: `python -m pytest -q` (32 passed; opt-in DB tests skipped
 - [x] H-06e VAS_DISPUTE now includes activation-evidence presence. Missing activation evidence is recorded as missing and never treated as consent; a future renewal-stop proposal can remain eligible from a fresh active recurring VAS target, with consequences stating past charges remain unresolved. Seeded F PostgreSQL test validates partial investigation plus proposal creation without confirmation or mutation.
 - [x] H-06f Money ledger validates each in-window reversal against its referenced original amount/currency and flags duplicate external posting references. Related original postings are read for verification but are not double-counted in the balance calculation. Unit tests and fresh B/C/E/F PostgreSQL matrix pass.
 - [x] B extension: the provider consumes the seeded one-shot late, duplicate and reversal-mismatch charging profiles only through the configured sandbox writer. Late visibility makes a statement incomplete, duplicate references conflict, and invalid reversal amounts conflict. Isolated PostgreSQL test verifies all three and profile consumption; missing opening evidence remains partial.
-- [ ] C: account/package/quota checks, supplied service checks and matching fresh incident; no invented ETA or healthy-service inference from an empty feed.
-- [ ] E: captured/pending fulfilment is not credited money; never suggest another recharge as recovery.
-- [ ] F: activation evidence missing; future deactivation and past dispute have separate outcomes.
-- [ ] Execute remaining fault-profile configuration: missing opening, partial page, stale source, wrong unit, CRM outage, rejected mutation, lost response and failed operation lookup. Fault selection is private to fixtures/operator tooling and is not exposed to customers.
+- [x] C: account/package/quota checks, supplied service checks and matching fresh incident; no invented ETA or healthy-service inference from an empty feed.
+- [x] E: captured/pending fulfilment is not credited money; never suggest another recharge as recovery.
+- [x] F: activation evidence missing; future deactivation and past dispute have separate outcomes.
+- [x] Usage fault profiles: incomplete page/stale source stay PARTIAL; wrong unit is retained with explicit unit evidence and CONFLICTING, never converted. One-shot consumption is verified.
+- [ ] Execute remaining action-profile configuration: CRM outage, rejected mutation, lost response and failed operation lookup. Fault selection is private to fixtures/operator tooling and is not exposed to customers.
 
 ## H-07/H-08: Voice integration and qualification
 
@@ -139,6 +140,7 @@ Existing Voice read timeout is eight seconds; conversation processing must retur
 
 - [ ] JSON logs with request/conversation/case/investigation/operation/Voice IDs, timings and error codes; redact credentials/transcripts/raw provider payloads. Capture model usage from Tevin and Voice duration/provider usage when available; never infer token counts.
 - [ ] Readiness checks DB/migration head; Voice/model outage degrades channel capability and does not mark deterministic text unavailable. Protected diagnostic metrics only; no extra observability service required.
+- [x] H-09a Safe HTTP request logs include request ID, method, route template, status, elapsed time and stable error code; tests confirm query/body/header values and exception messages are not logged.
 - [ ] Pytest covers reconciliation, permissions, provider faults, proposal/operation concurrency, restart and contracts. Coordinate Playwright with Jayith and dialogue tests with Tevin. Test both fresh setup and upgrade of the existing database.
 - [ ] Final README/configuration/dependency lock/demo access match the submitted commit; secrets shared separately. Confirm seven-day demo retention/cleanup and no audio recording.
 
@@ -155,5 +157,7 @@ Existing Voice read timeout is eight seconds; conversation processing must retur
 | 2026-10-02 | H-04a proposal/confirmation boundary | 17 tests pass; fresh isolated PostgreSQL migrated to revision 0004 and verified customer-scoped proposal/replay, accept/PENDING operation, confirmation replay, and duplicate accept rejection. HTTP test verifies CSRF and 202 response. | Provider operation runner/recovery, operation read, receipts, escalation delivery and action concurrency race test |
 | 2026-10-02 | H-04b execution/recovery/receipt | Separate sandbox writer and Resolve roles; isolated CRM outage and VAS committed-response-lost integrations recover to one ticket / one VAS mutation; receipt hash verifies. | Worker restart/concurrency, unresolved CRM outage, Voice confirmation, and broader provider faults |
 | 2026-10-02 | H-04c worker recovery/concurrent claim | Fresh disposable PostgreSQL migrated through `0005`; VAS provider commit followed by lost response was recovered after a fresh runner reclaimed an expired lease, yielding one mutation/event/receipt. Two concurrent runners claimed a CRM ticket action once; exactly one ticket, provider operation and receipt. Both integration tests passed; test volume removed. | Broader multi-process/restart stress, review-sync contention, remaining provider faults |
+| 2026-10-02 | H-09a HTTP request observability | Four middleware tests and four Resolve app tests pass; logs correlate validated request IDs and use route templates, while excluding body/header/query data and exception messages. | Provider/action correlation IDs and protected diagnostics |
+
 
 Work order and time boxes are in context.md. Harry owns the critical path; publish interfaces early and integrate one vertical text slice before secondary features.

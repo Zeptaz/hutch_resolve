@@ -226,3 +226,63 @@ def test_charging_fault_profiles_are_consumed_as_partial_or_conflicting_evidence
     finally:
         read_engine.dispose()
         write_engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("QUOTA_IT_DATABASE_URL") or not os.getenv("QUOTA_IT_SANDBOX_DATABASE_URL"),
+    reason="requires disposable PostgreSQL read and sandbox-writer URLs")
+def test_seeded_usage_fault_profiles_are_one_shot_and_never_sufficient_on_bad_evidence():
+    read_engine = create_engine(os.environ["QUOTA_IT_DATABASE_URL"])
+    write_engine = create_engine(os.environ["QUOTA_IT_SANDBOX_DATABASE_URL"])
+    run_id = UUID(os.getenv("QUOTA_IT_RUN_ID", "11111111-1111-4111-8111-111111111111"))
+    start = datetime.fromisoformat("2026-10-02T08:00:00+05:30")
+    end = datetime.fromisoformat("2026-10-02T12:00:00+05:30")
+    try:
+        provider = PostgresSandboxProvider(read_engine, write_engine)
+        with read_engine.connect() as connection:
+            account_id = connection.execute(text("""
+                SELECT id FROM sandbox.accounts WHERE sandbox_id=:run AND line_alias LIKE '%-0002'
+            """), {"run": run_id}).scalar_one()
+            profiles = dict(connection.execute(text("""
+                SELECT fault_type,id FROM sandbox.fault_profiles
+                WHERE sandbox_id=:run AND provider='usage' AND operation='list_usage'
+            """), {"run": run_id}).all())
+        assert {"INCOMPLETE_PAGE", "STALE_SOURCE", "WRONG_UNIT"} <= profiles.keys()
+
+        expected = {
+            "INCOMPLETE_PAGE": ("PARTIAL", "QUOTA_SOURCE_INCOMPLETE"),
+            "STALE_SOURCE": ("PARTIAL", "QUOTA_SOURCE_INCOMPLETE"),
+            "WRONG_UNIT": ("CONFLICTING", "USAGE_UNIT_MISMATCH"),
+        }
+        for fault_type, (expected_state, marker) in expected.items():
+            with write_engine.begin() as connection:
+                connection.execute(text("""
+                    UPDATE sandbox.fault_profiles SET remaining_uses=0
+                    WHERE sandbox_id=:run AND provider='usage' AND operation='list_usage'
+                """), {"run": run_id})
+                connection.execute(text("UPDATE sandbox.fault_profiles SET remaining_uses=1 WHERE id=:id"),
+                    {"id": profiles[fault_type]})
+
+            first_statement, first_usage = provider.get_quota_statements(run_id, account_id, start, end)[0]
+            first = reconcile_quota(first_statement, first_usage, fetched_at=datetime.now(UTC))
+            assert first["evidence_state"] == expected_state
+            assert marker in (first["missing"] if expected_state == "PARTIAL" else first["conflicts"])
+            if fault_type == "INCOMPLETE_PAGE":
+                assert ":usage-incomplete-page-page-2" in first_statement.source_version
+            elif fault_type == "STALE_SOURCE":
+                assert ":usage-stale-600s" in first_statement.source_version
+            else:
+                usage_evidence = [item for item in first["evidence"] if item["source"] == "USAGE_RECORDS"]
+                assert usage_evidence and all(item["unit"] == "KB" for item in usage_evidence)
+                assert all(item["source_payload"]["unit_matches_contract"] is False for item in usage_evidence)
+
+            with write_engine.connect() as connection:
+                remaining = connection.execute(text("SELECT remaining_uses FROM sandbox.fault_profiles WHERE id=:id"),
+                    {"id": profiles[fault_type]}).scalar_one()
+            assert remaining == 0
+
+            clean_statement, clean_usage = provider.get_quota_statements(run_id, account_id, start, end)[0]
+            clean = reconcile_quota(clean_statement, clean_usage, fetched_at=datetime.now(UTC))
+            assert clean["evidence_state"] == "SUFFICIENT"
+    finally:
+        read_engine.dispose()
+        write_engine.dispose()

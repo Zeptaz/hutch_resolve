@@ -62,6 +62,7 @@ class QuotaUsage:
     charge_entry_id: UUID | None
     interval_start: datetime
     interval_end: datetime
+    unit: str = "BYTES"
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,6 +355,7 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
                 bucket_page_complete = False
             else:
                 bucket_page_complete = True
+            usage_fault = self._take_fault(sandbox_id, account_id, "usage", "list_usage") if buckets else None
             output: list[tuple[QuotaBucketStatement, tuple[QuotaUsage, ...]]] = []
             for bucket in buckets:
                 opening = connection.execute(text("""
@@ -394,12 +396,26 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
                     "end": closing["as_of"] if closing else window_end}).mappings().all()
                 complete = bucket_page_complete and len(entries) <= 500 and len(usage_rows) <= 500
                 source_version = f"fixture-v{fixture}:bucket-{bucket['id']}:snapshot-{closing['last_quota_seq'] if closing else 'missing'}"
+                parsed_usage = [QuotaUsage(**row) for row in usage_rows[:500]]
+                if usage_fault is not None:
+                    fault_type = usage_fault["fault_type"]
+                    parameters = usage_fault["parameters"]
+                    if fault_type == "INCOMPLETE_PAGE":
+                        complete = False
+                        source_version += f":usage-incomplete-page-{parameters.get('next_cursor', 'unknown')}"
+                    elif fault_type == "STALE_SOURCE":
+                        complete = False
+                        source_version += f":usage-stale-{parameters.get('age_seconds', 'unknown')}s"
+                    elif fault_type == "WRONG_UNIT":
+                        source_unit = str(parameters.get("source_unit", "UNKNOWN")).upper()
+                        parsed_usage = [replace(record, unit=source_unit) for record in parsed_usage]
+                        source_version += f":usage-unit-{source_unit}-reported-{str(parameters.get('reported_unit', 'UNKNOWN')).upper()}"
                 statement = QuotaBucketStatement(bucket["id"], bucket["bucket_kind"], bucket["valid_from"], bucket["valid_to"],
                     opening["remaining_bytes"] if opening else None, opening["last_quota_seq"] if opening else None,
                     closing["remaining_bytes"] if closing else None, closing["last_quota_seq"] if closing else None,
                     closing["as_of"] if closing else None,
                     tuple(QuotaEntry(**row) for row in entries[:500]), complete, source_version)
-                usages = tuple(QuotaUsage(**row) for row in usage_rows[:500])
+                usages = tuple(parsed_usage)
                 output.append((statement, usages))
         return output
 
@@ -735,6 +751,8 @@ def reconcile_quota(statement: QuotaBucketStatement, usage: tuple[QuotaUsage, ..
         if record.usage_kind != "IN_BUNDLE":
             conflicts.append("UNKNOWN_USAGE_KIND")
             continue
+        if record.unit != "BYTES":
+            conflicts.append("USAGE_UNIT_MISMATCH")
         if record.bucket_id != statement.bucket_id:
             conflicts.append("USAGE_BUCKET_MISMATCH")
             continue
@@ -742,9 +760,10 @@ def reconcile_quota(statement: QuotaBucketStatement, usage: tuple[QuotaUsage, ..
             conflicts.append("DUPLICATE_USAGE_RECORD")
         usage_by_id[record.id] = record
         observed_usage += record.bytes
-        evidence_id = add_evidence(record.id, record.interval_end, record.bytes, "BYTES",
+        evidence_id = add_evidence(record.id, record.interval_end, record.bytes, record.unit,
             {"usage_kind": record.usage_kind, "interval_start": record.interval_start.isoformat(),
-             "interval_end": record.interval_end.isoformat(), "bucket_id": str(record.bucket_id)})
+             "interval_end": record.interval_end.isoformat(), "bucket_id": str(record.bucket_id),
+             "reported_unit": "BYTES", "unit_matches_contract": record.unit == "BYTES"})
         usage_terms.append({"evidence_id": evidence_id, "label": "IN_BUNDLE_USAGE", "value": record.bytes})
     for entry in entries:
         if entry.entry_kind != "CONSUME" or entry.usage_record_id is None:

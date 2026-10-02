@@ -4,7 +4,7 @@ import logging
 import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Protocol
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -18,6 +18,7 @@ from .case_api import build_case_router
 from .review_api import build_review_router
 from .config import Settings
 from .database import Database
+from .observability import create_request_middleware
 from backend.resolve.providers.sandbox import PostgresSandboxProvider
 from backend.resolve.services.facade import ResolveFacade
 from backend.resolve.services.operations import OperationRunner
@@ -104,19 +105,11 @@ def create_app(
     application.include_router(build_action_router())
     application.include_router(build_review_router())
 
-    @application.middleware("http")
-    async def request_id_middleware(request: Request, call_next):
-        try:
-            request_id = str(UUID(request.headers.get("X-Request-Id", "")))
-        except ValueError:
-            request_id = str(uuid4())
-        request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers["X-Request-Id"] = request_id
-        return response
+    application.middleware("http")(create_request_middleware(logging.getLogger("hutch_resolve.http")))
 
     @application.exception_handler(ResolveError)
     async def resolve_error_handler(request: Request, exc: ResolveError) -> JSONResponse:
+        request.state.error_code = exc.code
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {
@@ -131,6 +124,7 @@ def create_app(
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         del exc
+        request.state.error_code = "VALIDATION_ERROR"
         request_id = getattr(request.state, "request_id", str(uuid4()))
         return JSONResponse(
             status_code=422,
