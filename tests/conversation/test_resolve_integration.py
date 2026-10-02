@@ -46,7 +46,8 @@ def harry_real():
     from backend.resolve.services.facade import ResolveFacade
 
     app_engine, sandbox_engine = create_engine(DB_URL), create_engine(SANDBOX_URL)
-    yield ResolveFacade(app_engine, provider_engine=sandbox_engine), AuthStore(app_engine)
+    # Mirrors Harry's app wiring (ResolveDev 9ab23d9): the facade reads sandbox data with the app engine.
+    yield ResolveFacade(app_engine, cursor_secret=b"integration-test-cursor-secret-0123"), AuthStore(app_engine)
     app_engine.dispose()
     sandbox_engine.dispose()
 
@@ -67,7 +68,7 @@ def dummy_journey(account_id: UUID):
     from resolve.conversation import ConversationService
 
     ctx = customer(account_id).model_copy(update={"sandbox_id": SANDBOX})
-    names = {ACCOUNT_A: "A", ACCOUNT_D: "D"}
+    names = {ACCOUNT_A: "A", ACCOUNT_D: "D", ACCOUNT_B: "B", ACCOUNT_C: "C", ACCOUNT_E: "E", ACCOUNT_F: "F"}
     facade = FakeResolveFacade(lambda: datetime.now(UTC), {account_id: names[account_id]}, strict_complaints=True)
     repo = FakeConversationRepository(lambda: datetime.now(UTC))
     conversation_id = repo.create(ctx)
@@ -181,15 +182,38 @@ def test_vas_dispute_offers_resolve_listed_choices(harry) -> None:
 
 
 def test_data_complaint_on_a_line_without_data_issue(harry) -> None:
-    """KNOWN DIFFERENCE until Harry's H-06: the dummy answers, the real facade refuses."""
-    from resolve.conversation.errors import ResolveError
-
+    """Both backends now answer a data complaint (Harry's H-06 landed); neither errors or shows codes."""
     ctx, conv, repo, service, _ = journey(harry, ACCOUNT_A)
+    result = send(service, repo, ctx, conv, details("DATA_DEPLETION"))
+    assert result.case_id is not None and result.reply_text
     if is_dummy(harry):
-        result = send(service, repo, ctx, conv, details("DATA_DEPLETION"))
         assert "found nothing unusual" in result.reply_text
-        return
-    with pytest.raises(ResolveError) as err:
-        send(service, repo, ctx, conv, details("DATA_DEPLETION"))
-    assert err.value.code == "ACTION_NOT_ALLOWED"  # Harry: "not implemented yet" (H-06)
-    assert repo.conversations[conv].claim is None  # claim released; the customer can retry
+
+
+ACCOUNT_B = UUID("20000000-0000-0000-0000-000000000002")
+ACCOUNT_C = UUID("20000000-0000-0000-0000-000000000003")
+ACCOUNT_E = UUID("20000000-0000-0000-0000-000000000005")
+ACCOUNT_F = UUID("20000000-0000-0000-0000-000000000006")
+
+
+@pytest.mark.parametrize(("account", "complaint"), [
+    (ACCOUNT_B, "DATA_DEPLETION"), (ACCOUNT_C, "CONNECTIVITY"), (ACCOUNT_E, "BALANCE_RECHARGE"), (ACCOUNT_F, "VAS_DISPUTE"),
+])
+def test_secondary_cases_answer_safely_from_records(harry, account, complaint) -> None:
+    """B/C/E/F: safe behaviour from the records, checked without depending on Resolve's exact wording."""
+    ctx, conv, repo, service, _ = journey(harry, account)
+    result = send(service, repo, ctx, conv, details(complaint))
+    import re
+
+    assert not re.search(r"\b[A-Z]+(?:_[A-Z]+)+\b", result.reply_text)  # raw codes never reach the customer
+    reply = result.reply_text.lower()
+    if complaint == "DATA_DEPLETION":
+        assert any(card.type == "calculation" for card in result.cards)
+    if complaint == "CONNECTIVITY":
+        for invented in ("will be restored", "restored by", "will be fixed", "within"):
+            assert invented not in reply
+    if complaint == "BALANCE_RECHARGE":
+        assert "another payment" in reply or "pay again" in reply  # payment is not credit (E)
+    if complaint == "VAS_DISPUTE":
+        choices = {c.action_type.value for c in repo.conversations[conv].state.pending_choices}
+        assert result.pending_question.code == "CHOOSE_ACTION" and "DEACTIVATE_VAS" in choices

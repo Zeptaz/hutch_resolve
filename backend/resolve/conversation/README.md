@@ -63,7 +63,7 @@ The fingerprint covers channel, language, input and Voice evidence, but **not** 
 
 ## Integration with Harry's facade
 
-`ResolveFacadeAdapter(ResolveFacade(app_engine, provider_engine=sandbox_engine))` is what the conversation service receives in the real app. Known deviations it absorbs or exposes are listed in `docs/plans/tevin.md` ("Integration findings").
+`ResolveFacadeAdapter(ResolveFacade(app_engine, cursor_secret=...))` is what the conversation service receives in the real app. Known deviations it absorbs or exposes are listed in `docs/plans/tevin.md` ("Integration findings").
 
 ```bash
 PYTHON=~/.venvs/hutch/bin/python sh tests/conversation/run_integration.sh
@@ -78,7 +78,7 @@ This starts a **throwaway** PostgreSQL on port 55433 (never the shared container
 | `RESOLVE_BACKEND` | Resolve answers come from |
 | --- | --- |
 | `dummy` (default) | `tests/conversation/fakes.py`: contract examples for A/D, stand-ins for B/C/E/F, each line answering only its own complaint; simulated operation success and receipts |
-| `hybrid` | Harry's real facade (adapter) for balance and VAS complaints, offers, confirmations, his `OperationRunner` and receipts; the dummy for data and connection until H-06. Needs `sh tests/conversation/hybrid_db.sh start` (throwaway DB) |
+| `hybrid` | Harry's real facade (adapter) for all four complaint types, offers, confirmations, his `OperationRunner` and receipts. Only turn storage and sign-in are dev stand-ins. Needs `sh tests/conversation/hybrid_db.sh start` (throwaway DB). Pick a line at `/api/v1/dev`: Harry's fixtures hold one problem per line |
 | `real` | Not available until Harry ships turn storage and the conversation routes |
 
 Start `dev-backend` and `frontend-live`, then just open **http://localhost:5174** and talk. In dummy mode you are one demo customer whose records hold every problem: an extra deduction gets A's breakdown, a missing reload E, data B, connection C, an unknown service F. This is a simulation shortcut, not evidence. The chat opens with suggestion chips (`opening_question`), and replies follow the language you write in. To test one specific line (e.g. D's conflict), open http://localhost:5174/api/v1/dev. The same journeys run against the dummy and the real facade in `test_resolve_integration.py`; a pass on both is what keeps the dummy honest.

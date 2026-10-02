@@ -146,6 +146,20 @@ class MemoryCaseFacade:
                 "evidence_references": [], "missing": [], "conflicts": [], "actions": [], "handoff": None,
                 "next_step": "A human agent should review this case.", "simulation": True, "digest_sha256": "a" * 64}
 
+    def list_agent_cases(self, context, **kwargs):
+        self.agent_context = context
+        return {"items": [], "next_cursor": None}
+
+    def agent_case_detail(self, context, case_id):
+        return {"case": {}, "account": {}, "conversation": {}, "investigations": [], "proposals": [],
+                "confirmations": [], "operations": [], "receipts": [], "handoff": None, "review_notes": [], "audit_events": []}
+
+    def update_review(self, context, **kwargs):
+        now = datetime.now(UTC)
+        return {"case_id": kwargs["case_id"], "version": kwargs["expected_version"] + 1,
+                "review_status": kwargs["review_status"] or "NEW", "disposition": kwargs["disposition"],
+                "note": None, "review_sync_state": "NOT_APPLICABLE", "updated_at": now}
+
 
 def build_client() -> tuple[TestClient, MemoryAuthStore]:
     store = MemoryAuthStore()
@@ -364,4 +378,27 @@ def test_action_routes_require_customer_origin_csrf_and_return_pending_acceptanc
         assert receipt.json()["simulation"] is True
         no_csrf = client.post(f"/api/v1/action-proposals/{proposal.json()['id']}/confirmations", json=confirm_body,
                               headers={"Origin": ORIGIN})
+        assert no_csrf.status_code == 403
+
+
+def test_agent_review_routes_require_agent_session_and_csrf_on_mutation():
+    client, _ = build_client()
+    with client:
+        customer = client.post("/api/v1/demo/sessions", json={"demo_identity": "customer", "credential": "customer-pass"},
+                               headers={"Origin": ORIGIN})
+        assert customer.status_code == 200
+        assert client.get("/api/v1/agent/cases").status_code == 401
+        logged = client.post("/api/v1/agent/sessions", json={"demo_identity": "agent", "credential": "agent-pass"},
+                             headers={"Origin": ORIGIN})
+        assert logged.status_code == 200
+        queue = client.get("/api/v1/agent/cases?limit=10")
+        case_id = UUID(int=123)
+        assert queue.status_code == 200 and queue.json() == {"items": [], "next_cursor": None}
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": logged.json()["csrf_token"], "Idempotency-Key": str(UUID(int=501))}
+        update = client.patch(f"/api/v1/agent/cases/{case_id}/review",
+            json={"expected_version": 1, "review_status": "IN_REVIEW", "note": "Checked evidence."}, headers=headers)
+        assert update.status_code == 200, update.text
+        assert update.json()["review_status"] == "IN_REVIEW"
+        no_csrf = client.patch(f"/api/v1/agent/cases/{case_id}/review",
+            json={"expected_version": 1, "review_status": "IN_REVIEW"}, headers={"Origin": ORIGIN, "Idempotency-Key": str(UUID(int=502))})
         assert no_csrf.status_code == 403

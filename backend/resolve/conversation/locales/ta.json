@@ -80,7 +80,20 @@
    "opening_balance": "தொடக்க பேலன்ஸ்",
    "closing_balance": "சமீபத்திய பேலன்ஸ்",
    "activation_evidence": "சேவை செயல்படுத்தப்பட்டதற்கான சான்று",
-   "usage_category": "பயன்பாட்டின் வகை"
+   "usage_category": "பயன்பாட்டின் வகை",
+   "OPENING_SNAPSHOT_MISSING": "தொடக்க பேலன்ஸ்",
+   "CLOSING_SNAPSHOT_MISSING": "சமீபத்திய பேலன்ஸ்",
+   "QUOTA_OPENING_SNAPSHOT_MISSING": "தொடக்க டேட்டா இருப்பு",
+   "QUOTA_CLOSING_SNAPSHOT_MISSING": "சமீபத்திய டேட்டா இருப்பு",
+   "QUOTA_BUCKETS_MISSING": "உங்கள் டேட்டா பேக்கேஜ் பதிவுகள்",
+   "CONSUMPTION_USAGE_RECORD_MISSING": "சில டேட்டா பயன்பாட்டுப் பதிவுகள்",
+   "USAGE_CONSUMPTION_ENTRY_MISSING": "சில டேட்டா பயன்பாட்டுப் பதிவுகள்",
+   "FRESH_SERVICE_CHECK_MISSING": "உங்கள் லைனுக்கான சமீபத்திய நெட்வொர்க் சோதனை",
+   "RECHARGE_RECORD_MISSING": "ரீசார்ஜ் பதிவு",
+   "VAS_ACTIVATION_EVIDENCE_MISSING": "சேவை செயல்படுத்தப்பட்டதற்கான சான்று",
+   "POSTING_REVERSAL_ORIGINAL_MISSING": "திருப்பப்பட்ட கட்டணத்தின் மூலப் பதிவு",
+   "QUOTA_REVERSAL_ORIGINAL_MISSING": "திருப்பப்பட்ட டேட்டா பதிவின் மூலப் பதிவு",
+   "unknown": "சில பதிவுகள்"
   },
   "delivery": {
    "PENDING": "மதிப்பாய்வுக் குழுவிற்கு அனுப்புதல் இன்னும் நிலுவையில் உள்ளது; டிக்கெட் எண் இன்னும் வழங்கப்படவில்லை.",

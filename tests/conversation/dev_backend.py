@@ -8,9 +8,9 @@ Jayith's chat calls in live mode, using Tevin's real ConversationService and rea
 
 dummy   All Resolve answers come from tests/conversation/fakes.py: contract examples for A/D,
         stand-ins for B/C/E/F, simulated operation success and receipts.
-hybrid  Harry's real ResolveFacade (adapter) for balance and VAS complaints, offers,
-        confirmations, operations (his OperationRunner) and receipts; dummy for
-        DATA_DEPLETION/CONNECTIVITY until his H-06. Needs a migrated database:
+hybrid  Harry's real ResolveFacade (adapter) for all four complaint types (his H-06 landed in
+        ResolveDev 9ab23d9), offers, confirmations, operations (his OperationRunner) and receipts;
+        only turn storage and sign-in are still dev stand-ins. Needs a migrated database:
         RESOLVE_DEV_DATABASE_URL / RESOLVE_DEV_SANDBOX_URL (use a throwaway one).
 real    Not available until Harry ships turn storage and the conversation routes.
 
@@ -83,7 +83,7 @@ MISSING_RECHARGE = re.compile(
     r"(not|n't|never)\b.{0,40}\b(credit|add|arriv|receiv|reflect|show|come|came|go through|went through)"
     r"|\b(missing|pending|didn't get|did not get)\b", re.IGNORECASE)
 DUMMY_SIMULATED_SUCCESS_AFTER = timedelta(seconds=4)
-HARRY_COMPLAINTS = {ComplaintType.BALANCE_RECHARGE, ComplaintType.VAS_DISPUTE}  # implemented on ResolveDev
+HARRY_COMPLAINTS = set(ComplaintType)  # all implemented on ResolveDev 9ab23d9 (H-06); keep the switch for regressions
 
 
 def real_now() -> datetime:
@@ -254,7 +254,7 @@ if MODE == "hybrid":
     if not (db_url and sandbox_url):
         sys.exit("hybrid needs RESOLVE_DEV_DATABASE_URL and RESOLVE_DEV_SANDBOX_URL (a throwaway migrated database)")
     app_engine, sandbox_engine = create_engine(db_url), create_engine(sandbox_url)
-    harry_facade = ResolveFacade(app_engine, provider_engine=sandbox_engine)
+    harry_facade = ResolveFacade(app_engine, cursor_secret=os.urandom(32))  # Harry's app wiring (9ab23d9)
     harry_store = AuthStore(app_engine)
     runner = OperationRunner(app_engine, sandbox_engine)
     facade = HybridFacade(ResolveFacadeAdapter(harry_facade), dummy)
@@ -382,7 +382,7 @@ async def dev_home(request: Request):
         for k, (alias, about) in LINES.items()
     )
     model = client.model_name if client else "none: free text falls back to forms"
-    source = ("Balance/VAS complaints use <b>Harry's real facade</b>; data/connection use the dummy."
+    source = ("All complaints use <b>Harry's real facade</b> (his records, offers, runner and receipts)."
               if MODE == "hybrid" else "All Resolve answers are dummy stand-ins.")
     demo = ('<p><a href="/api/v1/dev/line/DEMO"><b>Demo customer</b></a> (default): one customer whose records hold '
             'every problem; just describe yours in any language.</p><p>Or test one specific line:</p>'

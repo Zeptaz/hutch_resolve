@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -8,6 +8,7 @@ from backend.resolve.providers.sandbox import (
     LedgerPosting,
     LedgerSnapshot,
     LedgerStatement,
+    _has_snapshot_sequence_conflict,
     reconcile_statement,
 )
 
@@ -65,3 +66,35 @@ def test_unsafe_json_integer_is_rejected():
     unsafe_opening = replace(source.opening, amount_minor=9_007_199_254_740_992)
     with pytest.raises(ValueError, match="LEDGER_VALUE_OUT_OF_RANGE"):
         reconcile_statement(replace(source, opening=unsafe_opening))
+
+
+def test_repeated_snapshot_sequence_only_conflicts_when_values_disagree():
+    opening = LedgerSnapshot(UUID(int=11), 10_000, "LKR", NOW, 0)
+    repeated = LedgerSnapshot(UUID(int=12), 10_000, "LKR", NOW + timedelta(hours=1), 0)
+    different = LedgerSnapshot(UUID(int=13), 9_000, "LKR", NOW + timedelta(hours=2), 0)
+    assert not _has_snapshot_sequence_conflict([opening, repeated])
+    assert _has_snapshot_sequence_conflict([opening, different])
+
+
+def test_linked_reversal_is_counted_once_and_must_match_original():
+    original = LedgerPosting(UUID(int=30), 1, -1_000, "LKR", "USAGE_CHARGE", NOW, NOW, None, "charge-1")
+    reversal = LedgerPosting(UUID(int=31), 2, 1_000, "LKR", "REVERSAL", NOW, NOW, original.id, "reverse-1")
+    source = LedgerStatement(LedgerSnapshot(UUID(int=32), 10_000, "LKR", NOW - timedelta(hours=1), 0),
+        LedgerSnapshot(UUID(int=33), 10_000, "LKR", NOW, 2), (original, reversal), True, (), "v2", NOW)
+    result = reconcile_statement(source)
+    assert result["evidence_state"] == "SUFFICIENT"
+    assert result["calculations"][0]["expected"] == 10_000
+
+    bad = replace(source, postings=(original, replace(reversal, amount_minor=900)))
+    conflict = reconcile_statement(bad)
+    assert "POSTING_REVERSAL_MISMATCH" in conflict["conflicts"]
+
+
+def test_duplicate_external_posting_reference_is_conflicting():
+    rows = (LedgerPosting(UUID(int=40), 1, 10_000, "LKR", "RECHARGE", NOW, NOW, None, "same-reference"),
+        LedgerPosting(UUID(int=41), 2, -1_000, "LKR", "RECHARGE", NOW, NOW, None, "same-reference"))
+    source = LedgerStatement(LedgerSnapshot(UUID(int=42), 0, "LKR", NOW - timedelta(hours=1), 0),
+        LedgerSnapshot(UUID(int=43), 9_000, "LKR", NOW, 2), rows, True, (), "v2", NOW)
+    result = reconcile_statement(source)
+    assert result["evidence_state"] == "CONFLICTING"
+    assert "DUPLICATE_POSTING_REFERENCE" in result["conflicts"]

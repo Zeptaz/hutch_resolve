@@ -252,3 +252,18 @@ def test_history_shows_readable_text_for_buttons_and_forms(h) -> None:
     user_bodies = [m.body for m in h.repo.conversations[conv].messages if m.speaker == "USER"]
     assert user_bodies == ["Balance or recharge", "Balance or recharge: details sent", "Yes, go ahead."]
     assert not any("{" in body or "proposal" in body for body in user_bodies)
+
+
+def test_resolve_codes_are_never_shown_raw() -> None:
+    from fakes import example
+    from resolve.conversation.dto import InvestigationResult, Language
+    from resolve.conversation.service import _investigation_draft
+
+    inv = InvestigationResult.model_validate(example("partial_evidence")).model_copy(update={
+        "missing": ["OPENING_SNAPSHOT_MISSING", "VAS_ACTIVATION_EVIDENCE_MISSING", "SOMETHING_NEW_MISSING"],
+        "review_reasons": ["OPENING_SNAPSHOT_MISSING", "Stopping renewal does not decide the past charge."],
+    })
+    reply = _investigation_draft(inv, None, Language.EN).reply_text
+    assert "the starting balance, proof the service was activated, some records" in reply
+    assert "Stopping renewal does not decide the past charge." in reply
+    assert "_MISSING" not in reply and "SNAPSHOT" not in reply
