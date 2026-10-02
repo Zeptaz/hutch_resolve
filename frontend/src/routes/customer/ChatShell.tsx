@@ -3,7 +3,7 @@ import { Bot, FolderOpen, SendHorizontal } from 'lucide-react'
 import { newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
-import type { ConversationView, Decision, Language, OperationView, ProposalView, SessionView, TurnInput } from '@/api/types'
+import type { ComplaintType, ConversationView, Decision, Language, OperationView, ProposalView, SessionView, TurnInput } from '@/api/types'
 import { BrandMark } from '@/components/BrandMark'
 import { ErrorState, LoadingState } from '@/components/states'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -44,6 +44,8 @@ export function ChatShell({ session }: { session: SessionView }) {
   const [decisions, setDecisions] = useState<Record<string, ProposalState>>({})
   const [caseRefresh, setCaseRefresh] = useState(0)
   const [casesOpen, setCasesOpen] = useState(false)
+  // The category the customer last picked, so a follow-up details form starts on it.
+  const [lastCategory, setLastCategory] = useState<ComplaintType | null>(null)
   const createKey = useRef(newId())
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -151,6 +153,7 @@ export function ChatShell({ session }: { session: SessionView }) {
   }
 
   const answer = (input: TurnInput, label: string) => {
+    if (input.type === 'category_selection') setLastCategory(input.complaint_type)
     if (sending) return
     void sendTurn(input, label, newId())
   }
@@ -291,7 +294,13 @@ export function ChatShell({ session }: { session: SessionView }) {
                   {pending && !pendingShownInline && <div className="max-w-xl sm:ml-9">{renderProposal(pending)}</div>}
                   {conversation.pending_question && !sending && (
                     <div className="max-w-xl sm:ml-9">
-                      <QuestionPrompt question={conversation.pending_question} disabled={sending} onAnswer={answer} />
+                      <QuestionPrompt
+                        question={conversation.pending_question}
+                        defaultComplaint={lastCategory}
+                        activeCaseId={conversation.active_case_id}
+                        disabled={sending}
+                        onAnswer={answer}
+                      />
                     </div>
                   )}
                   {sending && <Typing />}

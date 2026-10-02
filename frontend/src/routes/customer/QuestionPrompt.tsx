@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Repeat, Signal, Smartphone, Wallet } from 'lucide-react'
-import type { ComplaintType, PendingQuestion, ReportedFacts, TurnInput } from '@/api/types'
+import { customerApi } from '@/api/endpoints'
+import type { CaseView, ComplaintType, PendingQuestion, ReportedFacts, TurnInput } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -23,13 +24,24 @@ export function QuestionPrompt({
   question,
   disabled,
   onAnswer,
+  defaultComplaint,
+  activeCaseId,
 }: {
   question: PendingQuestion
   disabled: boolean
   onAnswer: (input: TurnInput, label: string) => void
+  /** Category picked just before, used as the details form's starting value. */
+  defaultComplaint?: ComplaintType | null
+  activeCaseId?: string | null
 }) {
   const allowed = question.allowed_input_types
-  if (allowed.includes('complaint_details')) return <DetailsForm disabled={disabled} onAnswer={onAnswer} />
+  if (question.code === 'CHOOSE_ACTION' && activeCaseId) {
+    return <ActionChoice caseId={activeCaseId} disabled={disabled} onAnswer={onAnswer} />
+  }
+  if (allowed.includes('complaint_details')) {
+    const initial = defaultComplaint ?? 'BALANCE_RECHARGE'
+    return <DetailsForm key={initial} initialType={initial} disabled={disabled} onAnswer={onAnswer} />
+  }
   if (allowed.includes('category_selection')) {
     return (
       <div role="group" aria-label="Choose a category" className="flex flex-wrap gap-2">
@@ -53,13 +65,77 @@ export function QuestionPrompt({
   return null
 }
 
+const ACTION_CHOICE_LABEL: Record<string, string> = {
+  DEACTIVATE_VAS: 'Stop future renewals',
+  SEND_SETTINGS_INSTRUCTIONS: 'Send settings instructions',
+  CREATE_REVIEW_TICKET: 'Send to the review team',
+}
+
+/**
+ * Options when Resolve made more than one action eligible. The contract has no structured
+ * "choose action" input yet, so each option sends its wording as text; choosing only requests
+ * an offer — the customer still confirms it on the confirmation card.
+ */
+function ActionChoice({
+  caseId,
+  disabled,
+  onAnswer,
+}: {
+  caseId: string
+  disabled: boolean
+  onAnswer: (input: TurnInput, label: string) => void
+}) {
+  const [caseView, setCaseView] = useState<CaseView | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    customerApi
+      .getCase(caseId)
+      .then((c) => !cancelled && setCaseView(c))
+      .catch(() => {
+        /* fall back to typing an answer */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [caseId])
+
+  const actions = caseView?.investigation?.eligible_actions ?? []
+  if (actions.length === 0) return null
+  return (
+    <div role="group" aria-label="Choose what to do" className="flex flex-wrap gap-2">
+      {actions.map((a) => {
+        const text = `${ACTION_CHOICE_LABEL[a.action_type] ?? a.action_type} (${a.target_label})`
+        return (
+          <Button
+            key={`${a.action_type}-${a.target_id}`}
+            variant="outline"
+            disabled={disabled}
+            onClick={() => onAnswer({ type: 'text', text }, text)}
+            className="h-auto rounded-full py-1.5 whitespace-normal"
+          >
+            {text}
+          </Button>
+        )
+      })}
+    </div>
+  )
+}
+
 function toLocalInput(d: Date) {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-function DetailsForm({ disabled, onAnswer }: { disabled: boolean; onAnswer: (input: TurnInput, label: string) => void }) {
-  const [type, setType] = useState<ComplaintType>('BALANCE_RECHARGE')
+function DetailsForm({
+  initialType,
+  disabled,
+  onAnswer,
+}: {
+  initialType: ComplaintType
+  disabled: boolean
+  onAnswer: (input: TurnInput, label: string) => void
+}) {
+  const [type, setType] = useState<ComplaintType>(initialType)
   const [from, setFrom] = useState(() => toLocalInput(new Date(Date.now() - 6 * 3600 * 1000)))
   const [to, setTo] = useState(() => toLocalInput(new Date()))
   const [amount, setAmount] = useState('')

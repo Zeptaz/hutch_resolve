@@ -108,7 +108,9 @@ export function CasePanelBody({ conversation, refreshKey, disabled, onSelectCase
             <EvidenceBadge state={shown.investigation?.evidence_state} />
           </div>
           {shown.investigation && shown.investigation.missing.length > 0 && (
-            <p className="text-xs text-muted-foreground">Missing: {shown.investigation.missing.join('; ')}</p>
+            <p className="text-xs text-muted-foreground">
+              Not available yet: {shown.investigation.missing.map((m) => humanize(m).toLowerCase()).join('; ')}
+            </p>
           )}
           {shown.receipt ? (
             <ReceiptDownloadButton caseId={shown.id} />

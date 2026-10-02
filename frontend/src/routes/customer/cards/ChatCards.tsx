@@ -173,7 +173,9 @@ function FindingCard({ data }: { data: CardOf<'finding'>['data'] }) {
     <CardFrame icon={<Search />} title="What we found">
       <p>{data.text}</p>
       <p className="mt-2 text-xs text-muted-foreground">
-        Based on {data.evidence_ids.length} record{data.evidence_ids.length === 1 ? '' : 's'} from our systems.
+        {data.evidence_ids.length === 0
+          ? 'No matching record was found in our systems.'
+          : `Based on ${data.evidence_ids.length} record${data.evidence_ids.length === 1 ? '' : 's'} from our systems.`}
       </p>
     </CardFrame>
   )

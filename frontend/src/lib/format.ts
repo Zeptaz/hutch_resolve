@@ -28,7 +28,8 @@ export function formatLkr(minor: number) {
 
 /** Integer bytes → decimal GB, per the contract. */
 export function formatGb(bytes: number) {
-  return `${(bytes / 1e9).toLocaleString('en-LK', { maximumFractionDigits: 2 })} GB`
+  const sign = bytes < 0 ? '−' : ''
+  return `${sign}${(Math.abs(bytes) / 1e9).toLocaleString('en-LK', { maximumFractionDigits: 2 })} GB`
 }
 
 /** Format a calculation value according to its contract unit. */
