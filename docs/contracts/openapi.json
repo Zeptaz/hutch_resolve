@@ -3,7 +3,7 @@
   "info": {
     "title": "HUTCH Resolve planned API",
     "version": "1.0.0",
-    "description": "Shared Resolve wire contract v1.0.0. Implemented routes: health/readiness, session lifecycle, customer-scoped account read, scoped case read and case investigation. Conversation/case creation remains in the in-process facade. Proposal/confirmation, operation, receipt, review, and conversation routes remain planned; see docs/contracts.md and context.md for status."
+    "description": "Shared Resolve wire contract v1.0.0. Implemented routes include health/readiness, session lifecycle, customer account/case/investigation APIs, proposal/confirmation, operation/receipt, and agent queue/detail/review. Conversation/case creation remains in the in-process facade; conversation HTTP routes and mock-ticket review synchronization are pending. See docs/contracts.md and context.md for status."
   },
   "servers": [
     {
@@ -2957,7 +2957,7 @@
         ]
       }
     },
-    "/agent/cases/{id}": {
+    "/agent/cases/{case_id}": {
       "get": {
         "operationId": "get_agent_case",
         "summary": "get agent case",
@@ -3075,7 +3075,7 @@
         ]
       }
     },
-    "/agent/cases/{id}/review": {
+    "/agent/cases/{case_id}/review": {
       "patch": {
         "operationId": "update_review",
         "summary": "update review",

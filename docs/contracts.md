@@ -1,6 +1,6 @@
 # Shared implementation contracts v1.0.0
 
-**Mixed implementation status.** Resolve currently implements health/readiness, session lifecycle, customer-scoped account reads, public scoped case reads/investigation routes, and an in-process facade for conversation/case creation and persisted A/D ledger investigations. Customer action proposal/confirmation routes persist immutable decisions and accepted `PENDING` operations; mock-provider execution, operation polling and Trust Receipt reads are implemented; conversation controller and dashboard review APIs remain future work in [OpenAPI 3.1](contracts/openapi.json). Existing external Voice interfaces are implemented but have known streaming failures. [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
+**Mixed implementation status.** Resolve implements health/readiness, session lifecycle, customer-scoped account reads, public scoped case reads/investigation routes, and an in-process facade for conversation/case creation and persisted A/D ledger investigations. Customer action proposal/confirmation routes persist immutable decisions and accepted `PENDING` operations; mock-provider execution, operation polling and Trust Receipt reads are implemented. Agent queue/detail/versioned review APIs are implemented, with local append-only review and audit history. Review status synchronization to a mock ticket provider, the conversation controller and both frontends remain future work. See [OpenAPI 3.1](contracts/openapi.json). Existing external Voice interfaces are implemented but have known streaming failures. [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
 
 ## Ownership and connections
 
@@ -77,9 +77,9 @@ All paths use `/api/v1`; OpenAPI defines exact fields and response models. Sessi
 | GET /cases/{id}/receipt | Customer session or agent run scope, optional revision ->stored ReceiptView |
 | POST /conversations/{id}/voice-sessions | Empty JSON, server-derived scope/origin ->201 VoiceSessionGrant |
 | POST /integrations/voice/turns; /events | Existing signed Voice body ->strict Voice result/ack |
-| GET /agent/cases | Filters/search/cursor ->queue |
-| GET /agent/cases/{id} | Scoped ID ->AgentCaseDetail |
-| PATCH /agent/cases/{id}/review | Versioned review/note ->updated review/version |
+| GET /agent/cases | Implemented: filters, exact case/line alias search, signed cursor -> scoped queue |
+| GET /agent/cases/{id} | Implemented: sandbox-scoped AgentCaseDetail |
+| PATCH /agent/cases/{id}/review | Implemented: versioned/idempotent review and internal note; ticket synchronization pending |
 | GET /healthz; /readyz | Process/DB-migration readiness |
 
 Case creation is an internal facade operation invoked by conversation intake. Public FAQ cannot create account cases. Health routes are under `/api/v1` in Resolve; Voice retains existing `/healthz`.

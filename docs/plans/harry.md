@@ -97,13 +97,16 @@ Acceptance: decline/expiry/stale target/stale investigation write nothing; concu
 
 ## H-05: dashboard backend
 
-- [ ] Queue `GET /agent/cases` with review-status, complaint-type, evidence-state, delivery-state filters; case-ID or exact synthetic-line search; opaque cursor; newest update then ID ordering.
-- [ ] Detail endpoint returns synthetic identity, issue/window, relevant conversation, evidence revisions/source freshness, calculations/conflicts, proposal/confirmation/operation history, receipt revisions, ticket delivery and internal review notes.
-- [ ] Versioned PATCH appends a note and optionally changes review status. NEW -> IN_REVIEW -> CLOSED; CLOSED -> IN_REVIEW requires reopening reason. Closing requires a disposition and explanatory note. Notes-only patches increment case version. Return updated review record/version.
-- [ ] Keep customer case status, investigation state, operation state, provider ticket status and agent review disposition distinct. Closing a review does not alter evidence or account state.
-- [ ] Persist local review history and audit atomically. If a mock ticket exists, queue its status/note synchronization using a stable provider key derived from review event ID; show pending sync rather than claiming CRM success. This agent-only administrative update cannot trigger charging/product mutations.
+- [x] H-05a Queue `GET /agent/cases` with review-status, complaint-type, evidence-state, delivery-state filters; case-ID or exact synthetic-line search; HMAC-signed opaque cursor; newest update then ID ordering. Scope is fixed to the authenticated sandbox run.
+- [x] H-05a Agent case detail returns synthetic account identity, case and conversation, evidence/source status, investigations, action proposals/confirmations/operations, receipts, ticket-delivery state and internal review notes/audit history.
+- [x] H-05a Versioned PATCH appends a note and optionally changes review status. NEW -> IN_REVIEW -> CLOSED; CLOSED -> IN_REVIEW requires reopening reason. Closing requires a disposition and explanatory note. Notes-only patches increment case version. Stale writes fail; request replay is idempotent.
+- [x] H-05a Keep customer case status, investigation state, operation state, provider ticket delivery state and agent review disposition distinct. Closing a review does not alter evidence or account state.
+- [x] H-05a Persist local review history and audit atomically. Agent updates cannot trigger charging/product mutations.
+- [ ] H-05b If a mock ticket exists, queue its review-status/note synchronization using a stable provider key derived from review event ID; display pending sync until confirmed. Do not claim CRM success.
 
 Acceptance: customer/guest denied; wrong run denied; stale PATCH returns 409; simultaneous agents do not overwrite notes; review history survives restart; dashboard shows a pending handoff without needing CRM availability. No analytics/admin portal beyond this scope.
+
+Verification for H-05a: `python -m pytest -q` (18 passed), `python -m compileall -q backend`, `git diff --check`, and runtime OpenAPI generation show all three `/api/v1/agent/cases` routes. Isolated PostgreSQL service-level checks previously exercised queue pagination/tamper rejection, detail reads, review replay/conflict, close/reopen rules and audit persistence. The container engine is inaccessible in the current shell, so the post-typing-change detail response was not rechecked against a live PostgreSQL fixture in this turn. Ticket review synchronization remains unimplemented; do not mark H-05 complete yet.
 
 ## H-06: remaining complaint and fault paths
 

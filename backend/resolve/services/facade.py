@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -10,6 +11,7 @@ from sqlalchemy import Engine, text
 
 from backend.resolve.app.auth import AuthContext, ResolveError
 from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_statement
+from .review import AgentReviewService
 
 ALLOWED_LANGUAGES = {"en", "si", "ta"}
 ALLOWED_COMPLAINTS = {"BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE"}
@@ -49,9 +51,19 @@ class ResolveFacade:
     """Typed in-process boundary consumed by the conversation controller."""
 
     def __init__(self, engine: Engine, provider: BalanceProvider | AccountProvider | None = None,
-                 *, provider_engine: Engine | None = None) -> None:
+                 *, cursor_secret: bytes | None = None) -> None:
         self._engine = engine
-        self._provider = provider or PostgresSandboxProvider(provider_engine or engine)
+        self._provider = provider or PostgresSandboxProvider(engine)
+        self._review = AgentReviewService(engine, self._provider, cursor_secret or secrets.token_bytes(32))
+
+    def list_agent_cases(self, context: AuthContext, **kwargs: Any) -> dict[str, Any]:
+        return self._review.list_cases(context, **kwargs)
+
+    def agent_case_detail(self, context: AuthContext, case_id: UUID) -> dict[str, Any]:
+        return self._review.case_detail(context, case_id)
+
+    def update_review(self, context: AuthContext, **kwargs: Any) -> dict[str, Any]:
+        return self._review.update_review(context, **kwargs)
 
     def create_conversation(self, context: AuthContext, language: str = "en") -> dict[str, Any]:
         if context.role not in {"GUEST", "CUSTOMER"}:

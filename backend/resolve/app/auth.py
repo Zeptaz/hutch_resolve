@@ -133,6 +133,18 @@ def authenticated_customer_mutation(request: Request, origin: str | None, csrf_h
     return context
 
 
+def authenticated_agent_mutation(request: Request, origin: str | None, csrf_header: str | None) -> AuthContext:
+    context = authenticated_context(request, cookie_name=AGENT_COOKIE, allowed_roles={"AGENT"})
+    configured = request.app.state.settings
+    if origin is None or origin.rstrip("/") not in configured.app_origins:
+        raise ResolveError(403, "ORIGIN_FORBIDDEN", "Request origin is not allowed")
+    credential = request.cookies.get(AGENT_COOKIE, "")
+    expected = _csrf_token(configured.app_secret_key, credential)
+    if csrf_header is None or not hmac.compare_digest(expected, csrf_header):
+        raise ResolveError(403, "CSRF_INVALID", "A valid CSRF token is required")
+    return context
+
+
 def _view(row: dict[str, Any], csrf_token: str) -> dict[str, Any]:
     result: dict[str, Any] = {
         "id": str(row["id"]),
