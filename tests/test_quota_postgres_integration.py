@@ -128,3 +128,41 @@ def test_seeded_captured_recharge_pending_fulfilment_blocks_duplicate_payment_ad
         assert any(item.source == "RECHARGE_FULFILMENT" for item in view.evidence)
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("QUOTA_IT_DATABASE_URL"), reason="requires disposable seeded PostgreSQL")
+def test_seeded_vas_without_activation_evidence_keeps_past_dispute_open_and_future_stop_separate():
+    engine = create_engine(os.environ["QUOTA_IT_DATABASE_URL"])
+    run_id = UUID(os.getenv("QUOTA_IT_RUN_ID", "11111111-1111-4111-8111-111111111111"))
+    account_id = uuid5(run_id, "20000000-0000-0000-0000-000000000006")
+    start = datetime.fromisoformat("2026-10-02T09:00:00+05:30")
+    end = datetime.fromisoformat("2026-10-02T12:00:00+05:30")
+    try:
+        provider = PostgresSandboxProvider(engine)
+        session_id = uuid4()
+        principal_id = f"vas-it-{session_id}"
+        AuthStore(engine).create_session(session_id=session_id, credential_hash=uuid4().bytes,
+            csrf_hash=uuid4().bytes, role="CUSTOMER", principal_id=principal_id, sandbox_id=run_id,
+            account_id=account_id, expires_at=datetime.now(UTC) + timedelta(hours=1))
+        context = AuthContext(session_id, principal_id, "CUSTOMER", run_id, account_id, uuid4(), "TEXT")
+        facade = ResolveFacade(engine, provider, cursor_secret=b"vas-integration-test-secret-32b")
+        conversation = facade.create_conversation(context)
+        case = facade.create_case(context, conversation_id=conversation["id"], client_turn_id=uuid4(),
+            expected_conversation_version=1, complaint_type="VAS_DISPUTE", window_start=start,
+            window_end=end, reported_facts={})
+        investigation = facade.investigate(context, case_id=case["id"], expected_version=1,
+            command_key=f"vas-it-{uuid4()}", complaint_type="VAS_DISPUTE", window_start=start,
+            window_end=end, reported_facts={})
+        view = InvestigationView.model_validate(investigation)
+        assert view.evidence_state == "PARTIAL"
+        assert "VAS_ACTIVATION_EVIDENCE_MISSING" in view.missing
+        assert any(item.code == "VAS_ACTIVATION_UNVERIFIED" and "does not establish customer consent" in item.text
+            for item in view.findings)
+        action = next(item for item in investigation["eligible_actions"] if item["action_type"] == "DEACTIVATE_VAS")
+        current = facade.get_case(context, case["id"])
+        proposal = facade.propose_action(context, case_id=case["id"], expected_version=current["version"],
+            investigation_id=investigation["id"], action_type="DEACTIVATE_VAS", target_id=action["target_id"],
+            request_key=f"vas-proposal-{uuid4()}")
+        assert "past charges remain under investigation" in proposal["consequences"]
+    finally:
+        engine.dispose()

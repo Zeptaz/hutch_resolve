@@ -413,7 +413,7 @@ class ResolveFacade:
                                                 "target_id": context.account_id,
                                                 "target_label": account_target["label"]})
         vas_targets: list[dict[str, Any]] = []
-        if complaint_type == "VAS_DISPUTE" and result["evidence_state"] == "SUFFICIENT":
+        if complaint_type == "VAS_DISPUTE" and result["evidence_state"] in {"SUFFICIENT", "PARTIAL"}:
             vas_targets = self._provider.eligible_vas_targets(context.sandbox_id, context.account_id)  # type: ignore[attr-defined]
             reported_subscription = facts.get("subscription_id")
             for target in vas_targets:
@@ -423,7 +423,16 @@ class ResolveFacade:
                     "observed_at": target["as_of"], "fetched_at": datetime.now(UTC), "value": target["status"],
                     "unit": None, "source_payload": {"offer_name": target["target_label"], "offer_kind": target["offer_kind"],
                         "recurring": target["recurring"], "renew_enabled": target["renew_enabled"],
-                        "target_version": target["target_version"], "starts_at": target["starts_at"], "expires_at": target["expires_at"]}})
+                        "target_version": target["target_version"], "starts_at": target["starts_at"],
+                        "expires_at": target["expires_at"],
+                        "activation_evidence_ref": target["activation_evidence_ref"]}})
+                if target["activation_evidence_ref"] is None:
+                    result["missing"].append("VAS_ACTIVATION_EVIDENCE_MISSING")
+                    result["review_reasons"].append("VAS_ACTIVATION_EVIDENCE_MISSING")
+                    result["findings"].append({"code": "VAS_ACTIVATION_UNVERIFIED",
+                        "text": "The available records do not contain activation evidence. This does not establish customer consent or decide the past-charge dispute; future renewal deactivation is a separate action.",
+                        "evidence_ids": [evidence_id]})
+                    result["evidence_state"] = "PARTIAL"
                 if reported_subscription is None or reported_subscription == str(target["target_id"]):
                     result["eligible_actions"].append({"action_type": "DEACTIVATE_VAS", "target_id": target["target_id"],
                                                         "target_label": target["target_label"]})
