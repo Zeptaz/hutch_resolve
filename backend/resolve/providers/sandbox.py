@@ -298,7 +298,10 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
                          if item.id in in_window_ids or item.id in related_original_ids)
         if opening is not None and closing is not None:
             expected_sequences = set(range(opening.last_posting_seq + 1, closing.last_posting_seq + 1))
-            actual_sequences = {item.posting_seq for item in postings}
+            # Reversal validation may fetch an original posting before the opening
+            # snapshot; that supporting row is not part of this window's sequence.
+            actual_sequences = {item.posting_seq for item in postings
+                                if opening.last_posting_seq < item.posting_seq <= closing.last_posting_seq}
             if expected_sequences != actual_sequences:
                 warnings.append("POSTING_SEQUENCE_GAP")
                 complete = False
@@ -863,9 +866,9 @@ def reconcile_service_status(statement: ServiceStatement, *, incident_freshness:
             "origin": check["origin"], "expires_at": check["expires_at"].isoformat(),
             "detail": check["detail"], "fresh": fresh}
         add("SERVICE_CHECK", check, check["observed_at"], check["result"], payload)
-        if fresh and check["result"] not in {"ENABLED", "OK", "HEALTHY"}:
+        if fresh and check["result"] in {"DISABLED", "FAILED", "ERROR", "DOWN", "UNREACHABLE"}:
             failing_checks.append(check)
-        elif fresh:
+        elif fresh and check["result"] in {"ENABLED", "OK", "HEALTHY"}:
             fresh_enabled_checks.append(check)
 
     if active_incidents:

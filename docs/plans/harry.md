@@ -1,4 +1,4 @@
-# Harry: Resolve backend and external Voice integration
+﻿# Harry: Resolve backend and external Voice integration
 
 Read [context.md](../../context.md) and [contracts](../contracts.md) first. Own all Resolve APIs and permissions, provider and business logic, persistence, dashboard data and Voice qualification. Tevin owns dialogue; Jayith owns UI. Update this plan and context after meaningful progress, including test evidence and remaining work. Unchecked means not implemented and verified.
 
@@ -51,7 +51,7 @@ Facade methods: `get_account`, `create_case`, `get_case`, `investigate`, `propos
 
 ## H-03: providers and primary investigation
 
-- [x] Implement the first in-process synthetic account/balance/subscription read and customer-only `GET /account`; implement the balance statement adapter and deterministic A/D calculator. Verified on fresh PostgreSQL: A=42,000 minor LKR reconciles; D is CONFLICTING at -7,000; account endpoint returns the customer’s fixed account.
+- [x] Implement the first in-process synthetic account/balance/subscription read and customer-only `GET /account`; implement the balance statement adapter and deterministic A/D calculator. Verified on fresh PostgreSQL: A=42,000 minor LKR reconciles; D is CONFLICTING at -7,000; account endpoint returns the customerâ€™s fixed account.
 - [x] Persist case origin-turn deduplication and immutable investigation revisions with evidence/calculations/source status, stable command-key replay, audit events and REVIEW_REQUIRED conflicts. Isolated PostgreSQL verified A, D, stale-version, idempotent replay and cross-account 404.
 - [x] Publish the contract-backed customer/agent case-detail and customer investigation routes. Require Idempotency-Key and validate persisted DTOs; verification includes replay, changed-body conflict, customer cross-account 404 and same-run agent read.
 - [ ] Implement separate Customer/CRM, Charging, Recharge, Product/VAS, Usage/Quota and ServiceAssurance provider ports in-process. Investigation code depends on ports, not sandbox SQL.
@@ -130,14 +130,20 @@ Verification for H-05: `python -m pytest -q` (32 passed; opt-in DB tests skipped
 
 - [x] H-07a Resolve generates UUID binding/session IDs, stores account/session/conversation/run/origin scope, signs Voice session provisioning with the existing HMAC format, returns the short-lived browser grant and revokes failed provisioning. No schema change was needed. Ten focused tests and a disposable PostgreSQL runtime-role integration passed.
 - [x] H-07a Resolve verifies exact raw-body digest/signature, header/body event ID and active binding/session/run scope before deduplication. Same event/body replays its response; changed content conflicts. Conversation+turn claims are separate, leased, and reuse their stable downstream UUID after failure. Logout/reset/expiry revoke callback authorization.
+- [x] H-07a audit repair: Voice consent requires a current scoped binding, a latest persisted matching proposal response and an unambiguous fresh affirmative transcript; accepted confirmations persist binding/turn/transcript digest/proposal response provenance. Revision 0006 fences recovered claims and bounds callback bodies. One unresolved turn per conversation prevents reordered decisions. Focused unit and disposable PostgreSQL checks pass.
 - [ ] H-07b Map finalized Voice input to Tevin's `ConversationService` and project its result into existing `VoiceTurnResponse`. The bridge passes trusted Voice consent evidence only after signed request and binding validation. Unit and PostgreSQL tests use a stub; live routing stays blocked until Tevin's service is mounted.
 - [ ] H-07c Qualify the complete Tevin + Voice path end-to-end, including proposal presentation and confirmed outcome. The Resolve bridge is pushed on `ResolveDev`; Voice runtime fixes and fake regressions are pushed on `hutch_zeptazvoice` branch `adapter_buildation` (`a6c3ea3`). Live microphone/model qualification still depends on credentials and Tevin's controller.
 - [x] In Voice, add committed fake-runtime regression tests for fragmented transcripts and repeated model turns. Finalize only when SDK `input_transcription.finished` is true, independently of model `turn_complete`; defer tool calls until a finalized caller turn exists. Never substitute model-generated text for missing input. Full Voice suite passes (26 tests).
 - [x] In Voice, handle repeated model receive cycles, emit interruption before later output and revoke proposal-presentation eligibility, require completed proposal audio before acknowledging presentation, honor Resolve `end_session` after final model completion or bounded timeout, cancel sibling tasks and exit the provider context. These behaviors have fake runtime coverage; actual browser audio-queue flushing remains J-03 work.
+- [x] In Voice, implement v2 response-scoped audio/playback/proposal controls, sensitive speech matching with text fallback, bounded Resolve retry and stable pending turn identity. Fake runtime and adapter suites pass (34 tests). Jayith's browser must send `playback_complete` before `proposal_presented`; live microphone/model qualification remains open.
 - [ ] Extend Voice qualification for forged/early/mismatched acknowledgements, ambiguous acceptance, provider unavailability and text continuation; retain same turn/event IDs on transport retries. Existing fake tests cover no-final-input, successful ack then interruption/rejection, socket/provider failure and timeouts, but not the full matrix.
 - [ ] Live gate: real microphone, actual configured model, A investigation -> proposal -> clear confirmation -> persisted result/receipt; repeat decline/interruption and disconnect-to-text. Record model/profile, timestamp, release and result without logging raw audio/secrets.
 
 Existing Voice read timeout is eight seconds; conversation processing must return within its budget. Persist slow work and return a pending response, never hold the call while polling a provider mutation. Do not extend timeouts casually to hide deadlocks or missing finalization.
+
+Audit repair verification on 2026-10-02: Resolve default suite 74 passed/19 opt-in skipped, Voice 34 passed. A fresh disposable PostgreSQL 18 instance migrated from baseline through `0006_audit_hardening`; 22 focused consent, worker and signed-bridge integration checks passed. Action/review workers use fenced claims and ordered review sync. Pending: real Tevin controller, v2 browser integration, live Gemini/model call, broader release soak and metrics. These results do not complete H-07b/H-07c or the live H-08 gate.
+
+Opt-in suite limitation: the legacy PostgreSQL modules mutate shared fixture rows and assume isolated runs. Running all modules against one reused container produced fixture lookup/pending-operation failures; one previously failing CRM fault test passed on a fresh migrated container. Isolate runs per module or reset fixtures before treating the aggregate PostgreSQL suite as a release gate.
 
 ## H-09: integration, observability and release
 

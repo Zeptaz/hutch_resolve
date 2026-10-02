@@ -7286,6 +7286,12 @@
           },
           "end_session": {
             "type": "boolean"
+          },
+          "speech_text": {
+            "type": "string"
+          },
+          "sensitive_audio": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -7296,7 +7302,9 @@
           "pending_question",
           "proposal",
           "operation_status",
-          "end_session"
+          "end_session",
+          "speech_text",
+          "sensitive_audio"
         ],
         "additionalProperties": false
       },
@@ -7309,11 +7317,16 @@
           },
           "accepted": {
             "type": "boolean"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
           "type",
-          "accepted"
+          "accepted",
+          "response_id"
         ],
         "additionalProperties": false
       },
@@ -7377,7 +7390,7 @@
           "response_id"
         ],
         "additionalProperties": false,
-        "description": "Proposed additive event, not implemented at baseline. Clear queued audio and proposal presentation eligibility."
+        "description": "Implemented v2 event: discard queued audio and pending proposal acknowledgement."
       },
       "VoicePresentation": {
         "type": "object",
@@ -7391,12 +7404,17 @@
           },
           "proposal_hash": {
             "type": "string"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
           "type",
           "proposal_id",
-          "proposal_hash"
+          "proposal_hash",
+          "response_id"
         ],
         "additionalProperties": false
       },
@@ -7425,6 +7443,18 @@
           },
           {
             "$ref": "#/components/schemas/VoiceInterrupted"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceAudioStart"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceAudioEnd"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceAudioFallback"
+          },
+          {
+            "$ref": "#/components/schemas/VoicePlaybackAck"
           }
         ],
         "discriminator": {
@@ -7432,7 +7462,119 @@
         }
       },
       "VoiceClientControl": {
-        "$ref": "#/components/schemas/VoicePresentation"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VoicePlaybackComplete"
+          },
+          {
+            "$ref": "#/components/schemas/VoicePresentation"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
+      "VoiceAudioStart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "audio_start"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "type",
+          "response_id"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceAudioEnd": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "audio_end"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "type",
+          "response_id"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceAudioFallback": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "audio_fallback"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "response_id",
+          "text",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "VoicePlaybackAck": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "playback_ack"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "response_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "VoicePlaybackComplete": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "playback_complete"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "type",
+          "response_id"
+        ],
+        "additionalProperties": false
       }
     }
   }

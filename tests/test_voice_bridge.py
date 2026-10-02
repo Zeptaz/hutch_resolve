@@ -37,6 +37,9 @@ class Result:
     def one_or_none(self):
         return self.row
 
+    def scalar_one_or_none(self):
+        return self.row
+
 
 class MemoryVoiceEngine:
     """Small SQL boundary fake for the bridge's scoped persistence queries."""
@@ -95,6 +98,8 @@ class MemoryConnection:
                     and row["session_id"] == params["session"]):
                 return Result(dict(row))
             return Result()
+        if "from resolve.conversations where" in sql and "for update" in sql:
+            return Result(CONVERSATION_ID if params["sandbox"] == RUN_ID and params["conversation"] == CONVERSATION_ID else None)
         if "from resolve.voice_bindings b" in sql:
             row = self.engine.bindings.get(params["binding_id"])
             if row and row["voice_session_id"] == params["voice_session_id"]:
@@ -108,6 +113,13 @@ class MemoryConnection:
             row = self.engine.idempotency_records.get(key)
             return Result(dict(row) if row else None)
         if "from resolve.turn_claims" in sql:
+            if "client_turn_id<>:turn" in sql:
+                for (conversation, turn), row in self.engine.turn_claims.items():
+                    if conversation == params["conversation"] and turn != params["turn"] and row["completed_at"] is None:
+                        return Result(turn)
+                return Result()
+            if "result->'proposal'" in sql:
+                return Result()
             row = self.engine.turn_claims.get((params["conversation"], params["turn"]))
             return Result(dict(row) if row else None)
         if "insert into resolve.voice_bindings" in sql:
@@ -130,11 +142,12 @@ class MemoryConnection:
             self.engine.turn_claims[(params["conversation"], params["turn"])] = {
                 "input_hash": params["hash"], "downstream_key": params["downstream"],
                 "lease_until": params["lease"], "completed_at": None, "result": None,
+                "claim_token": params["token"], "input_payload": json.loads(params["payload"]),
             }
             return Result()
-        if "update resolve.turn_claims set claimed_at" in sql:
+        if "update resolve.turn_claims" in sql and "claimed_at=:now" in sql:
             row = self.engine.turn_claims[(params["conversation"], params["turn"])]
-            row.update(lease_until=params["lease"])
+            row.update(lease_until=params["lease"], claim_token=params["token"])
             return Result()
         if "update resolve.turn_claims set lease_until" in sql:
             row = self.engine.turn_claims[(params["conversation"], params["turn"])]
@@ -142,6 +155,8 @@ class MemoryConnection:
             return Result()
         if "update resolve.turn_claims set completed_at" in sql:
             row = self.engine.turn_claims[(params["conversation"], params["turn"])]
+            if row["claim_token"] != params["token"]:
+                return Result(rowcount=0)
             row.update(completed_at=params["now"], result=json.loads(params["result"]))
             return Result()
         if "insert into resolve.integration_events" in sql:
@@ -157,15 +172,19 @@ class MemoryConnection:
             self.engine.idempotency_records[key] = {
                 "request_fingerprint": params["fingerprint"], "response_status": None,
                 "response_body": None, "created_at": params["now"], "completed_at": None,
+                "claim_token": params["token"],
             }
             return Result(rowcount=1)
         if "update resolve.idempotency_records set created_at" in sql:
             row = self.engine.idempotency_records[(params["subject"], params["route"], params["key"])]
             row["created_at"] = params.get("now", params.get("retry_at"))
+            row["claim_token"] = params["token"]
             return Result()
         if "update resolve.idempotency_records" in sql and "response_status" in sql:
             key = (params["subject"], params["route"], params["key"])
             row = self.engine.idempotency_records[key]
+            if row["claim_token"] != params["token"]:
+                return Result(rowcount=0)
             row.update(response_status=200, response_body=json.loads(params["response"]),
                        completed_at=params["now"])
             return Result()
@@ -294,6 +313,26 @@ def test_voice_turn_rejects_bad_signature_digest_and_header_body_event_mismatch(
     mismatch_headers = signed_headers(SECRET, other_event, body, now=int(datetime.now(UTC).timestamp()))
     mismatch = client.post("/api/v1/integrations/voice/turns", content=body, headers=mismatch_headers)
     assert mismatch.status_code == 401
+
+
+def test_voice_callbacks_reject_oversized_bodies_before_signature_or_storage():
+    client = make_client()
+    body = b"x" * (16 * 1024 + 1)
+    for route in ("turns", "events"):
+        response = client.post(f"/api/v1/integrations/voice/{route}", content=body)
+        assert response.status_code == 413
+        assert response.json()["error"]["code"] == "PAYLOAD_TOO_LARGE"
+    assert client.app.state.database.engine.idempotency_records == {}
+
+
+def test_new_voice_turn_waits_for_unresolved_prior_conversation_turn():
+    client = make_client()
+    engine = client.app.state.database.engine
+    engine.turn_claims[(CONVERSATION_ID, uuid4())] = {"completed_at": None}
+    response = signed_request(client, "/api/v1/integrations/voice/turns", turn_payload())
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "CONVERSATION_BUSY"
+    assert client.app.state.conversation_service.calls == []
 
 
 def test_voice_turn_rejects_missing_expired_revoked_and_cross_scope_bindings():

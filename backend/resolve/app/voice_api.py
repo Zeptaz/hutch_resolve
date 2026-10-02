@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import json
 import logging
 import time
@@ -25,19 +26,12 @@ from .voice_contracts import (
     VoiceTurnResponse,
 )
 from .voice_security import body_digest, canonical_json, verify_headers
+from backend.resolve.services.voice_consent import VoiceConsentEvidence
+from backend.resolve.services.turn_claims import claim_turn, complete_turn, release_turn
 
 logger = logging.getLogger("hutch_resolve.voice")
 VOICE_PROVIDER = "zeptaz_voice"
-
-
-@dataclass(frozen=True, slots=True)
-class VoiceConsentEvidence:
-    binding_id: UUID
-    voice_session_id: str
-    turn_id: UUID
-    final_transcript: str
-    presented_proposal_id: UUID | None
-    presented_proposal_hash: str | None
+MAX_SIGNED_BODY_BYTES = 16 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +55,21 @@ def _engine(request: Request):
 
 def _settings(request: Request) -> Settings:
     return request.app.state.settings
+
+
+async def _signed_body(request: Request) -> bytes:
+    if request.headers.get("content-length"):
+        try:
+            if int(request.headers["content-length"]) > MAX_SIGNED_BODY_BYTES:
+                raise ResolveError(413, "PAYLOAD_TOO_LARGE", "Voice callback is too large")
+        except ValueError as exc:
+            raise ResolveError(400, "VALIDATION_ERROR", "Invalid Content-Length") from exc
+    chunks = bytearray()
+    async for chunk in request.stream():
+        if len(chunks) + len(chunk) > MAX_SIGNED_BODY_BYTES:
+            raise ResolveError(413, "PAYLOAD_TOO_LARGE", "Voice callback is too large")
+        chunks.extend(chunk)
+    return bytes(chunks)
 
 
 def _verify_signed_body(request: Request, body: bytes) -> str:
@@ -132,42 +141,6 @@ def _turn_fingerprint(payload: VoiceTurnRequest, body: bytes) -> str:
     return hashlib.sha256(canonical_json(data)).hexdigest()
 
 
-def _claim_turn(engine, *, sandbox_id: UUID, conversation_id: UUID, payload: VoiceTurnRequest,
-                turn_id: UUID, request_fingerprint: str,
-                now: datetime) -> tuple[str, dict[str, Any] | None]:
-    downstream_key = uuid4()
-    with engine.begin() as connection:
-        prior = connection.execute(text("""
-            SELECT input_hash,downstream_key,lease_until,completed_at,result
-            FROM resolve.turn_claims WHERE conversation_id=:conversation AND client_turn_id=:turn
-            FOR UPDATE
-        """), {"conversation": conversation_id, "turn": turn_id}).mappings().one_or_none()
-        if prior is not None:
-            if prior["input_hash"] != request_fingerprint:
-                raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Voice turn ID was reused with different content")
-            if prior["completed_at"] is not None:
-                saved = prior["result"]
-                response = json.loads(saved) if isinstance(saved, str) else saved
-                return str(prior["downstream_key"]), response
-            if prior["lease_until"] > now:
-                raise ResolveError(409, "TURN_IN_PROGRESS", "This Voice turn is already being processed", True)
-            downstream_key = prior["downstream_key"]
-            connection.execute(text("""
-                UPDATE resolve.turn_claims SET claimed_at=:now,lease_until=:lease
-                WHERE conversation_id=:conversation AND client_turn_id=:turn
-            """), {"now": now, "lease": now + timedelta(seconds=30), "conversation": conversation_id,
-                  "turn": turn_id})
-        else:
-            connection.execute(text("""
-                INSERT INTO resolve.turn_claims(sandbox_id,conversation_id,client_turn_id,input_hash,
-                    downstream_key,claimed_at,lease_until)
-                VALUES (:sandbox,:conversation,:turn,:hash,:downstream,:now,:lease)
-            """), {"sandbox": sandbox_id, "conversation": conversation_id, "turn": turn_id,
-                  "hash": request_fingerprint, "downstream": downstream_key, "now": now,
-                  "lease": now + timedelta(seconds=30)})
-    return str(downstream_key), None
-
-
 def _voice_response(result: Any) -> dict[str, Any]:
     if hasattr(result, "model_dump"):
         result = result.model_dump(mode="json")
@@ -209,32 +182,22 @@ def _voice_response(result: Any) -> dict[str, Any]:
 
 
 def _save_turn(engine, *, conversation_id: UUID, turn_id: UUID, payload: VoiceTurnRequest, body: bytes,
-               binding_id: UUID, response: dict[str, Any], now: datetime) -> None:
+               binding_id: UUID, response: dict[str, Any], now: datetime,
+               turn_token: UUID, event_token: UUID) -> None:
     with engine.begin() as connection:
-        connection.execute(text("""
-            UPDATE resolve.turn_claims SET completed_at=:now,result=CAST(:result AS jsonb)
-            WHERE conversation_id=:conversation AND client_turn_id=:turn AND completed_at IS NULL
-        """), {"now": now, "result": json.dumps(response), "conversation": conversation_id,
-              "turn": turn_id})
+        complete_turn(connection, conversation_id=conversation_id, turn_id=turn_id,
+                      token=turn_token, result=response, now=now)
         _complete_event(connection, binding_id=binding_id, route_key="voice_callback",
                          event_id=payload.event_id, request_hash=_request_hash(body),
-                         response=response, now=now)
-
-
-def _release_turn_claim(engine, conversation_id: UUID, turn_id: UUID, now: datetime) -> None:
-    """Allow the adapter's same-key retry to resume while retaining its downstream key."""
-    with engine.begin() as connection:
-        connection.execute(text("""
-            UPDATE resolve.turn_claims SET lease_until=:now
-            WHERE conversation_id=:conversation AND client_turn_id=:turn AND completed_at IS NULL
-        """), {"now": now, "conversation": conversation_id, "turn": turn_id})
+                         response=response, now=now, token=event_token)
 
 
 def _claim_event(engine, *, binding_id: UUID, route_key: str, event_id: str,
-                 request_hash: str, now: datetime) -> dict[str, Any] | None:
+                 request_hash: str, now: datetime) -> tuple[UUID | None, dict[str, Any] | None]:
     """Persist the envelope claim before work so the same event cannot run concurrently twice."""
     del binding_id
     subject = VOICE_PROVIDER
+    token = uuid4()
     with engine.begin() as connection:
         existing = connection.execute(text("""
             SELECT request_fingerprint,response_status,response_body,created_at,completed_at
@@ -245,13 +208,13 @@ def _claim_event(engine, *, binding_id: UUID, route_key: str, event_id: str,
         if existing is None:
             inserted = connection.execute(text("""
                 INSERT INTO resolve.idempotency_records
-                  (id,subject_id,route_key,idempotency_key,request_fingerprint,created_at)
-                VALUES (:id,:subject,:route,:key,:fingerprint,:now)
+                  (id,subject_id,route_key,idempotency_key,request_fingerprint,created_at,claim_token)
+                VALUES (:id,:subject,:route,:key,:fingerprint,:now,:token)
                 ON CONFLICT(subject_id,route_key,idempotency_key) DO NOTHING
             """), {"id": uuid4(), "subject": subject, "route": route_key, "key": event_id,
-                  "fingerprint": request_hash, "now": now})
+                  "fingerprint": request_hash, "now": now, "token": token})
             if inserted.rowcount == 1:
-                return None
+                return token, None
             existing = connection.execute(text("""
                 SELECT request_fingerprint,response_status,response_body,created_at,completed_at
                 FROM resolve.idempotency_records
@@ -262,37 +225,42 @@ def _claim_event(engine, *, binding_id: UUID, route_key: str, event_id: str,
             raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Voice event ID was reused with different content")
         if existing["completed_at"] is not None:
             result = existing["response_body"]
-            return json.loads(result) if isinstance(result, str) else result
+            return None, json.loads(result) if isinstance(result, str) else result
         if existing["created_at"] > now - timedelta(seconds=30):
             raise ResolveError(409, "TURN_IN_PROGRESS", "This Voice event is already being processed", True)
         connection.execute(text("""
-            UPDATE resolve.idempotency_records SET created_at=:now
+            UPDATE resolve.idempotency_records SET created_at=:now,claim_token=:token
             WHERE subject_id=:subject AND route_key=:route AND idempotency_key=:key
-        """), {"now": now, "subject": subject, "route": route_key, "key": event_id})
-    return None
+        """), {"now": now, "token": token, "subject": subject, "route": route_key, "key": event_id})
+    return token, None
 
 
-def _release_event(engine, *, binding_id: UUID, route_key: str, event_id: str, now: datetime) -> None:
+def _release_event(engine, *, binding_id: UUID, route_key: str, event_id: str,
+                   now: datetime, token: UUID) -> None:
     del binding_id
     with engine.begin() as connection:
         connection.execute(text("""
             UPDATE resolve.idempotency_records SET created_at=:retry_at
-            WHERE subject_id=:subject AND route_key=:route AND idempotency_key=:key AND completed_at IS NULL
+            WHERE subject_id=:subject AND route_key=:route AND idempotency_key=:key
+              AND claim_token=:token AND completed_at IS NULL
         """), {"retry_at": now - timedelta(seconds=31), "subject": VOICE_PROVIDER,
-              "route": route_key, "key": event_id})
+              "route": route_key, "key": event_id, "token": token})
 
 
 def _complete_event(connection, *, binding_id: UUID, route_key: str, event_id: str,
-                    request_hash: str, response: dict[str, Any], now: datetime) -> None:
+                    request_hash: str, response: dict[str, Any], now: datetime,
+                    token: UUID) -> None:
     del binding_id
     serialized = json.dumps(response)
-    connection.execute(text("""
+    changed = connection.execute(text("""
         UPDATE resolve.idempotency_records
         SET response_status=200,response_body=CAST(:response AS jsonb),completed_at=:now
         WHERE subject_id=:subject AND route_key=:route AND idempotency_key=:key
-          AND request_fingerprint=:hash AND completed_at IS NULL
+          AND request_fingerprint=:hash AND claim_token=:token AND completed_at IS NULL
     """), {"response": serialized, "now": now, "subject": VOICE_PROVIDER,
-          "route": route_key, "key": event_id, "hash": request_hash})
+          "route": route_key, "key": event_id, "hash": request_hash, "token": token}).rowcount
+    if changed != 1:
+        raise ResolveError(409, "TURN_CLAIM_LOST", "This event is being recovered by another worker", True)
     connection.execute(text("""
         INSERT INTO resolve.integration_events(id,provider,event_id,request_hash,response,created_at)
         VALUES (:id,:provider,:event_id,:hash,CAST(:response AS jsonb),:now)
@@ -315,10 +283,68 @@ def _event_replay(engine, event_id: str, digest: str) -> dict[str, Any] | None:
 
 
 def _persist_event_response(engine, *, binding_id: UUID, route_key: str, event_id: str,
-                            request_hash: str, response: dict[str, Any], now: datetime) -> None:
+                            request_hash: str, response: dict[str, Any], now: datetime,
+                            token: UUID) -> None:
     with engine.begin() as connection:
         _complete_event(connection, binding_id=binding_id, route_key=route_key,
-                        event_id=event_id, request_hash=request_hash, response=response, now=now)
+                        event_id=event_id, request_hash=request_hash, response=response, now=now, token=token)
+
+
+def _presentation_response(engine, *, conversation_id: UUID, binding_id: UUID,
+                           proposal_id: UUID | None, proposal_hash: str | None) -> str | None:
+    if proposal_id is None or not proposal_hash:
+        return None
+    with engine.connect() as connection:
+        row = connection.execute(text("""
+            SELECT result FROM resolve.turn_claims
+            WHERE conversation_id=:conversation AND completed_at IS NOT NULL
+              AND input_payload->>'binding_id'=:binding
+              AND result->'proposal' IS NOT NULL
+            ORDER BY completed_at DESC,client_turn_id DESC LIMIT 1
+        """), {"conversation": conversation_id, "binding": str(binding_id)}).scalar_one_or_none()
+    if row is None:
+        return None
+    result = json.loads(row) if isinstance(row, str) else row
+    proposal = result.get("proposal") if isinstance(result, dict) else None
+    if (not isinstance(proposal, dict) or str(proposal.get("id")) != str(proposal_id)
+            or proposal.get("proposal_hash") != proposal_hash):
+        return None
+    return str(result.get("response_id")) if result.get("response_id") else None
+
+
+def _create_binding(engine, context: AuthContext, conversation_id: UUID, origin: str,
+                    now: datetime) -> tuple[UUID, str, datetime]:
+    expires = now + timedelta(seconds=180)
+    with engine.begin() as connection:
+        scoped = connection.execute(text("""
+            SELECT c.id,c.sandbox_id,c.session_id,s.account_id,s.expires_at AS session_expires_at,
+                   s.revoked_at AS session_revoked_at,r.run_status
+            FROM resolve.conversations c
+            JOIN resolve.sessions s ON (s.sandbox_id,s.id)=(c.sandbox_id,c.session_id)
+            JOIN sandbox.sandbox_runs r ON r.id=c.sandbox_id
+            WHERE c.id=:conversation AND c.sandbox_id=:sandbox AND c.session_id=:session
+        """), {"conversation": conversation_id, "sandbox": context.sandbox_id,
+              "session": context.session_id}).mappings().one_or_none()
+        if (scoped is None or scoped["account_id"] != context.account_id
+                or scoped["session_revoked_at"] is not None or scoped["session_expires_at"] <= now
+                or scoped["run_status"] != "ACTIVE"):
+            raise ResolveError(404, "NOT_FOUND", "Conversation is unavailable")
+        expires = min(expires, scoped["session_expires_at"])
+        binding_id = uuid4()
+        voice_session_id = str(uuid4())
+        connection.execute(text("""
+            INSERT INTO resolve.voice_bindings(id,sandbox_id,conversation_id,voice_session_id,account_id,origin,expires_at)
+            VALUES (:id,:sandbox,:conversation,:voice_session,:account,:origin,:expires)
+        """), {"id": binding_id, "sandbox": context.sandbox_id, "conversation": conversation_id,
+              "voice_session": voice_session_id, "account": context.account_id, "origin": origin,
+              "expires": expires})
+    return binding_id, voice_session_id, expires
+
+
+def _revoke_binding(engine, binding_id: UUID) -> None:
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE resolve.voice_bindings SET revoked_at=:now WHERE id=:id"),
+                           {"now": datetime.now(UTC), "id": binding_id})
 
 
 def build_voice_router() -> APIRouter:
@@ -346,32 +372,8 @@ def build_voice_router() -> APIRouter:
         client = getattr(request.app.state, "voice_client", None)
         if client is None or not settings.voice_base_url or not settings.voice_hmac_secret:
             raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Voice calling is not configured", True)
-        now = datetime.now(UTC)
-        # Allow the 60-second browser grant window plus the full 120-second call budget.
-        expires = now + timedelta(seconds=180)
-        with _engine(request).begin() as connection:
-            scoped = connection.execute(text("""
-                SELECT c.id,c.sandbox_id,c.session_id,s.account_id,s.expires_at AS session_expires_at,
-                       s.revoked_at AS session_revoked_at,r.run_status
-                FROM resolve.conversations c
-                JOIN resolve.sessions s ON (s.sandbox_id,s.id)=(c.sandbox_id,c.session_id)
-                JOIN sandbox.sandbox_runs r ON r.id=c.sandbox_id
-                WHERE c.id=:conversation AND c.sandbox_id=:sandbox AND c.session_id=:session
-            """), {"conversation": conversation_id, "sandbox": context.sandbox_id,
-                  "session": context.session_id}).mappings().one_or_none()
-            if (scoped is None or scoped["account_id"] != context.account_id
-                    or scoped["session_revoked_at"] is not None or scoped["session_expires_at"] <= now
-                    or scoped["run_status"] != "ACTIVE"):
-                raise ResolveError(404, "NOT_FOUND", "Conversation is unavailable")
-            expires = min(expires, scoped["session_expires_at"])
-            binding_id = uuid4()
-            voice_session_id = str(uuid4())
-            connection.execute(text("""
-                INSERT INTO resolve.voice_bindings(id,sandbox_id,conversation_id,voice_session_id,account_id,origin,expires_at)
-                VALUES (:id,:sandbox,:conversation,:voice_session,:account,:origin,:expires)
-            """), {"id": binding_id, "sandbox": context.sandbox_id, "conversation": conversation_id,
-                  "voice_session": voice_session_id, "account": context.account_id, "origin": origin,
-                  "expires": expires})
+        binding_id, voice_session_id, expires = await asyncio.to_thread(
+            _create_binding, _engine(request), context, conversation_id, origin, datetime.now(UTC))
         voice_request = {
             "binding_id": str(binding_id), "conversation_id": str(conversation_id),
             "voice_session_id": voice_session_id, "account_id": str(context.account_id),
@@ -395,15 +397,13 @@ def build_voice_router() -> APIRouter:
                 raise ValueError("Voice grant destination or lifetime is invalid")
             return grant.model_dump(mode="json")
         except (VoiceServiceError, ValidationError, ValueError) as exc:
-            with _engine(request).begin() as connection:
-                connection.execute(text("UPDATE resolve.voice_bindings SET revoked_at=:now WHERE id=:id"),
-                                   {"now": datetime.now(UTC), "id": binding_id})
+            await asyncio.to_thread(_revoke_binding, _engine(request), binding_id)
             logger.warning("Voice session provisioning failed (%s)", type(exc).__name__)
             raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Voice calling is temporarily unavailable", True) from exc
 
     @router.post("/integrations/voice/turns", response_model=VoiceTurnResponse, tags=["Voice integration"])
     async def receive_voice_turn(request: Request) -> dict[str, Any]:
-        body = await request.body()
+        body = await _signed_body(request)
         event_id = _verify_signed_body(request, body)
         payload = _parse_signed_model(VoiceTurnRequest, body, event_id)
         engine = _engine(request)
@@ -411,82 +411,100 @@ def build_voice_router() -> APIRouter:
         binding_id = _parse_uuid(payload.binding_id, not_found=True)
         turn_id = _parse_uuid(payload.turn_id)
         proposal_id = _parse_uuid(payload.presented_proposal_id) if payload.presented_proposal_id else None
-        context, conversation_id = _binding_context(engine, binding_id, payload.voice_session_id, request_id)
+        context, conversation_id = await asyncio.to_thread(
+            _binding_context, engine, binding_id, payload.voice_session_id, request_id)
         digest = _request_hash(body)
-        prior = _event_replay(engine, payload.event_id, digest)
+        prior = await asyncio.to_thread(_event_replay, engine, payload.event_id, digest)
         if prior is not None:
             return prior
         route_key = "voice_callback"
-        prior_event = _claim_event(engine, binding_id=binding_id, route_key=route_key,
-                                   event_id=payload.event_id, request_hash=digest,
-                                   now=datetime.now(UTC))
+        event_token, prior_event = await asyncio.to_thread(
+            _claim_event, engine, binding_id=binding_id, route_key=route_key,
+            event_id=payload.event_id, request_hash=digest, now=datetime.now(UTC))
         if prior_event is not None:
             return prior_event
+        assert event_token is not None
         service = getattr(request.app.state, "conversation_service", None)
         if service is None:
-            _release_event(engine, binding_id=binding_id, route_key=route_key,
-                           event_id=payload.event_id, now=datetime.now(UTC))
+            await asyncio.to_thread(_release_event, engine, binding_id=binding_id, route_key=route_key,
+                                    event_id=payload.event_id, now=datetime.now(UTC), token=event_token)
             raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Conversation service is unavailable", True)
         now = datetime.now(UTC)
-        downstream_key, prior_turn = _claim_turn(
-            engine, sandbox_id=context.sandbox_id, conversation_id=conversation_id, payload=payload,
-            turn_id=turn_id,
-            request_fingerprint=_turn_fingerprint(payload, body), now=now,
-        )
-        if prior_turn is not None:
-            _persist_event_response(engine, binding_id=binding_id, route_key=route_key,
-                                    event_id=payload.event_id, request_hash=digest,
-                                    response=prior_turn, now=datetime.now(UTC))
-            return prior_turn
-        consent = VoiceConsentEvidence(
-            binding_id=binding_id, voice_session_id=payload.voice_session_id,
-            turn_id=turn_id, final_transcript=payload.transcript,
-            presented_proposal_id=proposal_id,
-            presented_proposal_hash=payload.presented_proposal_hash,
-        )
-        normalized = NormalizedVoiceTurn(
-            channel="VOICE", conversation_id=conversation_id, turn_id=turn_id,
-            downstream_key=UUID(downstream_key), language=payload.language,
-            transcript=payload.transcript, consent=consent,
-        )
         try:
-            result = service.handle_turn(context, normalized)
+            claim = await asyncio.to_thread(
+                claim_turn, engine, sandbox_id=context.sandbox_id,
+                conversation_id=conversation_id, turn_id=turn_id,
+                input_hash=_turn_fingerprint(payload, body),
+                input_payload=payload.model_dump(mode="json"), now=now)
+        except Exception:
+            await asyncio.to_thread(_release_event, engine, binding_id=binding_id, route_key=route_key,
+                                    event_id=payload.event_id, now=datetime.now(UTC), token=event_token)
+            raise
+        if claim.result is not None:
+            await asyncio.to_thread(_persist_event_response, engine, binding_id=binding_id,
+                                    route_key=route_key, event_id=payload.event_id, request_hash=digest,
+                                    response=claim.result, now=datetime.now(UTC), token=event_token)
+            return claim.result
+        assert claim.token is not None
+        try:
+            presentation_response_id = await asyncio.to_thread(
+                _presentation_response, engine, conversation_id=conversation_id, binding_id=binding_id,
+                proposal_id=proposal_id, proposal_hash=payload.presented_proposal_hash)
+            consent = VoiceConsentEvidence(
+                binding_id=binding_id, voice_session_id=payload.voice_session_id,
+                conversation_id=conversation_id, turn_id=turn_id, language=payload.language,
+                final_transcript=payload.transcript,
+                presented_proposal_id=proposal_id,
+                presented_proposal_hash=payload.presented_proposal_hash,
+                presentation_response_id=presentation_response_id,
+            )
+            normalized = NormalizedVoiceTurn(
+                channel="VOICE", conversation_id=conversation_id, turn_id=turn_id,
+                downstream_key=claim.downstream_key, language=payload.language,
+                transcript=payload.transcript, consent=consent,
+            )
+            result = await asyncio.to_thread(service.handle_turn, context, normalized)
             if hasattr(result, "__await__"):
                 result = await result
             response = _voice_response(result)
         except Exception as exc:
-            _release_turn_claim(engine, conversation_id, turn_id, datetime.now(UTC))
-            _release_event(engine, binding_id=binding_id, route_key=route_key,
-                           event_id=payload.event_id, now=datetime.now(UTC))
+            await asyncio.to_thread(release_turn, engine, conversation_id=conversation_id,
+                                    turn_id=turn_id, token=claim.token, now=datetime.now(UTC))
+            await asyncio.to_thread(_release_event, engine, binding_id=binding_id, route_key=route_key,
+                                    event_id=payload.event_id, now=datetime.now(UTC), token=event_token)
+            if isinstance(exc, ResolveError):
+                raise
             logger.warning("Voice turn handler failed (%s)", type(exc).__name__)
             raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Conversation service is temporarily unavailable", True) from exc
-        _save_turn(engine, conversation_id=conversation_id, turn_id=turn_id, payload=payload, body=body,
-                   binding_id=binding_id, response=response, now=datetime.now(UTC))
+        await asyncio.to_thread(_save_turn, engine, conversation_id=conversation_id, turn_id=turn_id,
+                                payload=payload, body=body, binding_id=binding_id, response=response,
+                                now=datetime.now(UTC), turn_token=claim.token, event_token=event_token)
         return response
 
     @router.post("/integrations/voice/events", response_model=VoiceEventAck, tags=["Voice integration"])
     async def receive_voice_event(request: Request) -> dict[str, Any]:
-        body = await request.body()
+        body = await _signed_body(request)
         event_id = _verify_signed_body(request, body)
         payload = _parse_signed_model(VoiceEventRequest, body, event_id)
         engine = _engine(request)
         binding_id = _parse_uuid(payload.binding_id, not_found=True)
-        _binding_context(engine, binding_id, payload.voice_session_id,
-                         getattr(request.state, "request_id", None))
+        await asyncio.to_thread(_binding_context, engine, binding_id, payload.voice_session_id,
+                                getattr(request.state, "request_id", None))
         digest = _request_hash(body)
-        prior = _event_replay(engine, payload.event_id, digest)
+        prior = await asyncio.to_thread(_event_replay, engine, payload.event_id, digest)
         if prior is not None:
             return prior
         route_key = "voice_callback"
-        prior_event = _claim_event(engine, binding_id=binding_id, route_key=route_key,
-                                   event_id=payload.event_id, request_hash=digest,
-                                   now=datetime.now(UTC))
+        event_token, prior_event = await asyncio.to_thread(
+            _claim_event, engine, binding_id=binding_id, route_key=route_key,
+            event_id=payload.event_id, request_hash=digest, now=datetime.now(UTC))
         if prior_event is not None:
             return prior_event
+        assert event_token is not None
         ack = VoiceEventAck(accepted=True, event_id=payload.event_id).model_dump(mode="json")
-        _persist_event_response(engine, binding_id=binding_id, route_key=route_key,
-                                event_id=payload.event_id, request_hash=digest,
-                                response=ack, now=datetime.now(UTC))
+        await asyncio.to_thread(_persist_event_response, engine, binding_id=binding_id,
+                                route_key=route_key, event_id=payload.event_id, request_hash=digest,
+                                response=ack, now=datetime.now(UTC), token=event_token)
         logger.info(json.dumps({
             "event": "voice_lifecycle",
             "request_id": getattr(request.state, "request_id", None),

@@ -299,7 +299,7 @@ def build_auth_router() -> APIRouter:
             raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Configured demo account is unavailable", True)
 
         replaced_session: UUID | None = None
-        prior_credential = request.cookies.get(CUSTOMER_COOKIE)
+        prior_credential = request.cookies.get(CUSTOMER_COOKIE) if expected_role == "CUSTOMER" else None
         if prior_credential:
             prior = store(request).get_session(_token_hash(prior_credential), datetime.now(UTC))
             if prior is not None and prior["role"] == "GUEST":
