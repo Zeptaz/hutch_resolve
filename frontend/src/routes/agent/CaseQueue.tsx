@@ -176,7 +176,13 @@ export function CaseQueue() {
           </Button>
         </div>
 
-        <div role="radiogroup" aria-label="Review status" className="grid grid-cols-4 rounded-full bg-muted p-1 text-xs font-semibold">
+        <div role="radiogroup" aria-label="Review status" className="relative grid grid-cols-4 rounded-full bg-muted p-1 text-xs font-semibold">
+          {/* One pill slides between the options instead of each button repainting. */}
+          <span
+            aria-hidden
+            className="absolute inset-y-1 left-1 w-[calc((100%-0.5rem)/4)] rounded-full bg-foreground shadow-sm transition-transform duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none"
+            style={{ transform: `translateX(${Math.max(0, REVIEW_TABS.findIndex((t) => t.value === filters.review_status)) * 100}%)` }}
+          />
           {REVIEW_TABS.map((tab) => {
             const active = filters.review_status === tab.value
             return (
@@ -187,8 +193,8 @@ export function CaseQueue() {
                 aria-checked={active}
                 onClick={() => setFilter('review_status', tab.value)}
                 className={cn(
-                  'h-7 rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  active ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground',
+                  'relative z-10 h-7 rounded-full transition-colors duration-200 outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  active ? 'text-background' : 'text-muted-foreground hover:text-foreground',
                 )}
               >
                 {tab.label}
@@ -229,7 +235,7 @@ export function CaseQueue() {
         {chips.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             {chips.map(([key, label]) => (
-              <span key={key} className="inline-flex h-7 items-center gap-1 rounded-full bg-foreground/90 pr-1 pl-3 text-xs font-medium text-background">
+              <span key={key} className="inline-flex h-7 animate-pop items-center gap-1 rounded-full bg-foreground/90 pr-1 pl-3 text-xs font-medium text-background">
                 {label}
                 <button
                   type="button"
@@ -280,8 +286,8 @@ export function CaseQueue() {
               </p>
             )}
             <ul ref={listRef} className="flex flex-col gap-1.5" aria-label="Cases">
-              {rows.map((row) => (
-                <QueueRow key={row.case_id} row={row} selected={row.case_id === caseId} onStep={move} />
+              {rows.map((row, i) => (
+                <QueueRow key={row.case_id} row={row} index={i} selected={row.case_id === caseId} onStep={move} />
               ))}
             </ul>
             {cursor && (
@@ -306,10 +312,11 @@ const TINT = {
   warning: { rest: 'bg-warning/[0.12] hover:bg-warning/20', selected: 'bg-warning/25 ring-1 ring-warning/60' },
 }
 
-function QueueRow({ row, selected, onStep }: { row: CaseQueueRow; selected: boolean; onStep: (step: 1 | -1) => void }) {
+function QueueRow({ row, index, selected, onStep }: { row: CaseQueueRow; index: number; selected: boolean; onStep: (step: 1 | -1) => void }) {
   const flag = attention(row)
   return (
-    <li>
+    // Rows animate when they first appear (load, filter, a new case), not on every 5 s refresh.
+    <li className="animate-rise-in" style={{ '--i': index } as React.CSSProperties}>
       <NavLink
         to={`/agent/cases/${row.case_id}`}
         data-case={row.case_id}
@@ -324,7 +331,7 @@ function QueueRow({ row, selected, onStep }: { row: CaseQueueRow; selected: bool
           }
         }}
         className={cn(
-          'relative flex flex-col gap-2 overflow-hidden rounded-xl px-4 py-3 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+          'relative flex flex-col gap-2 overflow-hidden rounded-xl px-4 py-3 outline-none transition-[background-color,box-shadow] duration-200 ease-out focus-visible:ring-2 focus-visible:ring-ring',
           // Rows that need attention carry a light wash of their status colour instead of a side bar.
           flag
             ? TINT[flag.tone][selected ? 'selected' : 'rest']

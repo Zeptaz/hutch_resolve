@@ -86,15 +86,17 @@ function CaseDetail({ caseId }: { caseId: string }) {
       <Link to="/agent" className="inline-flex items-center gap-1 self-start text-sm font-medium text-muted-foreground hover:text-foreground lg:hidden">
         <ArrowLeft className="size-4" aria-hidden /> Queue
       </Link>
-      <CaseHeader detail={detail} loadedAt={loadedAt} refreshing={refreshing} onRefresh={() => void refresh()} stale={error != null} />
+      <div className="animate-rise-in">
+        <CaseHeader detail={detail} loadedAt={loadedAt} refreshing={refreshing} onRefresh={() => void refresh()} stale={error != null} />
+      </div>
       <div className="grid gap-5 [grid-template-areas:'why'_'review'_'tabs'] xl:grid-cols-[minmax(0,1fr)_22rem] xl:[grid-template-areas:'why_review'_'tabs_review']">
-        <div className="[grid-area:why]">
+        <div className="animate-rise-in [grid-area:why]" style={{ '--i': 1 } as React.CSSProperties}>
           <WhyHere detail={detail} />
         </div>
-        <div className="[grid-area:review] xl:sticky xl:top-4 xl:self-start">
+        <div className="animate-rise-in [grid-area:review] xl:sticky xl:top-4 xl:self-start" style={{ '--i': 2 } as React.CSSProperties}>
           <ReviewPanel detail={detail} onChanged={() => void refresh()} />
         </div>
-        <div className="min-w-0 [grid-area:tabs]">
+        <div className="min-w-0 animate-rise-in [grid-area:tabs]" style={{ '--i': 3 } as React.CSSProperties}>
           <CaseTabs detail={detail} />
         </div>
       </div>
@@ -145,10 +147,12 @@ function CaseHeader({
       {/* Four separate states, each with its own name, so none is mistaken for another. */}
       <dl className="flex flex-wrap gap-x-5 gap-y-2 text-xs">
         <State label="Case">
-          <StatusBadge tone={c.status === 'REVIEW_REQUIRED' ? 'danger' : c.status === 'RESOLVED' ? 'success' : 'info'}>{caseStatusLabel(c.status)}</StatusBadge>
+          <StatusBadge key={c.status} className="animate-pop" tone={c.status === 'REVIEW_REQUIRED' ? 'danger' : c.status === 'RESOLVED' ? 'success' : 'info'}>{caseStatusLabel(c.status)}</StatusBadge>
         </State>
         <State label="Review">
-          <ReviewBadge status={c.review_status} />
+          <span key={c.review_status} className="inline-flex animate-pop">
+            <ReviewBadge status={c.review_status} />
+          </span>
         </State>
         <State label="Evidence">
           {c.investigation ? (
@@ -158,7 +162,7 @@ function CaseHeader({
           )}
         </State>
         <State label="Ticket">
-          {handoff ? <StatusBadge tone={deliveryTone[handoff.delivery_state]}>{humanize(handoff.delivery_state)}</StatusBadge> : <StatusBadge tone="neutral">None</StatusBadge>}
+          {handoff ? <StatusBadge key={handoff.delivery_state} className="animate-pop" tone={deliveryTone[handoff.delivery_state]}>{humanize(handoff.delivery_state)}</StatusBadge> : <StatusBadge tone="neutral">None</StatusBadge>}
         </State>
       </dl>
     </header>

@@ -43,19 +43,19 @@ export function CaseTabs({ detail }: { detail: AgentCaseDetail }) {
           ))}
         </TabsList>
       </div>
-      <TabsContent value="evidence">
+      <TabsContent value="evidence" className="animate-fade-in">
         <EvidenceTab detail={detail} />
       </TabsContent>
-      <TabsContent value="actions">
+      <TabsContent value="actions" className="animate-fade-in">
         <ActionsTab detail={detail} />
       </TabsContent>
-      <TabsContent value="conversation">
+      <TabsContent value="conversation" className="animate-fade-in">
         <ConversationTab detail={detail} />
       </TabsContent>
-      <TabsContent value="receipts">
+      <TabsContent value="receipts" className="animate-fade-in">
         <ReceiptsTab receipts={detail.receipts} />
       </TabsContent>
-      <TabsContent value="history">
+      <TabsContent value="history" className="animate-fade-in">
         <HistoryTab detail={detail} />
       </TabsContent>
     </Tabs>
@@ -228,7 +228,7 @@ function RecordList({ inv }: { inv: InvestigationResult }) {
                   <span className="hidden text-xs text-muted-foreground group-open:inline">Hide</span>
                 </span>
               </summary>
-              <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg bg-card p-3 text-xs">
+              <dl className="mt-2 grid animate-expand grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg bg-card p-3 text-xs">
                 <dt className="text-muted-foreground">Record</dt>
                 <dd className="font-mono break-all">{e.source_record_id}</dd>
                 <dt className="text-muted-foreground">Version</dt>

@@ -145,7 +145,7 @@ export function ReviewPanel({ detail, onChanged }: { detail: AgentCaseDetail; on
   const notes = [...detail.review_notes].reverse()
 
   return (
-    <CardFrame icon={<ClipboardCheck />} title="Your review" tone={reviewTone[c.review_status]} aside={<ReviewBadge status={c.review_status} />}>
+    <CardFrame icon={<ClipboardCheck />} title="Your review" tone={reviewTone[c.review_status]} aside={<span key={c.review_status} className="inline-flex animate-pop"><ReviewBadge status={c.review_status} /></span>}>
       <div className="flex flex-col gap-4">
         <p className="text-muted-foreground">
           {c.review_status === 'NEW' && 'Nobody has picked this up yet.'}
@@ -182,13 +182,13 @@ export function ReviewPanel({ detail, onChanged }: { detail: AgentCaseDetail; on
           }}
         >
           {mode === 'close' && (
-            <fieldset className="flex flex-col gap-1.5">
+            <fieldset className="flex animate-expand flex-col gap-1.5">
               <legend className="mb-1.5 text-xs font-semibold">Outcome</legend>
               {(Object.keys(DISPOSITION) as Disposition[]).map((d) => (
                 <label
                   key={d}
                   className={cn(
-                    'flex cursor-pointer gap-2 rounded-lg bg-card px-3 py-2 ring-1 ring-transparent has-focus-visible:ring-ring',
+                    'flex cursor-pointer gap-2 rounded-lg bg-card px-3 py-2 ring-1 ring-transparent transition-shadow duration-150 has-focus-visible:ring-ring',
                     draft.disposition === d && 'ring-foreground/40',
                   )}
                 >
@@ -242,7 +242,7 @@ export function ReviewPanel({ detail, onChanged }: { detail: AgentCaseDetail; on
             </p>
           </div>
 
-          {mode === 'close' && <p className="text-xs text-muted-foreground">Closing the review changes no account, evidence or ticket status.</p>}
+          {mode === 'close' && <p className="animate-fade-in text-xs text-muted-foreground">Closing the review changes no account, evidence or ticket status.</p>}
 
           {changedSince && feedback?.kind !== 'conflict' && (
             <Notice tone="warning">
@@ -272,7 +272,7 @@ export function ReviewPanel({ detail, onChanged }: { detail: AgentCaseDetail; on
             {feedback?.kind === 'saved' ? 'Saved.' : ''}
           </p>
           {feedback?.kind === 'saved' && (
-            <p className="flex flex-wrap items-center gap-2 text-xs text-success">
+            <p className="flex animate-pop flex-wrap items-center gap-2 text-xs text-success">
               Saved as version {feedback.result.version}.
               {feedback.result.review_sync_state !== 'NOT_APPLICABLE' && (
                 <StatusBadge tone={feedback.result.review_sync_state === 'SYNCED' ? 'success' : 'warning'}>{syncLabel(feedback.result.review_sync_state)}</StatusBadge>
@@ -299,7 +299,7 @@ export function ReviewPanel({ detail, onChanged }: { detail: AgentCaseDetail; on
           ) : (
             <ol className="flex max-h-80 flex-col gap-2 overflow-y-auto">
               {notes.map((n) => (
-                <li key={n.id} className="rounded-xl bg-card px-3 py-2">
+                <li key={n.id} className="animate-bubble-in rounded-xl bg-card px-3 py-2">
                   <p className="whitespace-pre-wrap">{n.note}</p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     {n.actor_id} · {formatDateTime(n.created_at)}
@@ -316,7 +316,7 @@ export function ReviewPanel({ detail, onChanged }: { detail: AgentCaseDetail; on
 
 function Notice({ tone, children }: { tone: 'warning' | 'danger'; children: React.ReactNode }) {
   return (
-    <div role="alert" className={cn('flex gap-2 rounded-lg px-3 py-2 text-xs', tone === 'danger' ? 'bg-destructive/10 text-destructive' : 'bg-warning/25 text-foreground')}>
+    <div role="alert" className={cn('flex animate-fade-in gap-2 rounded-lg px-3 py-2 text-xs', tone === 'danger' ? 'bg-destructive/10 text-destructive' : 'bg-warning/25 text-foreground')}>
       <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
       <span>{children}</span>
     </div>
