@@ -1,6 +1,6 @@
 # Shared implementation contracts v1.0.0
 
-**Mixed implementation status.** Resolve implements health/readiness, session lifecycle, customer-scoped account reads, public scoped case reads/investigation routes, and an in-process facade for conversation/case creation and persisted A/D ledger investigations. Customer action proposal/confirmation routes persist immutable decisions and accepted `PENDING` operations; mock-provider execution, operation polling and Trust Receipt reads are implemented. Agent queue/detail/versioned review APIs are implemented, with local append-only review and audit history. Review status synchronization to a mock ticket provider, the conversation controller and both frontends remain future work. See [OpenAPI 3.1](contracts/openapi.json). Existing external Voice interfaces are implemented but have known streaming failures. [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
+**Mixed implementation status.** Resolve implements health/readiness, session lifecycle, scoped case APIs, and an in-process facade for conversation/case creation and persisted investigations. Action proposal/confirmation routes, mock-provider execution, operation polling, Trust Receipts and agent review APIs are implemented. The Resolve-side Voice bridge now provisions scoped short-lived browser grants, verifies and deduplicates signed callbacks, and projects finalized turns through an injected Tevin conversation service. The live Tevin controller, external Voice runtime qualification and both frontends remain future work. See [OpenAPI 3.1](contracts/openapi.json). [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
 
 ## Ownership and connections
 
@@ -11,7 +11,7 @@ One Resolve process hosts Tevin's conversation controller and Harry's business s
 | Browser -> Resolve | `/api/v1`; Vite localhost:5173 proxies to localhost:8080 | Customer/agent session cookie and CSRF |
 | Conversation -> Resolve facade | In-process async methods | AuthContext from middleware or validated Voice binding |
 | Resolve -> PostgreSQL | localhost:55432/hutch_resolve | Resolve role; separate sandbox-provider role |
-| Resolve -> Voice | VOICE_BASE_URL default http://localhost:8088 + /api/hutch/sessions | Existing HMAC |
+| Resolve -> Voice | VOICE_BASE_URL default http://localhost:8088 + /api/hutch/sessions | HMAC-SHA256, same event ID/body on one retry |
 | Voice -> Resolve | HUTCH_RESOLVE_BASE_URL includes /api/v1 | HMAC plus stored binding scope |
 | Browser -> Voice | Returned absolute WebSocket URL | Exact Origin, single-use grant subprotocol |
 
@@ -75,8 +75,8 @@ All paths use `/api/v1`; OpenAPI defines exact fields and response models. Sessi
 | GET /operations/{id} | Customer session or agent run scope ->OperationView |
 | POST /cases/{id}/escalations | expected_version, investigation_id, reason ->201 CREATE_REVIEW_TICKET ProposalView |
 | GET /cases/{id}/receipt | Customer session or agent run scope, optional revision ->stored ReceiptView |
-| POST /conversations/{id}/voice-sessions | Empty JSON, server-derived scope/origin ->201 VoiceSessionGrant |
-| POST /integrations/voice/turns; /events | Existing signed Voice body ->strict Voice result/ack |
+| POST /conversations/{id}/voice-sessions | Implemented: customer session, Origin+CSRF, session/account/run-scoped binding, outbound Voice grant ->201 VoiceSessionGrant |
+| POST /integrations/voice/turns; /events | Implemented: strict signed body, active binding scope and durable event/turn replay -> Voice result/ack; turn handling requires injected Tevin service |
 | GET /agent/cases | Implemented: filters, exact case/line alias search, signed cursor -> scoped queue |
 | GET /agent/cases/{id} | Implemented: sandbox-scoped AgentCaseDetail |
 | PATCH /agent/cases/{id}/review | Implemented: versioned/idempotent review and internal note; delivered mock ticket gets a durable sync job |
@@ -122,7 +122,7 @@ Commit local review/audit atomically. If provider ticket exists, queue its statu
 
 ## In-process facade and events
 
-Tevin exports `ConversationService.handle_turn(AuthContext, NormalizedTurn) -> TurnResult`. Text supplies expected conversation version; Voice bridge obtains it from the validated binding's conversation. NormalizedTurn includes channel, stable turn ID, input, language and optional trusted Voice presentation evidence. Browser body cannot set trusted channel/presentation fields.
+Tevin exports `ConversationService.handle_turn(AuthContext, NormalizedTurn) -> TurnResult`. Text supplies expected conversation version; Voice bridge obtains conversation/account/session scope from the validated binding. For Voice, it passes `channel=VOICE`, stable turn/downstream UUIDs, transcript/language, and trusted VoiceConsentEvidence constructed only after HMAC and binding validation. The service's Voice result projection is `response_id`, optional `case_id`, `reply_text`, `speech_text`, optional `pending_question`, `proposal`, `operation_status`, and `end_session`. Browser body cannot set trusted channel/presentation fields.
 
 Harry exports ResolveFacade methods create_conversation/get_account/create_case/get_case/investigate/propose_action/confirm_action/prepare_escalation/get_operation/get_receipt. Each accepts AuthContext plus typed request; return types match corresponding public domain DTOs. The current facade implements conversation creation, origin-turn case creation, scoped case reads, persisted balance and VAS-dispute investigations, action proposals, explicit accept/decline persistence, operation reads and receipt reads. The single in-process worker claims leased operations and records sandbox results using separate provider credentials. Also provide scoped ConversationRepository (claim/load/save turn, dialogue state, active-case selection) and KnowledgeRepository (bounded lexical lookup with reviewed citation/version). Tevin owns dialogue schema; Harry owns storage/migrations.
 
@@ -147,11 +147,11 @@ Internal events persist in PostgreSQL, not a broker. Envelope: event_id, event_t
 
 The [existing wire contract](https://github.com/Zeptaz/hutch_zeptazvoice/blob/main/docs/hutch-resolve-contract.md) remains authoritative for current Voice shapes. OpenAPI mirrors strict VoiceTurnRequest/Response/EventRequest. Do not append fields without coordinating strict-model compatibility.
 
-Resolve session creation body: binding_id, conversation_id, voice_session_id, account_id, origin, expires_at(Unix seconds). Voice returns browser_grant, websocket_path, websocket_url and expires_at. Grant at most60s, single use, origin/session bound. Browser protocols `zeptaz-hutch-v1` and `hutch-grant.{token}`. Binary mono PCM16 in16kHz/out24kHz; existing16KiB frame/120s call/3.84MB audio limits.
+Resolve session creation body: binding_id, conversation_id, voice_session_id, account_id, origin, expires_at(Unix seconds). Resolve stores the scoped binding before calling Voice and revokes it if grant provisioning fails. Binding max180s covers the 60-second browser grant window plus a full 120-second call; the browser grant itself is single use and origin/session bound. Voice returns browser_grant, websocket_path, websocket_url and expires_at. Browser protocols `zeptaz-hutch-v1` and `hutch-grant.{token}`. Binary mono PCM16 in16kHz/out24kHz; existing16KiB frame/120s call/3.84MB audio limits.
 
 Voice turn: binding_id, voice_session_id, event_id, turn_id, transcript, language, is_final=true, nullable presented_proposal_id/hash. Response: response_id, nullable case_id, reply_text, speech_text, nullable pending_question/proposal/operation_status, end_session. Detailed cards/receipts are fetched by browser from Resolve. Events connected/disconnected/error/usage carry binding/session/event IDs and details; Resolve returns accepted/event_id. Delivery is currently best effort; missing events do not prove call state.
 
-HMAC headers: X-Voice-Timestamp, X-Voice-Event-Id, X-Voice-Body-Sha256, X-Voice-Signature. HMAC-SHA256 over UTF-8 `timestamp.event_id.body_sha256`; hash exact transmitted bytes; max60s skew. Header/body event IDs match. Verify signature and binding scope before deduplication; same event/body replays result, changed body409. Deduplicate turn_id separately under conversation so two envelopes cannot repeat a turn.
+HMAC headers: X-Voice-Timestamp, X-Voice-Event-Id, X-Voice-Body-Sha256, X-Voice-Signature. HMAC-SHA256 over UTF-8 `timestamp.event_id.body_sha256`; hash exact transmitted bytes; max60s skew. Header/body event IDs match. Resolve verifies signature and active binding scope before deduplication; same event/body replays result, changed body409. It deduplicates `turn_id` separately under conversation, leases a turn before the Tevin call, and reuses its persisted downstream key on recovery.
 
 Existing connect timeout2s/read8s; at most one turn retry on network timeout/5xx, identical body/event/turn IDs. Resolve returns within budget and does not wait for account execution. Model extraction uses a total6s budget including at most one repair; structured fallback handles exhaustion.
 
@@ -174,7 +174,8 @@ Typed in-process ports: get_account, get_statement, list_recharges, list_offers/
 | DEMO_IDENTITIES_JSON | Resolve secret config | JSON map: identity -> `{credential_sha256, role, principal_id, sandbox_id, account_id?}`; credential hashes and fixed synthetic scope are server-side |
 | APP_SECRET_KEY | Resolve secret config | Random secret >=32 bytes for CSRF derivation; replace the example value |
 | VOICE_BASE_URL | Resolve server | http://localhost:8088 |
-| HUTCH_RESOLVE_HMAC_SECRET | Both servers | Same random secret, minimum32 characters |
+| VOICE_HMAC_SECRET | Resolve server | Random secret >=32 bytes; set the same value as Voice's `HUTCH_RESOLVE_HMAC_SECRET` |
+| HUTCH_RESOLVE_HMAC_SECRET | Voice server | Same random secret as Resolve `VOICE_HMAC_SECRET`, minimum32 bytes |
 | HUTCH_RESOLVE_BASE_URL | Voice server | http://localhost:8080/api/v1 |
 | ZEPTAZ_PUBLIC_BASE_URL | Voice server | Reachable HTTP(S) Voice base for returned WS URL |
 | HUTCH_VOICE_ALLOWED_ORIGINS | Voice server | Exact UI origins, no wildcard |

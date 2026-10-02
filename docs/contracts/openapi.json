@@ -3,12 +3,12 @@
   "info": {
     "title": "HUTCH Resolve planned API",
     "version": "1.0.0",
-    "description": "Shared Resolve wire contract v1.0.0. Implemented routes include health/readiness, session lifecycle, customer account/case/investigation APIs, proposal/confirmation, operation/receipt, and agent queue/detail/review. Conversation/case creation remains in the in-process facade; conversation HTTP routes remain pending. See docs/contracts.md and context.md for status."
+    "description": "Shared Resolve wire contract v1.0.0. Implemented routes include health/readiness, session lifecycle, customer account/case/investigation APIs, action/receipt, agent review, and signed Voice session/callback endpoints. Conversation turns depend on Tevin's injected in-process controller; full frontends and live Voice qualification remain pending. See docs/contracts.md and context.md for status."
   },
   "servers": [
     {
       "url": "http://localhost:8080/api/v1",
-      "description": "Proposed local Resolve runtime"
+      "description": "Local Resolve runtime"
     }
   ],
   "paths": {
@@ -2348,7 +2348,7 @@
       "post": {
         "operationId": "create_voice_binding",
         "summary": "create voice binding",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Implemented: customer session, exact Origin and CSRF required; binding is scoped to the session, account, conversation, active sandbox run, origin and short expiry. Requires configured Voice service.",
         "tags": [
           "Resolve"
         ],
@@ -2502,7 +2502,7 @@
       "post": {
         "operationId": "receive_voice_turn",
         "summary": "receive voice turn",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Implemented signed callback. Signature, active binding scope, and event/turn idempotency are checked before an injected ConversationService handles the finalized turn. A missing conversation service returns 503.",
         "tags": [
           "Voice integration"
         ],
@@ -2647,7 +2647,7 @@
       "post": {
         "operationId": "receive_voice_event",
         "summary": "receive voice event",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Implemented signed lifecycle callback. Signature and active binding scope are checked before durable event replay/acknowledgement.",
         "tags": [
           "Voice integration"
         ],

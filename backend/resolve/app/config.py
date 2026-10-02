@@ -4,6 +4,7 @@ import os
 import json
 import re
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 from uuid import UUID
 
 
@@ -25,6 +26,8 @@ class Settings:
     session_minutes: int
     demo_identities: dict[str, DemoIdentity]
     sandbox_database_url: str | None = None
+    voice_base_url: str | None = None
+    voice_hmac_secret: bytes | None = None
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -36,6 +39,22 @@ class Settings:
         sandbox_database_url = os.getenv("SANDBOX_DATABASE_URL", "").strip() or None
         if sandbox_database_url and not sandbox_database_url.startswith("postgresql+psycopg://"):
             raise RuntimeError("SANDBOX_DATABASE_URL must use the psycopg PostgreSQL driver")
+        voice_base_url = os.getenv("VOICE_BASE_URL", "http://localhost:8088").strip().rstrip("/") or None
+        if voice_base_url:
+            parts = urlsplit(voice_base_url)
+            try:
+                port = parts.port
+            except ValueError as exc:
+                raise RuntimeError("VOICE_BASE_URL has an invalid port") from exc
+            if (parts.scheme not in {"http", "https"} or not parts.hostname or parts.path
+                    or parts.query or parts.fragment or parts.username or parts.password or port == 0):
+                raise RuntimeError("VOICE_BASE_URL must be an absolute HTTP(S) origin without path, credentials, query or fragment")
+            if parts.scheme == "http" and parts.hostname not in {"localhost", "127.0.0.1", "::1"}:
+                raise RuntimeError("VOICE_BASE_URL must use HTTPS outside local development")
+        voice_secret_text = os.getenv("VOICE_HMAC_SECRET", "")
+        voice_hmac_secret = voice_secret_text.encode("utf-8") if voice_secret_text else None
+        if voice_hmac_secret is not None and len(voice_hmac_secret) < 32:
+            raise RuntimeError("VOICE_HMAC_SECRET must contain at least 32 bytes")
         origins = frozenset(
             value.strip().rstrip("/")
             for value in os.getenv("APP_ORIGINS", "http://localhost:5173").split(",")
@@ -96,4 +115,6 @@ class Settings:
             session_minutes=30,
             demo_identities=identities,
             sandbox_database_url=sandbox_database_url,
+            voice_base_url=voice_base_url,
+            voice_hmac_secret=voice_hmac_secret,
         )
