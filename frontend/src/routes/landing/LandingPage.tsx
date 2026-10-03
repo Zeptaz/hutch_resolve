@@ -22,6 +22,7 @@ import {
 import { cn } from '@/lib/utils'
 import { Bubble, ChatPreview, DashboardPreview, DesktopFrame, HeroScreen, PhoneFrame, VoicePreview } from './devices'
 import { loadAgentPage, loadCustomerPage } from '@/routes/pages'
+import { ResolveWordmark } from './Logo'
 import { Splash } from './Splash'
 
 /*
@@ -94,13 +95,8 @@ function useWarmPages() {
 
 /* ---------- shared bits ---------- */
 
-/** Text-only wordmark, like the rest of the app. */
 function Wordmark({ className }: { className?: string }) {
-  return (
-    <span className={cn('text-xl font-semibold tracking-[-0.03em] whitespace-nowrap lg:text-[26px]', className)}>
-      HUTCH <span className="text-primary">Resolve</span>
-    </span>
-  )
+  return <ResolveWordmark className={cn('text-xl font-semibold tracking-[-0.03em] lg:text-[26px]', className)} />
 }
 
 function Eyebrow({ children, className }: { children: React.ReactNode; className?: string }) {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { LayoutDashboard, MessageCircle, Mic } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ResolveWordmark } from './Logo'
 
 const SEEN_KEY = 'hutch-resolve.intro-seen'
 const HOLD_MS = 1500
@@ -55,9 +56,7 @@ export function Splash() {
     >
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(40rem_28rem_at_50%_45%,color-mix(in_oklch,var(--primary)_14%,transparent),transparent)]" />
       <div className="relative flex flex-col items-center gap-6">
-        <p className="animate-rise-in text-4xl font-medium tracking-[-0.03em] text-[#111114]">
-          HUTCH <span className="text-primary">Resolve</span>
-        </p>
+        <ResolveWordmark className="animate-rise-in text-4xl font-medium tracking-[-0.03em] text-[#111114]" />
         <div className="flex items-center gap-3 text-muted-foreground">
           {[MessageCircle, Mic, LayoutDashboard].map((Icon, i) => (
             <span
