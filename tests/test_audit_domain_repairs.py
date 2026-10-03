@@ -95,6 +95,16 @@ def test_voice_confirmation_requires_trusted_evidence_before_database_access():
     assert exc.value.code == "VOICE_CONSENT_REQUIRED"
 
 
+def test_action_acceptance_is_rejected_before_database_access_when_worker_is_unavailable():
+    facade = ResolveFacade(_ScopeOnlyEngine(), provider=object(), action_execution_available=False)
+    context = AuthContext(session_id=uuid4(), principal_id="customer", role="CUSTOMER",
+                          sandbox_id=uuid4(), account_id=uuid4(), request_id=uuid4(), channel="TEXT")
+    with pytest.raises(ResolveError) as exc:
+        facade.confirm_action(context, proposal_id=uuid4(), proposal_hash="hash", decision="ACCEPT",
+                              client_turn_id=uuid4())
+    assert (exc.value.status_code, exc.value.code, exc.value.retryable) == (503, "ACTION_EXECUTION_UNAVAILABLE", True)
+
+
 @pytest.mark.parametrize("transcript,decision,expected_error", [
     ("yes, but later", "ACCEPT", "VOICE_CONSENT_UNCLEAR"),
     ("no", "ACCEPT", "VOICE_DECISION_MISMATCH"),

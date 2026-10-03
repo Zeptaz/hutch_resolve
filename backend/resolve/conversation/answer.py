@@ -19,6 +19,7 @@ import asyncio
 import json
 import re
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -31,7 +32,8 @@ from .rewrite import STYLE, _numbers, has_magnitude, soften_singlish_k
 ANSWER_PROMPT_VERSION = "answer-v3"
 ANSWER_BUDGET_SECONDS = 6.0
 
-_DOMAIN = re.compile(r"\b(?:[a-z0-9-]+\.)+(?:lk|com|net|org)\b", re.IGNORECASE)
+_DOMAIN = re.compile(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b", re.IGNORECASE)
+_URL = re.compile(r"(?i)(?:(?:https?://|www\.)?)(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>\"']*)?")
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
 # "1. Open the app" — step numbers at the start of a line are layout, not facts.
 _LIST_MARKER = re.compile(r"(?m)^\s*[1-9][.)]\s+")
@@ -81,16 +83,22 @@ def _contacts(text: str) -> set[str]:
     return {m.lower() for m in _DOMAIN.findall(text)} | {m.lower() for m in _EMAIL.findall(text)}
 
 
+def _urls(text: str) -> set[str]:
+    """Return complete explicit URLs, trimming only terminal prose punctuation."""
+    return {match.rstrip(".,!?;:)") for match in _URL.findall(text)}
+
+
 def ungrounded_reason(answer: str, sources: str) -> str | None:
     """Which check an answer fails (NUMBERS, CONTACTS, LINK, MAGNITUDE, LENGTH), or None. Never its text."""
     if len(answer) > 1500:
         return "LENGTH"
     answer = _LIST_MARKER.sub("", answer)
-    if not _numbers(answer) <= _numbers(sources):
+    answer_numbers, source_numbers = _numbers(answer), _numbers(sources)
+    if answer_numbers - source_numbers:
         return "NUMBERS"
     if not _contacts(answer) <= _contacts(sources):
         return "CONTACTS"
-    if "http" in answer.lower() and "http" not in sources.lower():
+    if not _urls(answer) <= _urls(sources):
         return "LINK"
     if has_magnitude(answer) and not has_magnitude(sources):
         return "MAGNITUDE"

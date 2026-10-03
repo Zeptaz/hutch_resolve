@@ -46,6 +46,7 @@ class ConversationView(StrictModel):
     pending_question: PendingQuestion | None
     pending_proposal: ProposalView | None
     operation_ids: list[UUID]
+    pending_turn: dict | None = None
 
 
 def _mutating_context(request: Request, origin: str | None, csrf: str | None):
@@ -102,6 +103,25 @@ def build_conversation_router() -> APIRouter:
         try:
             return await service.handle_turn(_typed_context(context), NormalizedTurn.from_message(id, body))
         except ConversationError as error:
-            raise ResolveError(error.http_status, error.code, error.message, error.retryable) from error
+            raise ResolveError(error.http_status, error.code, error.message, error.retryable, error.details) from error
+
+    @router.post("/conversations/{id}/turns/{turn_id}/resume", response_model=TurnResult)
+    async def resume_turn(id: UUID, turn_id: UUID, request: Request,
+                         origin: str | None = Header(default=None),
+                         csrf: str | None = Header(default=None, alias="X-CSRF-Token")):
+        context = await asyncio.to_thread(_mutating_context, request, origin, csrf)
+        service = request.app.state.conversation_service
+        if service is None:
+            raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Conversation service is unavailable", True)
+        repository = PostgresConversationRepository(request.app.state.database.engine)
+        try:
+            saved = await asyncio.to_thread(repository.resume_payload, _typed_context(context), id, turn_id)
+            current = await asyncio.to_thread(repository.get_view, _typed_context(context), id)
+            body = MessageRequest.model_validate({
+                "client_turn_id": turn_id, "expected_version": current["version"], **saved,
+            })
+            return await service.handle_turn(_typed_context(context), NormalizedTurn.from_message(id, body))
+        except ConversationError as error:
+            raise ResolveError(error.http_status, error.code, error.message, error.retryable, error.details) from error
 
     return router

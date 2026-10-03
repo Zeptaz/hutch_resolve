@@ -263,7 +263,7 @@ export interface paths {
         put?: never;
         /**
          * confirm or decline
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Customer confirmation is idempotent. ACCEPT is durably queued only when action execution is available; otherwise returns retryable 503 ACTION_EXECUTION_UNAVAILABLE without recording the acceptance. DECLINE remains available.
          */
         post: operations["confirm_or_decline"];
         delete?: never;
@@ -303,7 +303,7 @@ export interface paths {
         put?: never;
         /**
          * prepare escalation
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Persist the reason with a CREATE_REVIEW_TICKET proposal; normal customer confirmation is still required before delivery.
          */
         post: operations["prepare_escalation"];
         delete?: never;
@@ -481,11 +481,31 @@ export interface paths {
         };
         /**
          * readiness
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Reports database readiness and independent runtime capabilities. Optional model and Voice integrations may be unavailable while text remains usable; actions require the sandbox writer and operation worker.
          */
         get: operations["readiness"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{id}/turns/{turn_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume an expired conversation turn
+         * @description Resumes only a persisted text turn using its stored normalized input and stable command keys. Voice consent is never reconstructed from browser data.
+         */
+        post: operations["resume_turn"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1018,6 +1038,7 @@ export interface components {
             pending_question: components["schemas"]["PendingQuestion"] | null;
             pending_proposal: components["schemas"]["ProposalView"] | null;
             operation_ids: string[];
+            pending_turn: components["schemas"]["PendingTurn"] | null;
         };
         ReviewRequest: ({
             expected_version: number;
@@ -1478,9 +1499,30 @@ export interface components {
             type: "playback_complete";
             response_id: string;
         };
+        PendingTurn: {
+            /** Format: uuid */
+            turn_id: string;
+            /** @enum {string} */
+            state: "IN_PROGRESS" | "RECOVERY_REQUIRED";
+            /** Format: date-time */
+            retry_after: string;
+        };
+        Readiness: {
+            /** @enum {string} */
+            status: "ready" | "unavailable";
+            capabilities: {
+                text: boolean;
+                actions: boolean;
+                voice: boolean;
+                model: boolean;
+            };
+        };
     };
     responses: never;
-    parameters: never;
+    parameters: {
+        /** @description Selects the browser session realm for shared customer/agent reads. Required when both cookies are present. */
+        ResolveRealm: "customer" | "agent";
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -2465,7 +2507,10 @@ export interface operations {
     get_case: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Selects the browser session realm for shared customer/agent reads. Required when both cookies are present. */
+                "X-Resolve-Realm"?: components["parameters"]["ResolveRealm"];
+            };
             path: {
                 id: string;
             };
@@ -2832,7 +2877,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Error; see shared contract codes */
+            /** @description Action execution unavailable or dependency unavailable; see Error.code. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -2846,7 +2891,10 @@ export interface operations {
     get_operation: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Selects the browser session realm for shared customer/agent reads. Required when both cookies are present. */
+                "X-Resolve-Realm"?: components["parameters"]["ResolveRealm"];
+            };
             path: {
                 id: string;
             };
@@ -3030,7 +3078,10 @@ export interface operations {
             query?: {
                 revision?: number;
             };
-            header?: never;
+            header?: {
+                /** @description Selects the browser session realm for shared customer/agent reads. Required when both cookies are present. */
+                "X-Resolve-Realm"?: components["parameters"]["ResolveRealm"];
+            };
             path: {
                 id: string;
             };
@@ -3772,7 +3823,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Health"];
+                    "application/json": components["schemas"]["Readiness"];
                 };
             };
             /** @description Error; see shared contract codes */
@@ -3829,7 +3880,78 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Error; see shared contract codes */
+            /** @description Database unavailable; all capability flags are false */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Readiness"];
+                };
+            };
+        };
+    };
+    resume_turn: {
+        parameters: {
+            query?: never;
+            header: {
+                Origin: string;
+                "X-CSRF-Token": string;
+            };
+            path: {
+                id: string;
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Canonical turn result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TurnResult"];
+                };
+            };
+            /** @description Origin or CSRF rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conversation or pending turn unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Turn still active or recovery conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Dependency unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

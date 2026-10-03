@@ -178,3 +178,14 @@ Opt-in suite limitation: the legacy PostgreSQL modules mutate shared fixture row
 
 
 Work order and time boxes are in context.md. Harry owns the critical path; publish interfaces early and integrate one vertical text slice before secondary features.
+
+
+## Audit fix phase — 2026-10-03
+
+The [audit and remediation status](../audits/2026-10-03-resolve.md) tracks findings from baseline `2b52b72` on `ResolveDev`. The implementation remains within the reviewed architecture and this phase changed only `hutch_resolve`; it did not access the Zeptaz Voice repository.
+
+- Fixed and unit/API-verified: AUD-01 deterministic response/rewrite safeguards; AUD-02 investigation Origin/CSRF; AUD-04 late microphone cleanup; AUD-06 explicit auth realm; AUD-11 redacted catch-all error envelope and request ID. AUD-05 escalation API/reason, AUD-07 Voice operation projection, AUD-08 review-event backfill, AUD-09 aggregate case status, AUD-10 encrypted idempotent Voice grant provisioning, AUD-12 shared throttling and proxy policy are implemented, but their PostgreSQL transactional/recovery acceptance checks remain open.
+- AUD-03 is partial: atomic expected-version claim, persisted text input and safe same-turn resume are implemented. Abandoned Voice and old claims without saved input are refused without replaying consent or side effects, but still need an authorized durable reconciliation path to unblock subsequent turns.
+- Readiness now advertises text/actions/Voice/model capabilities. Both the HTTP confirmation endpoint and shared facade reject ACCEPT before persistence when action execution is unavailable. Canonical contract/OpenAPI and generated frontend types include readiness capabilities and retryable `503 ACTION_EXECUTION_UNAVAILABLE`.
+
+Verification checkpoint: full default backend suite **438 passed, 35 PostgreSQL-gated skips**; focused action-capability/domain tests **56 passed, 1 PostgreSQL-gated skip**; Python compileall and `git diff --check` pass. Frontend typecheck, production build and final mock e2e (18/18) pass. Docker engine access is denied and no disposable PostgreSQL URL is configured, so migration, database locking, worker/outbox, concurrent idempotency, and crash-recovery changes are not fully qualified. Keep related tasks open until those gates pass. No commit/push has yet been made for this checkpoint.

@@ -62,6 +62,7 @@ def create_app(
         sandbox_database = None
         operation_task = None
         owns_voice_client = False
+        model_available = False
         if active_database is None:
             if active_settings is None:
                 load_dotenv()
@@ -90,7 +91,9 @@ def create_app(
             provider = PostgresSandboxProvider(active_database.engine, sandbox_engine)
         application.state.account_provider = provider
         application.state.resolve_facade = resolve_facade or (
-            ResolveFacade(active_database.engine, provider, cursor_secret=active_settings.app_secret_key) if hasattr(active_database, "engine") else None
+            ResolveFacade(active_database.engine, provider, cursor_secret=active_settings.app_secret_key,
+                          action_execution_available=sandbox_engine is not None)
+            if hasattr(active_database, "engine") else None
         )
         active_voice_client = voice_client
         if active_voice_client is None and active_settings.voice_base_url and active_settings.voice_hmac_secret:
@@ -101,6 +104,7 @@ def create_app(
         if active_conversation_service is None and hasattr(active_database, "engine") and application.state.resolve_facade:
             engine = active_database.engine
             model = GeminiModelClient.from_env()
+            model_available = model is not None
             active_conversation_service = ConversationService(
                 ResolveFacadeAdapter(application.state.resolve_facade),
                 PostgresConversationRepository(engine), PostgresKnowledgeRepository(engine),
@@ -118,6 +122,12 @@ def create_app(
             runner = OperationRunner(active_database.engine, sandbox_engine)
             application.state.operation_runner = runner
             operation_task = asyncio.create_task(_operation_loop(runner))
+        # An injected facade is used by tests and embedded integrations which own
+        # their execution boundary. Production needs the separate writer and worker.
+        application.state.action_execution_available = (
+            application.state.operation_runner is not None or resolve_facade is not None
+        )
+        application.state.model_available = model_available
         try:
             yield
         finally:
@@ -159,14 +169,15 @@ def create_app(
                 "message": exc.message,
                 "retryable": exc.retryable,
                 "request_id": getattr(request.state, "request_id", str(uuid4())),
-                "details": {},
+                "details": exc.details,
             }},
+            headers={"Retry-After": "600"} if exc.status_code == 429 else None,
         )
 
     @application.exception_handler(ConversationError)
     async def conversation_error_handler(request: Request, exc: ConversationError) -> JSONResponse:
         return await resolve_error_handler(
-            request, ResolveError(exc.http_status, exc.code, exc.message, exc.retryable))
+            request, ResolveError(exc.http_status, exc.code, exc.message, exc.retryable, exc.details))
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -184,20 +195,44 @@ def create_app(
             }},
         )
 
+    @application.exception_handler(Exception)
+    async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        request_id = getattr(request.state, "request_id", str(uuid4()))
+        request.state.error_code = "INTERNAL_ERROR"
+        logger.error("Unhandled Resolve request failure (%s, request_id=%s)", type(exc).__name__, request_id)
+        return JSONResponse(status_code=500, content={"error": {
+            "code": "INTERNAL_ERROR",
+            "message": "The request could not be completed",
+            "retryable": False,
+            "request_id": request_id,
+            "details": {},
+        }}, headers={"X-Request-Id": request_id})
+
     @application.get("/api/v1/healthz", tags=["Operations"])
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @application.get("/api/v1/readyz", tags=["Operations"], response_model=None)
-    def readiness(request: Request) -> JSONResponse | dict[str, str]:
+    def readiness(request: Request) -> JSONResponse | dict[str, object]:
         try:
             ready = request.app.state.database.probe()
         except Exception as exc:
             logger.warning("Database readiness probe failed (%s)", type(exc).__name__)
             ready = False
         if not ready:
-            return JSONResponse(status_code=503, content={"status": "unavailable"})
-        return {"status": "ready"}
+            return JSONResponse(status_code=503, content={
+                "status": "unavailable",
+                "capabilities": {"text": False, "actions": False, "voice": False, "model": False},
+            })
+        return {
+            "status": "ready",
+            "capabilities": {
+                "text": request.app.state.conversation_service is not None,
+                "actions": request.app.state.action_execution_available,
+                "voice": request.app.state.voice_client is not None,
+                "model": request.app.state.model_available,
+            },
+        }
 
     return application
 

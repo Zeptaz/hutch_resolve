@@ -18,6 +18,7 @@ import asyncio
 import json
 import re
 import time
+from collections import Counter
 from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -29,7 +30,9 @@ from .model import ModelClient, ModelError, ModelReply
 REWRITE_PROMPT_VERSION = "rewrite-v2"
 REWRITE_BUDGET_SECONDS = 5.0
 
-_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+# Keep signs, decimal precision, separators, percentages and repeated values. A set of
+# punctuation-stripped numbers made 80.00 interchangeable with 8000 and lost sign.
+_NUMBER = re.compile(r"(?<![\w])[-+]?\d+(?:,\d{3})*(?:\.\d+)?%?")
 # "80k" / "LKR 5m" read as thousand/million; Singlish endings like "420kata" are fine, and so is a bare
 # single digit counting things ("package 3k" = three packages).
 _MAGNITUDE = re.compile(r"(?P<currency>(?:LKR|Rs\.?)\s?)?(?P<number>\d[\d,.]*)\s?[kKmM]\b")
@@ -85,8 +88,9 @@ class _Rewrite(BaseModel):
     reply: str = Field(min_length=1, max_length=3000)
 
 
-def _numbers(text: str) -> set[str]:
-    return {re.sub(r"[.,]", "", n).lstrip("0") or "0" for n in _NUMBER.findall(_ID.sub(" ", text))}
+def _numbers(text: str) -> Counter[str]:
+    """Multiset of literal numeric facts, excluding digits inside identifiers."""
+    return Counter(_NUMBER.findall(_ID.sub(" ", text)))
 
 
 def preserves_facts(source: str, rewrite: str) -> bool:

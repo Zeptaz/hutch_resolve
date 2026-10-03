@@ -97,6 +97,7 @@ export class VoiceCall {
   private playbackAttempts = 0
   private playbackRetryTimer = 0
   private limitTimer = 0
+  private grantRequestKey: string | null = null
 
   private handlers: CallHandlers = {}
 
@@ -159,13 +160,19 @@ export class VoiceCall {
 
     let grant
     try {
+      this.grantRequestKey ??= newId()
       grant = await request<VoiceSessionGrant>('customer', 'POST', `/conversations/${this.conversationId}/voice-sessions`, {
         body: {},
-        idempotencyKey: newId(),
+        idempotencyKey: this.grantRequestKey,
       })
     } catch (error) {
+      // A replayed unknown provider outcome requires an explicit fresh grant attempt.
+      if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'VOICE_GRANT_OUTCOME_UNKNOWN') {
+        this.grantRequestKey = null
+      }
       return this.fail({ kind: 'grant', error })
     }
+    this.grantRequestKey = null
     if (this.audio !== audio) return
 
     this.set({ phase: 'connecting' })

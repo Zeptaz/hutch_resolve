@@ -10,6 +10,8 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, text
 
+from .case_status import refresh_case_status
+
 from backend.resolve.app.auth import AuthContext, ResolveError
 from backend.resolve.providers.sandbox import AccountProvider
 
@@ -244,20 +246,23 @@ class AgentReviewService:
                 {"id": uuid4(), "actor": context.session_id, "case": case_id,
                  "details": json.dumps({"from": old_status, "to": new_status, "version": new_version,
                                         "disposition": disposition}), "now": now})
-            delivery = connection.execute(text("""
-                SELECT provider_ticket_id FROM resolve.escalation_deliveries
-                WHERE sandbox_id=:sandbox AND case_id=:case AND delivery_state='DELIVERED'
-                  AND provider_ticket_id IS NOT NULL ORDER BY updated_at DESC,id DESC LIMIT 1
-            """), {"sandbox": sandbox_id, "case": case_id}).scalar_one_or_none()
+            handoff = connection.execute(text("""
+                SELECT delivery_state,provider_ticket_id FROM resolve.escalation_deliveries
+                WHERE sandbox_id=:sandbox AND case_id=:case
+                ORDER BY updated_at DESC,id DESC LIMIT 1
+            """), {"sandbox": sandbox_id, "case": case_id}).mappings().one_or_none()
             sync_state = "NOT_APPLICABLE"
-            if delivery is not None:
+            if handoff is not None and handoff["delivery_state"] == "DELIVERED" and handoff["provider_ticket_id"]:
                 connection.execute(text("""
                     INSERT INTO resolve.review_sync_jobs
                       (id,sandbox_id,case_id,review_event_id,provider_ticket_id,status,created_at,updated_at)
                     VALUES (:id,:sandbox,:case,:event,:ticket,'PENDING',:now,:now)
                 """), {"id": event_id, "sandbox": sandbox_id, "case": case_id,
-                    "event": event_id, "ticket": delivery, "now": now})
+                    "event": event_id, "ticket": handoff["provider_ticket_id"], "now": now})
                 sync_state = "PENDING"
+            elif handoff is not None:
+                sync_state = "PENDING"
+            refresh_case_status(connection, case_id, now)
             result = {"case_id": case_id, "version": new_version, "review_status": new_status,
                 "disposition": disposition,
                 "note": {"id": event_id, "actor_id": context.principal_id, "note": stored_note,

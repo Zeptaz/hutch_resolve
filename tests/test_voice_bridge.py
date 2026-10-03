@@ -67,7 +67,11 @@ class MemoryVoiceEngine:
             "sandbox_id": RUN_ID,
             "session_id": SESSION_ID,
             "account_id": ACCOUNT_ID,
+            "expires_at": datetime.now(UTC) + timedelta(minutes=30),
+            "conversation_expires": datetime.now(UTC) + timedelta(minutes=30),
             "session_expires_at": datetime.now(UTC) + timedelta(minutes=30),
+            "session_expires": datetime.now(UTC) + timedelta(minutes=30),
+            "session_revoked": None,
             "session_revoked_at": None,
             "run_status": "ACTIVE",
         }
@@ -75,6 +79,7 @@ class MemoryVoiceEngine:
         self.turn_claims = {}
         self.integration_events = {}
         self.idempotency_records = {}
+        self.grant_requests = {}
 
     @contextmanager
     def connect(self):
@@ -92,6 +97,36 @@ class MemoryConnection:
     def execute(self, statement, params=None):
         sql = str(statement).lower()
         params = params or {}
+        if "update resolve.voice_grant_requests set encrypted_grant=null" in sql:
+            return Result()
+        if "from resolve.sessions where id=:session" in sql:
+            return Result(params["session"] if params["session"] == SESSION_ID else None)
+        if "from resolve.voice_grant_requests" in sql and "idempotency_key=:key" in sql:
+            row = self.engine.grant_requests.get((params["session"], params["key"]))
+            return Result(dict(row) if row else None)
+        if "from resolve.conversations c join resolve.sessions" in sql:
+            row = self.engine.conversation
+            if row["id"] == params["conversation"] and row["session_id"] == params["session"]:
+                return Result(dict(row))
+            return Result()
+        if "insert into resolve.voice_grant_requests" in sql:
+            row = {"id": params["id"], "request_fingerprint": params["fingerprint"],
+                   "state": "PROVISIONING", "binding_id": params["binding"],
+                   "encrypted_grant": None, "grant_expires_at": None,
+                   "outbound_event_id": params["event"], "request_body": json.loads(params["payload"])}
+            self.engine.grant_requests[(params["session"], params["key"])] = row
+            return Result()
+        if "update resolve.voice_grant_requests set state='succeeded'" in sql:
+            for row in self.engine.grant_requests.values():
+                if row["id"] == params["id"]:
+                    row.update(state="SUCCEEDED", encrypted_grant=params["encrypted"],
+                               grant_expires_at=datetime.fromtimestamp(params["expires"], UTC))
+            return Result()
+        if "update resolve.voice_grant_requests set state='unknown'" in sql:
+            for row in self.engine.grant_requests.values():
+                if row["id"] == params["id"]:
+                    row.update(state="UNKNOWN")
+            return Result()
         if "from resolve.conversations c" in sql:
             row = self.engine.conversation
             if (row["id"] == params["conversation"] and row["sandbox_id"] == params["sandbox"]
@@ -219,8 +254,8 @@ class VoiceClient:
         self.calls = []
         self.fail = fail
 
-    async def request_session(self, payload):
-        self.calls.append(payload)
+    async def request_session(self, payload, *, event_id=None):
+        self.calls.append({**payload, "event_id": event_id})
         if self.fail:
             raise VoiceServiceError("voice unavailable")
         return {
@@ -243,6 +278,7 @@ def make_client(*, conversation_service=True, voice_client=None):
         app_origins=frozenset({ORIGIN}), app_secret_key=APP_SECRET,
         cookie_secure=False, session_minutes=30, demo_identities={},
         voice_base_url="http://voice.test", voice_hmac_secret=SECRET,
+        voice_grant_encryption_key=b"g" * 32,
     )
     app.state.database = type("DatabaseStub", (), {"engine": MemoryVoiceEngine()})()
     app.state.auth_store = MemoryAuthStore()
@@ -430,26 +466,28 @@ def test_failed_voice_turn_retry_reuses_downstream_key():
 def test_voice_session_requires_customer_origin_and_csrf_and_scoped_conversation():
     client = make_client()
     path = f"/api/v1/conversations/{CONVERSATION_ID}/voice-sessions"
-    denied_origin = client.post(path, json={}, headers={"Origin": "https://attacker.test", "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie")})
+    grant_key = str(uuid4())
+    denied_origin = client.post(path, json={}, headers={"Origin": "https://attacker.test", "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie"), "Idempotency-Key": grant_key})
     assert denied_origin.status_code == 403
-    non_exact_origin = client.post(path, json={}, headers={"Origin": ORIGIN + "/", "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie")})
+    non_exact_origin = client.post(path, json={}, headers={"Origin": ORIGIN + "/", "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie"), "Idempotency-Key": grant_key})
     assert non_exact_origin.status_code == 403
-    denied_csrf = client.post(path, json={}, headers={"Origin": ORIGIN, "X-CSRF-Token": "wrong"})
+    denied_csrf = client.post(path, json={}, headers={"Origin": ORIGIN, "X-CSRF-Token": "wrong", "Idempotency-Key": grant_key})
     assert denied_csrf.status_code == 403
 
     client.app.state.database.engine.conversation["session_id"] = uuid4()
-    out_of_scope = client.post(path, json={}, headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie")})
+    out_of_scope = client.post(path, json={}, headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie"), "Idempotency-Key": grant_key})
     assert out_of_scope.status_code == 404
     assert client.app.state.voice_client.calls == []
 
     anonymous = make_client()
     anonymous.cookies.clear()
-    unauthenticated = anonymous.post(path, json={}, headers={"Origin": ORIGIN})
+    unauthenticated = anonymous.post(path, json={}, headers={"Origin": ORIGIN, "Idempotency-Key": grant_key})
     assert unauthenticated.status_code == 401
 
     expired_session = make_client()
     expired_session.app.state.database.engine.conversation["session_expires_at"] = datetime.now(UTC) - timedelta(seconds=1)
-    expired = expired_session.post(path, json={}, headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie")})
+    expired_session.app.state.database.engine.conversation["session_expires"] = datetime.now(UTC) - timedelta(seconds=1)
+    expired = expired_session.post(path, json={}, headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie"), "Idempotency-Key": grant_key})
     assert expired.status_code == 404
     assert expired_session.app.state.voice_client.calls == []
 
@@ -458,7 +496,7 @@ def test_voice_session_success_uses_mocked_voice_client_and_returns_grant():
     voice = VoiceClient()
     client = make_client(voice_client=voice)
     path = f"/api/v1/conversations/{CONVERSATION_ID}/voice-sessions"
-    response = client.post(path, json={}, headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie")})
+    response = client.post(path, json={}, headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie"), "Idempotency-Key": str(uuid4())})
 
     assert response.status_code == 201
     assert response.json()["browser_grant"] == "short-lived-test-grant"
@@ -472,9 +510,23 @@ def test_voice_session_provisioning_failure_is_safe_and_revokes_binding():
     voice = VoiceClient(fail=True)
     client = make_client(voice_client=voice)
     path = f"/api/v1/conversations/{CONVERSATION_ID}/voice-sessions"
-    response = client.post(path, json={}, headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie")})
+    response = client.post(path, json={}, headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie"), "Idempotency-Key": str(uuid4())})
 
     assert response.status_code == 503
-    assert response.json()["error"]["code"] == "DEPENDENCY_UNAVAILABLE"
+    assert response.json()["error"]["code"] == "VOICE_GRANT_OUTCOME_UNKNOWN"
     provisioned = next(row for row in client.app.state.database.engine.bindings.values() if row["id"] != BINDING_ID)
     assert provisioned["revoked_at"] is not None
+
+
+def test_voice_session_replays_identical_encrypted_grant_and_rejects_changed_scope():
+    voice = VoiceClient()
+    client = make_client(voice_client=voice)
+    path = f"/api/v1/conversations/{CONVERSATION_ID}/voice-sessions"
+    key = str(uuid4())
+    headers = {"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, "customer-session-cookie"),
+               "Idempotency-Key": key}
+    first = client.post(path, json={}, headers=headers)
+    second = client.post(path, json={}, headers=headers)
+    assert first.status_code == second.status_code == 201
+    assert first.json() == second.json()
+    assert len(voice.calls) == 1

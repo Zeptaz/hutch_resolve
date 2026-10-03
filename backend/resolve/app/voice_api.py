@@ -4,6 +4,7 @@ import hashlib
 import asyncio
 import json
 import logging
+import secrets
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -12,6 +13,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Header, Request, Response
 from pydantic import ValidationError
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import text
 
 from .auth import AuthContext, ResolveError, authenticated_customer_mutation
@@ -380,7 +382,7 @@ async def _real_voice_turn(service: RealConversationService, engine, *, context:
                                 route_key="voice_callback", event_id=payload.event_id,
                                 now=datetime.now(UTC), token=event_token)
         if isinstance(exc, ConversationError):
-            raise ResolveError(exc.http_status, exc.code, exc.message, exc.retryable) from exc
+            raise ResolveError(exc.http_status, exc.code, exc.message, exc.retryable, exc.details) from exc
         if isinstance(exc, ResolveError):
             raise
         logger.warning("Conversation Voice turn failed (%s)", type(exc).__name__)
@@ -422,6 +424,82 @@ def _revoke_binding(engine, binding_id: UUID) -> None:
                            {"now": datetime.now(UTC), "id": binding_id})
 
 
+def _encrypt_grant(key: bytes, request_id: UUID, grant: dict[str, Any]) -> bytes:
+    nonce = secrets.token_bytes(12)
+    return nonce + AESGCM(key).encrypt(nonce, canonical_json(grant), str(request_id).encode())
+
+
+def _decrypt_grant(key: bytes, request_id: UUID, encrypted: bytes) -> dict[str, Any]:
+    raw = AESGCM(key).decrypt(encrypted[:12], encrypted[12:], str(request_id).encode())
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("stored grant is invalid")
+    return value
+
+
+def _claim_voice_grant(engine, context: AuthContext, conversation_id: UUID, origin: str,
+                       idempotency_key: UUID, fingerprint: str, now: datetime):
+    """Serialize one session's grant claims and persist local binding before network I/O."""
+    with engine.begin() as connection:
+        connection.execute(text("""
+            UPDATE resolve.voice_grant_requests SET encrypted_grant=NULL
+            WHERE grant_expires_at<=:now AND encrypted_grant IS NOT NULL
+        """), {"now": now})
+        session = connection.execute(text("""
+            SELECT id FROM resolve.sessions WHERE id=:session AND sandbox_id=:sandbox
+              AND role='CUSTOMER' AND account_id=:account AND revoked_at IS NULL AND expires_at>:now
+            FOR UPDATE
+        """), {"session": context.session_id, "sandbox": context.sandbox_id,
+              "account": context.account_id, "now": now}).scalar_one_or_none()
+        if session is None:
+            raise ResolveError(401, "SESSION_EXPIRED", "Session is unavailable")
+        prior = connection.execute(text("""
+            SELECT * FROM resolve.voice_grant_requests
+            WHERE session_id=:session AND idempotency_key=:key FOR UPDATE
+        """), {"session": context.session_id, "key": idempotency_key}).mappings().one_or_none()
+        if prior is not None:
+            if prior["request_fingerprint"] != fingerprint:
+                raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Voice grant key was reused with different input")
+            return ("REPLAY", dict(prior))
+        scoped = connection.execute(text("""
+            SELECT c.id,c.sandbox_id,c.session_id,c.expires_at AS conversation_expires,
+                   s.account_id,s.expires_at AS session_expires,s.revoked_at AS session_revoked,r.run_status
+            FROM resolve.conversations c JOIN resolve.sessions s ON (s.sandbox_id,s.id)=(c.sandbox_id,c.session_id)
+            JOIN sandbox.sandbox_runs r ON r.id=c.sandbox_id
+            WHERE c.id=:conversation AND c.sandbox_id=:sandbox AND c.session_id=:session
+            FOR SHARE OF c,s
+        """), {"conversation": conversation_id, "sandbox": context.sandbox_id,
+              "session": context.session_id}).mappings().one_or_none()
+        if (scoped is None or scoped["account_id"] != context.account_id
+                or scoped["session_revoked"] is not None or scoped["session_expires"] <= now
+                or scoped["conversation_expires"] <= now or scoped["run_status"] != "ACTIVE"):
+            raise ResolveError(404, "RESOURCE_NOT_FOUND", "Conversation is unavailable")
+        binding_id, voice_session_id = uuid4(), uuid4()
+        expires = min(now + timedelta(seconds=180), scoped["session_expires"], scoped["conversation_expires"])
+        request_id, event_id = uuid4(), uuid4()
+        payload = {"binding_id": str(binding_id), "conversation_id": str(conversation_id),
+                   "voice_session_id": str(voice_session_id), "account_id": str(context.account_id),
+                   "origin": origin, "expires_at": int(expires.timestamp())}
+        connection.execute(text("""
+            INSERT INTO resolve.voice_bindings(id,sandbox_id,conversation_id,voice_session_id,account_id,origin,expires_at)
+            VALUES (:id,:sandbox,:conversation,:voice_session,:account,:origin,:expires)
+        """), {"id": binding_id, "sandbox": context.sandbox_id, "conversation": conversation_id,
+              "voice_session": voice_session_id, "account": context.account_id, "origin": origin,
+              "expires": expires})
+        connection.execute(text("""
+            INSERT INTO resolve.voice_grant_requests
+              (id,sandbox_id,session_id,conversation_id,idempotency_key,request_fingerprint,binding_id,
+               voice_session_id,request_body,outbound_event_id,state,created_at,updated_at)
+            VALUES (:id,:sandbox,:session,:conversation,:key,:fingerprint,:binding,:voice_session,
+                    CAST(:payload AS jsonb),:event,'PROVISIONING',:now,:now)
+        """), {"id": request_id, "sandbox": context.sandbox_id, "session": context.session_id,
+              "conversation": conversation_id, "key": idempotency_key, "fingerprint": fingerprint,
+              "binding": binding_id, "voice_session": voice_session_id,
+              "payload": json.dumps(payload), "event": event_id, "now": now})
+        return ("NEW", {"id": request_id, "binding_id": binding_id, "voice_session_id": voice_session_id,
+                        "outbound_event_id": event_id, "request_body": payload, "expires_at": expires})
+
+
 def build_voice_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
@@ -434,6 +512,7 @@ def build_voice_router() -> APIRouter:
         response: Response,
         origin: str = Header(...),
         csrf_header: str | None = Header(default=None, alias="X-CSRF-Token"),
+        idempotency_key: UUID = Header(..., alias="Idempotency-Key"),
     ) -> dict[str, Any]:
         del body
         response.headers["Cache-Control"] = "no-store"
@@ -445,23 +524,38 @@ def build_voice_router() -> APIRouter:
             raise ResolveError(403, "ROLE_FORBIDDEN", "A signed-in customer is required for Voice")
         settings = _settings(request)
         client = getattr(request.app.state, "voice_client", None)
-        if client is None or not settings.voice_base_url or not settings.voice_hmac_secret:
+        if (client is None or not settings.voice_base_url or not settings.voice_hmac_secret
+                or settings.voice_grant_encryption_key is None):
             raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Voice calling is not configured", True)
-        binding_id, voice_session_id, expires = await asyncio.to_thread(
-            _create_binding, _engine(request), context, conversation_id, origin, datetime.now(UTC))
-        voice_request = {
-            "binding_id": str(binding_id), "conversation_id": str(conversation_id),
-            "voice_session_id": voice_session_id, "account_id": str(context.account_id),
-            "origin": origin, "expires_at": int(expires.timestamp()),
-        }
+        engine = _engine(request)
+        now = datetime.now(UTC)
+        fingerprint = hashlib.sha256(canonical_json({"conversation_id": str(conversation_id),
+            "session_id": str(context.session_id), "account_id": str(context.account_id),
+            "origin": origin})).hexdigest()
+        state, claimed = await asyncio.to_thread(_claim_voice_grant, engine, context,
+            conversation_id, origin, idempotency_key, fingerprint, now)
+        if state == "REPLAY":
+            if claimed["state"] == "SUCCEEDED" and claimed["grant_expires_at"] > now:
+                try:
+                    grant = _decrypt_grant(settings.voice_grant_encryption_key, claimed["id"], claimed["encrypted_grant"])
+                    response.headers["Cache-Control"] = "no-store"
+                    return grant
+                except Exception as exc:
+                    raise ResolveError(503, "GRANT_OUTCOME_UNKNOWN", "Voice grant replay is unavailable; request a new call", True) from exc
+            code = "VOICE_GRANT_EXPIRED" if claimed["state"] == "SUCCEEDED" else "VOICE_GRANT_OUTCOME_UNKNOWN"
+            raise ResolveError(409, code, "This Voice request cannot safely create another grant; start a new call", True)
+        grant_request_id = claimed["id"]
+        binding_id = claimed["binding_id"]
+        voice_session_id = str(claimed["voice_session_id"])
+        voice_request = claimed["request_body"]
         try:
-            result = await client.request_session(voice_request)
+            result = await client.request_session(voice_request, event_id=str(claimed["outbound_event_id"]))
             grant = VoiceSessionGrant.model_validate(result)
             received_at = int(datetime.now(UTC).timestamp())
             websocket_url = grant.websocket_url
             allowed_schemes = {"wss"} if settings.voice_base_url.startswith("https://") else {"ws", "wss"}
             if (grant.binding_id != binding_id or str(grant.voice_session_id) != voice_session_id
-                    or grant.expires_at > int(expires.timestamp()) or grant.expires_at <= received_at):
+                    or grant.expires_at > voice_request["expires_at"] or grant.expires_at <= received_at):
                 raise ValueError("Voice grant scope or expiry is invalid")
             if (grant.expires_at > received_at + 60
                     or grant.websocket_path != f"/ws/hutch/{voice_session_id}"
@@ -470,11 +564,25 @@ def build_voice_router() -> APIRouter:
                     or websocket_url.query or websocket_url.fragment
                     or websocket_url.username or websocket_url.password):
                 raise ValueError("Voice grant destination or lifetime is invalid")
-            return grant.model_dump(mode="json")
+            grant_body = grant.model_dump(mode="json")
+            encrypted = _encrypt_grant(settings.voice_grant_encryption_key, grant_request_id, grant_body)
+            with engine.begin() as connection:
+                connection.execute(text("""
+                    UPDATE resolve.voice_grant_requests SET state='SUCCEEDED',encrypted_grant=:encrypted,
+                      grant_expires_at=to_timestamp(:expires),updated_at=:now
+                    WHERE id=:id AND state='PROVISIONING'
+                """), {"encrypted": encrypted, "expires": grant.expires_at,
+                      "now": datetime.now(UTC), "id": grant_request_id})
+            return grant_body
         except (VoiceServiceError, ValidationError, ValueError) as exc:
-            await asyncio.to_thread(_revoke_binding, _engine(request), binding_id)
+            with engine.begin() as connection:
+                connection.execute(text("""
+                    UPDATE resolve.voice_grant_requests SET state='UNKNOWN',error_code='PROVIDER_OUTCOME_UNKNOWN',updated_at=:now
+                    WHERE id=:id AND state='PROVISIONING'
+                """), {"now": datetime.now(UTC), "id": grant_request_id})
+            await asyncio.to_thread(_revoke_binding, engine, binding_id)
             logger.warning("Voice session provisioning failed (%s)", type(exc).__name__)
-            raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Voice calling is temporarily unavailable", True) from exc
+            raise ResolveError(503, "VOICE_GRANT_OUTCOME_UNKNOWN", "Voice setup outcome is unknown; start a new call", True) from exc
 
     @router.post("/integrations/voice/turns", response_model=VoiceTurnResponse, tags=["Voice integration"])
     async def receive_voice_turn(request: Request) -> dict[str, Any]:

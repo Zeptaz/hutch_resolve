@@ -100,7 +100,13 @@ def test_real_text_case_replay_and_scope(runtime):
     with engine.connect() as connection:
         count = connection.execute(text("SELECT count(*) FROM resolve.cases WHERE conversation_id=:id"),
                                    {"id": conv}).scalar_one()
+        stored_input = connection.execute(text("""
+            SELECT input_payload FROM resolve.turn_claims
+            WHERE conversation_id=:conversation AND client_turn_id=:turn
+        """), {"conversation": conv, "turn": turn_id}).scalar_one()
     assert count == 1
+    assert stored_input["input"]["complaint_type"] == "BALANCE_RECHARGE"
+    assert stored_input["expected_version"] == 1
 
 
 def test_guest_public_turn_claim_and_replay(runtime):
@@ -112,6 +118,24 @@ def test_guest_public_turn_claim_and_replay(runtime):
     assert first.conversation_version == 2
     assert send(service, ctx, conv, 1, {"type": "text", "text": "How can I check usage?"}, turn_id) == first
     assert repo.get_view(ctx, conv)["cases"] == []
+
+
+def test_stale_new_turn_does_not_leave_an_unfinished_claim(runtime):
+    engine, facade, repo, service = runtime
+    app_ctx, ctx = session(engine)
+    conv = facade.create_conversation(app_ctx)["id"]
+    send(service, ctx, conv, 1, {"type": "text", "text": "How can I check usage?"})
+    stale_turn_id = uuid4()
+
+    with pytest.raises(ResolveError) as stale:
+        send(service, ctx, conv, 1, {"type": "text", "text": "another question"}, stale_turn_id)
+    assert stale.value.code == "STALE_VERSION"
+    with engine.connect() as connection:
+        claim = connection.execute(text("""
+            SELECT 1 FROM resolve.turn_claims
+            WHERE conversation_id=:conversation AND client_turn_id=:turn
+        """), {"conversation": conv, "turn": stale_turn_id}).scalar_one_or_none()
+    assert claim is None
 
 
 def test_guest_upgrade_retains_public_conversation_and_completed_turns(runtime):

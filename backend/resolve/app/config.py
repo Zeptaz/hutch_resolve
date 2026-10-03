@@ -28,6 +28,11 @@ class Settings:
     sandbox_database_url: str | None = None
     voice_base_url: str | None = None
     voice_hmac_secret: bytes | None = None
+    trusted_proxy_ips: frozenset[str] = frozenset()
+    auth_guest_limit: int = 30
+    auth_login_ip_limit: int = 30
+    auth_login_identity_limit: int = 10
+    voice_grant_encryption_key: bytes | None = None
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -55,6 +60,26 @@ class Settings:
         voice_hmac_secret = voice_secret_text.encode("utf-8") if voice_secret_text else None
         if voice_hmac_secret is not None and len(voice_hmac_secret) < 32:
             raise RuntimeError("VOICE_HMAC_SECRET must contain at least 32 bytes")
+        grant_key_text = os.getenv("VOICE_GRANT_ENCRYPTION_KEY", "")
+        voice_grant_encryption_key = grant_key_text.encode("utf-8") if grant_key_text else None
+        if voice_grant_encryption_key is not None and len(voice_grant_encryption_key) != 32:
+            raise RuntimeError("VOICE_GRANT_ENCRYPTION_KEY must contain exactly 32 bytes")
+        trusted_proxy_ips = frozenset(value.strip() for value in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if value.strip())
+        import ipaddress
+        try:
+            for address in trusted_proxy_ips:
+                ipaddress.ip_address(address)
+        except ValueError as exc:
+            raise RuntimeError("TRUSTED_PROXY_IPS must contain comma-separated IP addresses") from exc
+        limits: dict[str, int] = {}
+        for name, default in (("AUTH_GUEST_LIMIT", 30), ("AUTH_LOGIN_IP_LIMIT", 30), ("AUTH_LOGIN_IDENTITY_LIMIT", 10)):
+            try:
+                value = int(os.getenv(name, str(default)))
+            except ValueError as exc:
+                raise RuntimeError(f"{name} must be a positive integer") from exc
+            if not 1 <= value <= 10000:
+                raise RuntimeError(f"{name} must be between 1 and 10000")
+            limits[name] = value
         origins = frozenset(
             value.strip().rstrip("/")
             for value in os.getenv("APP_ORIGINS", "http://localhost:5173").split(",")
@@ -117,4 +142,9 @@ class Settings:
             sandbox_database_url=sandbox_database_url,
             voice_base_url=voice_base_url,
             voice_hmac_secret=voice_hmac_secret,
+            trusted_proxy_ips=trusted_proxy_ips,
+            auth_guest_limit=limits["AUTH_GUEST_LIMIT"],
+            auth_login_ip_limit=limits["AUTH_LOGIN_IP_LIMIT"],
+            auth_login_identity_limit=limits["AUTH_LOGIN_IDENTITY_LIMIT"],
+            voice_grant_encryption_key=voice_grant_encryption_key,
         )

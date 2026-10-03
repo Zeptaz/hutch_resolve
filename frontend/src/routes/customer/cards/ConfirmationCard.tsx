@@ -21,10 +21,12 @@ export type ProposalState =
 export function ConfirmationCard({
   proposal,
   state,
+  disabled = false,
   onDecide,
 }: {
   proposal: ProposalView
   state: ProposalState
+  disabled?: boolean
   onDecide: (decision: Decision) => void
 }) {
   const { t } = useI18n()
@@ -76,10 +78,10 @@ export function ConfirmationCard({
 
       {(state.kind === 'open' || state.kind === 'submitting') && !expired && (
         <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={t('confirm.group')}>
-          <Button onClick={() => onDecide('ACCEPT')} disabled={!actionable}>
+          <Button onClick={() => onDecide('ACCEPT')} disabled={!actionable || disabled}>
             {state.kind === 'submitting' && state.decision === 'ACCEPT' ? t('confirm.sending') : t('confirm.yes')}
           </Button>
-          <Button variant="outline" onClick={() => onDecide('DECLINE')} disabled={!actionable}>
+          <Button variant="outline" onClick={() => onDecide('DECLINE')} disabled={!actionable || disabled}>
             {state.kind === 'submitting' && state.decision === 'DECLINE' ? t('confirm.sending') : t('confirm.no')}
           </Button>
         </div>

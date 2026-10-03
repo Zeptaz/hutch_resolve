@@ -28,9 +28,9 @@ class VoiceSessionClient:
         if self._owns_client:
             await self._client.aclose()
 
-    async def request_session(self, payload: dict) -> dict:
+    async def request_session(self, payload: dict, *, event_id: str | None = None) -> dict:
         body = canonical_json(payload)
-        event_id = str(uuid.uuid4())
+        event_id = event_id or str(uuid.uuid4())
         url = f"{self.base_url}/api/hutch/sessions"
         for attempt in range(2):
             try:

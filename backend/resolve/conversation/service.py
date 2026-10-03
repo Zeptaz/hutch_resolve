@@ -97,6 +97,15 @@ TURN_BUDGET_SECONDS = {Channel.TEXT: 15.0, Channel.VOICE: 7.0}
 MIN_REWRITE_SECONDS = 1.5  # below this, keep the English reply rather than risk the deadline
 MIN_AGENT_SECONDS = 3.0  # the package agent needs at least one model call
 _DEADLINE: ContextVar[float | None] = ContextVar("turn_deadline", default=None)
+_CRITICAL_REPLY = re.compile(
+    r"\b(?:lkr|rs\.?|balance|charged|paid|refund|credit(?:ed)?|recharg(?:e|ed)|"
+    r"active|inactive|pending|succeed(?:ed)?|fail(?:ed|ure)?|approv(?:ed|al)|"
+    r"declin(?:ed|e)|confirm(?:ed|ation)?|consent|accept(?:ed)?|activat(?:e|ed|ion)|"
+    r"deactivat(?:e|ed|ion)|case|ticket|investigation|request|proposal|operation|"
+    r"status|reconcil(?:e|ed|iation)|review|disput(?:e|ed)|complet(?:e|ed|ion)|"
+    r"success|unsuccessful)\b",
+    re.IGNORECASE,
+)
 # Knowledge topics where a signed-in customer's current balance is useful context.
 _BALANCE_TOPICS = {"how-to-reload", "check-balance-how", "reload-not-received", "prepaid-recharge"}
 _CODE = re.compile(r"[A-Z0-9_]+")
@@ -303,6 +312,13 @@ class ConversationService:
     async def _localize(self, ctx: AuthContext, turn: NormalizedTurn, draft: TurnDraft, state: DialogueState) -> TurnDraft:
         """Re-express the reply in the customer's language/style; keep English on any doubt."""
         if self._rewriter is None or self._rewriter.style_for(state.language, state.script) is None:
+            return draft
+        # Financial facts, case findings, action choices/outcomes, confirmations and
+        # handoffs are Resolve-owned wording. A lexical validator cannot establish
+        # that a translated sentence preserves consent or operational meaning.
+        if (draft.case_id is not None or state.active_case_id is not None or draft.operation_ids
+                or draft.cards or draft.citations or state.pending_proposal is not None
+                or _CRITICAL_REPLY.search(draft.reply_text)):
             return draft
         if draft.citations or draft.localized:
             return draft  # reviewed knowledge text, or already written in the customer's style

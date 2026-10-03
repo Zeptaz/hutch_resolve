@@ -11,6 +11,9 @@ from conftest import ACCOUNT_A, customer, details
 from resolve.conversation.dto import Channel
 from resolve.conversation.errors import ResolveError
 from resolve.conversation.identity import command_key
+from resolve.conversation.storage import _durable_turn_input
+from resolve.conversation.storage import _resumable_text_input
+from backend.resolve.app.auth import ResolveError as AppResolveError
 
 
 def test_identical_replay_returns_saved_result_without_repeating_work(h) -> None:
@@ -153,3 +156,46 @@ def test_command_keys_are_deterministic_and_distinct() -> None:
     assert command_key(conv, turn, "investigate", case) == command_key(conv, turn, "investigate", case)
     assert command_key(conv, turn, "investigate", case) != command_key(conv, uuid4(), "investigate", case)
     assert command_key(conv, turn, "investigate", case) != command_key(conv, turn, "propose", case)
+
+
+def test_durable_turn_input_keeps_normalized_body_but_not_voice_consent_evidence() -> None:
+    from resolve.conversation.dto import Channel
+
+    payload = {
+        "language": "si",
+        "expected_version": 4,
+        "input": {"type": "action_decision", "decision": "ACCEPT"},
+        "voice_evidence": {
+            "binding_id": "binding-1", "final_transcript": "yes", "turn_id": "voice-turn",
+            "presented_proposal_hash": "a" * 64, "presentation_response_id": "response-1",
+        },
+    }
+    stored = _durable_turn_input(Channel.VOICE, "fingerprint", payload)
+
+    assert stored == {
+        "channel": "VOICE", "fingerprint": "fingerprint", "language": "si",
+        "expected_version": 4, "input": payload["input"], "binding_id": "binding-1",
+    }
+    assert "final_transcript" not in stored and "presented_proposal_hash" not in stored
+
+
+def test_recovery_never_replays_voice_decision_without_authenticated_evidence() -> None:
+    with pytest.raises(AppResolveError) as blocked:
+        _resumable_text_input({
+            "channel": "VOICE",
+            "input": {"type": "action_decision", "decision": "ACCEPT"},
+            "binding_id": "old-binding",
+        })
+
+    assert blocked.value.code == "CONVERSATION_BUSY"
+    assert "original authenticated event" in blocked.value.message
+    assert blocked.value.retryable is False
+
+
+def test_legacy_claim_without_input_is_not_reconstructed_or_replayed() -> None:
+    with pytest.raises(AppResolveError) as blocked:
+        _resumable_text_input({"channel": "TEXT", "fingerprint": "legacy-only"})
+
+    assert blocked.value.code == "CONVERSATION_BUSY"
+    assert "support reconciliation" in blocked.value.message
+    assert blocked.value.retryable is False

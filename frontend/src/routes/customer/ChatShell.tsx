@@ -29,14 +29,21 @@ const LANGUAGES: { value: Language; short: string; label: string }[] = [
 ]
 
 const MAX_TEXT = 4000
+const RECOVERY_TIMEOUT_MS = 30_000
+const RECOVERY_REQUEST_TIMEOUT_MS = 5_000
+const RECOVERY_MAX_POLLS = 32
+const CONVERSATION_READ_TIMEOUT_MS = 5_000
 // How much unread thread below the fold before "More below" shows.
 const MORE_BELOW_PX = 48
 
 /** A turn that failed to send. Retrying reuses its client_turn_id so the server can de-duplicate. */
 type FailedTurn = { clientTurnId: string; input: TurnInput; label: string; error: unknown }
 
-/** Errors where resending the same turn can't help; the user needs fresh state or a new request. */
-const NOT_RETRYABLE = new Set(['STALE_VERSION', 'PROPOSAL_EXPIRED', 'PROPOSAL_INVALIDATED', 'VALIDATION_ERROR', 'ACTION_NOT_ALLOWED'])
+/** A failed request may have reached Resolve. Keep the turn locked until its same ID is replayed. */
+function hasUncertainOutcome(error: unknown) {
+  return !isApiError(error) || error.status === 0 || error.status >= 500 || error.retryable ||
+    error.code === 'CONVERSATION_BUSY' || error.code === 'TURN_IN_PROGRESS'
+}
 
 export function ChatShell({ session, onDemoLogin }: {
   session: SessionView
@@ -81,16 +88,46 @@ export function ChatShell({ session, onDemoLogin }: {
     let cancelled = false
     const open = async () => {
       const savedId = readSavedConversation(session.id)
+      let conversation: ConversationView
       if (savedId) {
         try {
-          return await customerApi.getConversation(savedId)
+          conversation = await customerApi.getConversation(savedId, AbortSignal.timeout(CONVERSATION_READ_TIMEOUT_MS))
         } catch (e) {
           if (!(isApiError(e) && e.status === 404)) throw e
+          conversation = await customerApi.createConversation(openingLanguage.current, createKey.current)
+          saveConversation(session.id, conversation.id)
         }
+      } else {
+        conversation = await customerApi.createConversation(openingLanguage.current, createKey.current)
+        saveConversation(session.id, conversation.id)
       }
-      const created = await customerApi.createConversation(openingLanguage.current, createKey.current)
-      saveConversation(session.id, created.id)
-      return created
+      // Resolve exposes abandoned text turns by ID; resume from the persisted
+      // input after expiry instead of making a reload strand the conversation.
+      // Every request and the whole recovery window are bounded so a broken
+      // retry_after or an unavailable API cannot spin or hold the page forever.
+      const recoveryDeadline = Date.now() + RECOVERY_TIMEOUT_MS
+      for (let poll = 0; conversation.pending_turn && poll < RECOVERY_MAX_POLLS && Date.now() < recoveryDeadline; poll++) {
+        if (conversation.pending_turn.state === 'IN_PROGRESS') {
+          const retryAt = Date.parse(conversation.pending_turn.retry_after)
+          const now = Date.now()
+          const suggestedDelay = Number.isFinite(retryAt) && retryAt > now ? retryAt - now : 500
+          const delay = Math.min(1000, Math.max(100, suggestedDelay), recoveryDeadline - now)
+          await new Promise((resolve) => window.setTimeout(resolve, delay))
+          if (Date.now() >= recoveryDeadline) break
+          conversation = await customerApi.getConversation(conversation.id, recoverySignal(recoveryDeadline))
+          continue
+        }
+        try {
+          await customerApi.resumeTurn(conversation.id, conversation.pending_turn.turn_id, recoverySignal(recoveryDeadline))
+        } catch (error) {
+          const outcomeMayBeUnknown = !isApiError(error) || error.status === 0 || error.status >= 500 || error.retryable
+          const leaseStillActive = isApiError(error) && error.code === 'TURN_IN_PROGRESS'
+          if (!outcomeMayBeUnknown && !leaseStillActive) throw error
+        }
+        conversation = await customerApi.getConversation(conversation.id, recoverySignal(recoveryDeadline))
+      }
+      if (conversation.pending_turn) throw new Error('A previous message is still recovering. Retry loading the conversation.')
+      return conversation
     }
     open()
       .then((c) => {
@@ -125,7 +162,7 @@ export function ChatShell({ session, onDemoLogin }: {
 
   const reload = useCallback(async (id: string) => {
     try {
-      setConversation(await customerApi.getConversation(id))
+      setConversation(await customerApi.getConversation(id, AbortSignal.timeout(CONVERSATION_READ_TIMEOUT_MS)))
     } catch {
       /* keep the current view; the next action will surface any error */
     }
@@ -145,7 +182,7 @@ export function ChatShell({ session, onDemoLogin }: {
           input,
         })
         // Fetch the canonical conversation rather than patching state locally.
-        setConversation(await customerApi.getConversation(conversation.id))
+        setConversation(await customerApi.getConversation(conversation.id, AbortSignal.timeout(CONVERSATION_READ_TIMEOUT_MS)))
         setCaseRefresh((n) => n + 1)
         return true
       } catch (e) {
@@ -163,13 +200,13 @@ export function ChatShell({ session, onDemoLogin }: {
 
   const submitText = () => {
     const text = draft.trim()
-    if (!text || sending || !conversation) return // keep the draft until the chat is ready
+    if (!text || sending || turnOutcomeUncertain || !conversation) return // keep the draft until the chat is ready
     setDraft('')
     void sendTurn({ type: 'text', text }, text, newId())
   }
 
   const decide = async (proposal: ProposalView, decision: Decision) => {
-    if (sending) return
+    if (sending || turnOutcomeUncertain) return
     setDecisions((d) => ({ ...d, [proposal.id]: { kind: 'submitting', decision } }))
     const okSent = await sendTurn(
       { type: 'action_decision', proposal_id: proposal.id, proposal_hash: proposal.proposal_hash, decision },
@@ -186,7 +223,7 @@ export function ChatShell({ session, onDemoLogin }: {
 
   const answer = (input: TurnInput, label: string) => {
     if (input.type === 'category_selection') setLastCategory(input.complaint_type)
-    if (sending) return
+    if (sending || turnOutcomeUncertain) return
     void sendTurn(input, label, newId())
   }
 
@@ -205,15 +242,16 @@ export function ChatShell({ session, onDemoLogin }: {
     if (local) return local
     return conversation?.pending_proposal?.id === p.id ? { kind: 'open' } : { kind: 'closed' }
   }
+  const turnOutcomeUncertain = failed !== null && hasUncertainOutcome(failed.error)
 
   const renderProposal = (p: ProposalView) => (
-    <ConfirmationCard key={p.id} proposal={p} state={proposalState(p)} onDecide={(d) => void decide(p, d)} />
+    <ConfirmationCard key={p.id} proposal={p} state={proposalState(p)} disabled={turnOutcomeUncertain} onDecide={(d) => void decide(p, d)} />
   )
 
   const panelProps: CasePanelProps = {
     conversation,
     refreshKey: caseRefresh,
-    disabled: sending,
+    disabled: sending || turnOutcomeUncertain,
     onSelectCase: (id, label) => {
       setCasesOpen(false)
       answer({ type: 'case_selection', case_id: id }, t('chat.switchTo', { label }))
@@ -248,7 +286,7 @@ export function ChatShell({ session, onDemoLogin }: {
         <BrandMark subtitle={t('brand.subtitle')} />
         <div className="flex items-center gap-2">
           {session.role === 'CUSTOMER' && (
-            <Button variant="outline" size="sm" onClick={() => setVoiceOpen(true)} disabled={!conversation}>
+            <Button variant="outline" size="sm" onClick={() => setVoiceOpen(true)} disabled={!conversation || turnOutcomeUncertain}>
               <Phone aria-hidden /> {t('chat.call')}
             </Button>
           )}
@@ -421,9 +459,9 @@ export function ChatShell({ session, onDemoLogin }: {
                 aria-label={t('chat.message')}
                 rows={1}
                 className="max-h-40 min-h-11 resize-none rounded-xl"
-                disabled={!textAllowed}
+                disabled={!textAllowed || turnOutcomeUncertain}
               />
-              <Button type="submit" size="icon-lg" aria-label={t('chat.send')} disabled={!conversation || sending || !draft.trim()}>
+              <Button type="submit" size="icon-lg" aria-label={t('chat.send')} disabled={!conversation || sending || turnOutcomeUncertain || !draft.trim()}>
                 <SendHorizontal aria-hidden />
               </Button>
             </div>
@@ -455,13 +493,19 @@ function saveConversation(sessionId: string, conversationId: string) {
   }
 }
 
+function recoverySignal(deadline: number) {
+  const remaining = deadline - Date.now()
+  if (remaining <= 0) throw new Error('Conversation recovery timed out.')
+  return AbortSignal.timeout(Math.min(RECOVERY_REQUEST_TIMEOUT_MS, remaining))
+}
+
 function prefersSmoothScroll() {
   return document.visibilityState === 'visible' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
 function FailedTurnNotice({ failed, onRetry, t }: { failed: FailedTurn; onRetry: () => void; t: Translate }) {
   const code = isApiError(failed.error) ? failed.error.code : null
-  const canRetry = !code || !NOT_RETRYABLE.has(code)
+  const canRetry = hasUncertainOutcome(failed.error)
   const reason =
     code === 'PROPOSAL_EXPIRED'
       ? t('chat.err.proposalExpired')

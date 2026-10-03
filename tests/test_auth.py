@@ -77,10 +77,11 @@ class MemoryAccountProvider:
 
 class MemoryCaseFacade:
     def get_case(self, context, case_id):
+        self.get_case_context = context
         return {
             "id": case_id,
             "conversation_id": UUID(int=100),
-            "account_id": context.account_id,
+            "account_id": context.account_id or ACCOUNT_ID,
             "complaint_type": "BALANCE_RECHARGE",
             "status": "OPEN",
             "review_status": "NEW",
@@ -115,6 +116,16 @@ class MemoryCaseFacade:
             "created_at": datetime.now(UTC),
             "simulation": True,
         }
+
+    def propose_escalation(self, context, **kwargs):
+        self.escalation = kwargs
+        return {"id": UUID(int=301), "case_id": kwargs["case_id"],
+                "investigation_id": kwargs["investigation_id"],
+                "action_type": "CREATE_REVIEW_TICKET", "target_id": ACCOUNT_ID,
+                "target_version": 1, "target_label": "SIM-LK-0001",
+                "consequences": f"Review reason: {kwargs['reason']}",
+                "proposal_hash": "a" * 64, "expires_at": datetime.now(UTC),
+                "simulation": True}
 
     def propose_action(self, context, **kwargs):
         self.proposal_context = context
@@ -185,7 +196,9 @@ def build_client() -> tuple[TestClient, MemoryAuthStore]:
             ),
         },
     )
-    return TestClient(create_app(Probe(), settings, store, MemoryAccountProvider(), MemoryCaseFacade())), store
+    app = create_app(Probe(), settings, store, MemoryAccountProvider(), MemoryCaseFacade())
+    app.state.auth_rate_limiter = lambda bucket, limit: None
+    return TestClient(app), store
 
 
 def test_anonymous_session_requires_exact_origin_and_returns_csrf_cookie():
@@ -202,6 +215,27 @@ def test_anonymous_session_requires_exact_origin_and_returns_csrf_cookie():
         assert len(response.json()["csrf_token"]) == 64
         assert "httponly" in response.headers["set-cookie"].lower()
         assert client.get("/api/v1/session").json()["id"] == response.json()["id"]
+
+
+def test_session_creation_rate_limit_returns_retry_after():
+    client, _ = build_client()
+    attempts = 0
+
+    def limiter(bucket, limit):
+        nonlocal attempts
+        attempts += 1
+        if attempts > 1:
+            from backend.resolve.app.auth import ResolveError
+            raise ResolveError(429, "RATE_LIMITED", "Too many attempts", True)
+
+    client.app.state.auth_rate_limiter = limiter
+    with client:
+        headers = {"Origin": ORIGIN}
+        assert client.post("/api/v1/sessions/anonymous", json={}, headers=headers).status_code == 201
+        blocked = client.post("/api/v1/sessions/anonymous", json={}, headers=headers)
+        assert blocked.status_code == 429
+        assert blocked.json()["error"]["code"] == "RATE_LIMITED"
+        assert blocked.headers["retry-after"] == "600"
 
 
 def test_demo_login_uses_configured_scope_and_refuses_client_role_or_account():
@@ -221,6 +255,27 @@ def test_demo_login_uses_configured_scope_and_refuses_client_role_or_account():
             json={"demo_identity": "customer", "credential": "customer-pass", "role": "AGENT"},
             headers={"Origin": ORIGIN},
         ).status_code == 422
+
+
+def test_escalation_route_retains_reason_and_requires_csrf():
+    client, _ = build_client()
+    with client:
+        login = client.post("/api/v1/demo/sessions",
+            json={"demo_identity": "customer", "credential": "customer-pass"},
+            headers={"Origin": ORIGIN})
+        csrf = login.json()["csrf_token"]
+        body = {"expected_version": 1, "investigation_id": str(UUID(int=200)),
+                "reason": "  Recharge is captured but not credited.  "}
+        path = f"/api/v1/cases/{UUID(int=300)}/escalations"
+        denied = client.post(path, json=body,
+            headers={"Origin": ORIGIN, "Idempotency-Key": str(UUID(int=400))})
+        assert denied.status_code == 403
+        response = client.post(path, json=body,
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf,
+                     "Idempotency-Key": str(UUID(int=400))})
+        assert response.status_code == 201
+        assert "Recharge is captured but not credited." in response.json()["consequences"]
+        assert client.app.state.resolve_facade.escalation["reason"] == "Recharge is captured but not credited."
 
 
 def test_guest_upgrade_requires_csrf_and_rotates_session():
@@ -334,21 +389,70 @@ def test_case_routes_use_auth_context_and_forward_stable_command_key():
         assert detail.status_code == 200
         assert detail.json()["account_id"] == str(ACCOUNT_ID)
 
+        investigation_body = {
+            "expected_version": 1,
+            "complaint_type": "BALANCE_RECHARGE",
+            "window_start": "2026-10-02T08:00:00+05:30",
+            "window_end": "2026-10-02T12:00:00+05:30",
+            "reported_facts": {},
+        }
+        facade = client.app.state.resolve_facade
+        rejected = client.post(
+            f"/api/v1/cases/{case_id}/investigations", json=investigation_body,
+            headers={"Origin": "https://attacker.test", "Idempotency-Key": "rejected-origin"},
+        )
+        assert rejected.status_code == 403
+        assert rejected.json()["error"]["code"] == "ORIGIN_FORBIDDEN"
+        assert not hasattr(facade, "kwargs")
+
+        rejected = client.post(
+            f"/api/v1/cases/{case_id}/investigations", json=investigation_body,
+            headers={"Origin": ORIGIN, "Idempotency-Key": "missing-csrf"},
+        )
+        assert rejected.status_code == 403
+        assert rejected.json()["error"]["code"] == "CSRF_FAILED"
+        assert not hasattr(facade, "kwargs")
+
         investigation = client.post(
-            f"/api/v1/cases/{case_id}/investigations",
-            json={
-                "expected_version": 1,
-                "complaint_type": "BALANCE_RECHARGE",
-                "window_start": "2026-10-02T08:00:00+05:30",
-                "window_end": "2026-10-02T12:00:00+05:30",
-                "reported_facts": {},
-            },
-            headers={"Origin": ORIGIN, "Idempotency-Key": "turn-command-1"},
+            f"/api/v1/cases/{case_id}/investigations", json=investigation_body,
+            headers={"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"],
+                     "Idempotency-Key": "turn-command-1"},
         )
         assert login.status_code == 200
         assert investigation.status_code == 200, investigation.text
         assert client.app.state.resolve_facade.kwargs["command_key"] == "turn-command-1"
         assert client.app.state.resolve_facade.context.account_id == ACCOUNT_ID
+
+
+def test_shared_case_reads_require_explicit_realm_when_both_sessions_exist():
+    client, _ = build_client()
+    with client:
+        customer = client.post("/api/v1/demo/sessions", json={"demo_identity": "customer", "credential": "customer-pass"},
+                               headers={"Origin": ORIGIN})
+        agent = client.post("/api/v1/agent/sessions", json={"demo_identity": "agent", "credential": "agent-pass"},
+                            headers={"Origin": ORIGIN})
+        assert customer.status_code == agent.status_code == 200
+        case_path = f"/api/v1/cases/{UUID(int=123)}"
+
+        ambiguous = client.get(case_path)
+        assert ambiguous.status_code == 400
+        assert ambiguous.json()["error"]["code"] == "AUTH_REALM_REQUIRED"
+
+        customer_case = client.get(case_path, headers={"X-Resolve-Realm": "customer"})
+        assert customer_case.status_code == 200
+        assert client.app.state.resolve_facade.get_case_context.role == "CUSTOMER"
+        agent_case = client.get(case_path, headers={"X-Resolve-Realm": "agent"})
+        assert agent_case.status_code == 200
+        assert client.app.state.resolve_facade.get_case_context.role == "AGENT"
+
+        invalid = client.get(case_path, headers={"X-Resolve-Realm": "service"})
+        assert invalid.status_code == 400
+        assert invalid.json()["error"]["code"] == "AUTH_REALM_INVALID"
+
+        client.cookies.set("resolve_agent_session", "revoked-or-invalid", path="/")
+        denied = client.get(case_path, headers={"X-Resolve-Realm": "agent"})
+        assert denied.status_code == 401
+        assert denied.json()["error"]["code"] == "SESSION_EXPIRED"
 
 
 def test_action_routes_require_customer_origin_csrf_and_return_pending_acceptance():

@@ -11,6 +11,8 @@ from uuid import UUID, uuid5, NAMESPACE_URL
 
 from sqlalchemy import Engine, text
 
+from .case_status import refresh_case_status
+
 logger = logging.getLogger("hutch_resolve.operations")
 _LOG_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
@@ -70,7 +72,8 @@ class MockSandboxWriter:
 
     def execute(self, *, sandbox_id: UUID, account_id: UUID, case_id: UUID, operation_id: UUID,
                 action_type: str, target_id: UUID, target_version: int, request_hash: str,
-                complaint_type: str, investigation_id: UUID) -> tuple[str, dict[str, Any]]:
+                complaint_type: str, investigation_id: UUID,
+                escalation_reason: str | None = None) -> tuple[str, dict[str, Any]]:
         provider, operation = {
             "DEACTIVATE_VAS": ("vas", "deactivate"),
             "SEND_SETTINGS_INSTRUCTIONS": ("messaging", "send_settings"),
@@ -128,7 +131,8 @@ class MockSandboxWriter:
                     ticket_id = uuid5(NAMESPACE_URL, f"{operation_id}:ticket")
                     category = "BILLING_DISPUTE" if complaint_type in {"BALANCE_RECHARGE", "VAS_DISPUTE"} else "TECHNICAL_SUPPORT"
                     queue = "BILLING_REVIEW" if category == "BILLING_DISPUTE" else "TECHNICAL_SUPPORT"
-                    packet = {"synthetic": True, "case_id": str(case_id), "investigation_id": str(investigation_id), "complaint_type": complaint_type}
+                    packet = {"synthetic": True, "case_id": str(case_id), "investigation_id": str(investigation_id),
+                              "complaint_type": complaint_type, "escalation_reason": escalation_reason}
                     connection.execute(text("INSERT INTO sandbox.tickets(id,sandbox_id,account_id,case_ref,category,queue,status,packet) VALUES (:id,:sandbox,:account,:case_ref,:category,:queue,'OPEN',CAST(:packet AS jsonb))"),
                         {"id": ticket_id, "sandbox": sandbox_id, "account": account_id, "case_ref": f"RESOLVE-{operation_id}",
                          "category": category, "queue": queue, "packet": json.dumps(packet)})
@@ -241,7 +245,7 @@ class OperationRunner:
         with self._resolve.begin() as connection:
             row = connection.execute(text("""
                 SELECT o.id,o.case_id,o.proposal_id,o.attempt_count,c.sandbox_id,c.account_id,c.complaint_type,
-                       p.action_type,p.target_id,p.target_version,p.investigation_id,i.revision
+                       p.action_type,p.target_id,p.target_version,p.investigation_id,p.escalation_reason,i.revision
                 FROM resolve.operations o
                 JOIN resolve.cases c ON c.id=o.case_id
                 JOIN resolve.action_proposals p ON p.id=o.proposal_id AND p.case_id=o.case_id
@@ -259,15 +263,19 @@ class OperationRunner:
             operation["attempt_count"] = row["attempt_count"] + 1
         operation_id = operation["id"]
         started_at = time.perf_counter()
-        request_hash = hashlib.sha256(json.dumps({"operation_id": str(operation_id), "case_id": str(operation["case_id"]),
+        request_identity = {"operation_id": str(operation_id), "case_id": str(operation["case_id"]),
             "action_type": operation["action_type"], "target_id": str(operation["target_id"]),
-            "target_version": operation["target_version"], "investigation_id": str(operation["investigation_id"])},
+            "target_version": operation["target_version"], "investigation_id": str(operation["investigation_id"])}
+        if operation["escalation_reason"] is not None:
+            request_identity["escalation_reason"] = operation["escalation_reason"]
+        request_hash = hashlib.sha256(json.dumps(request_identity,
             sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         try:
             status, result = self._writer.execute(sandbox_id=operation["sandbox_id"], account_id=operation["account_id"],
                 case_id=operation["case_id"], operation_id=operation_id, action_type=operation["action_type"],
                 target_id=operation["target_id"], target_version=operation["target_version"], request_hash=request_hash,
-                complaint_type=operation["complaint_type"], investigation_id=operation["investigation_id"])
+                complaint_type=operation["complaint_type"], investigation_id=operation["investigation_id"],
+                escalation_reason=operation["escalation_reason"])
         except ProviderUnavailable as exc:
             attempts = operation["attempt_count"]
             terminal = attempts >= 3
@@ -409,9 +417,23 @@ class OperationRunner:
                 connection.execute(text("UPDATE resolve.escalation_deliveries SET delivery_state=:state,provider_ticket_id=:ticket,last_error_code=:error,updated_at=:now WHERE operation_id=:operation"),
                     {"state": delivery, "ticket": result.get("provider_ticket_id") if delivery == "DELIVERED" else None,
                      "error": None if delivery == "DELIVERED" else result.get("code"), "now": now, "operation": operation["id"]})
-            case_status = "REVIEW_REQUIRED" if status in {"FAILED", "REVIEW_REQUIRED"} or (operation["action_type"] == "CREATE_REVIEW_TICKET" and status == "SUCCEEDED") else ("OPEN" if terminal else "ACTION_PENDING")
-            connection.execute(text("UPDATE resolve.cases SET status=:status,version=version+1,updated_at=:now WHERE id=:case_id"),
-                {"status": case_status, "now": now, "case_id": operation["case_id"]})
+                if delivery == "DELIVERED":
+                    # A review may have been written while CRM ticket creation was down.
+                    # Backfill every still-unsynchronized event in version order.
+                    connection.execute(text("""
+                        INSERT INTO resolve.review_sync_jobs
+                          (id,sandbox_id,case_id,review_event_id,provider_ticket_id,status,created_at,updated_at)
+                        SELECT e.id,e.sandbox_id,e.case_id,e.id,:ticket,'PENDING',:now,:now
+                        FROM resolve.review_events e
+                        WHERE e.case_id=:case_id AND NOT EXISTS (
+                          SELECT 1 FROM resolve.review_sync_jobs j WHERE j.review_event_id=e.id)
+                        ORDER BY e.case_version,e.created_at,e.id
+                        ON CONFLICT (review_event_id) DO NOTHING
+                    """), {"ticket": result["provider_ticket_id"], "now": now,
+                          "case_id": operation["case_id"]})
+            connection.execute(text("UPDATE resolve.cases SET version=version+1,updated_at=:now WHERE id=:case_id"),
+                {"now": now, "case_id": operation["case_id"]})
+            refresh_case_status(connection, operation["case_id"], now)
             connection.execute(text("INSERT INTO resolve.audit_events(id,case_id,event_type,details,created_at) VALUES (:id,:case,'OPERATION_CHANGED',CAST(:details AS jsonb),:now)"),
                 {"id": uuid5(NAMESPACE_URL, f"{operation['id']}:{status}:{operation['attempt_count']}"), "case": operation["case_id"],
                  "details": json.dumps({"operation_id": str(operation["id"]), "status": status, "attempt": operation["attempt_count"], "code": result.get("code")}), "now": now})

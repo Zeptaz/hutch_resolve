@@ -7,3 +7,4 @@ psycopg[binary]>=3.2,<4
 httpx==0.28.1
 google-genai==2.19.0
 python-dotenv==1.1.0
+cryptography>=42,<47

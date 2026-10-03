@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Activity, ArrowLeft, Mic, MicOff, PhoneOff, ShieldCheck, Volume2 } from 'lucide-react'
 import { API_MODE, newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
@@ -18,6 +18,16 @@ type Offer = {
   retry: { decision: 'ACCEPT' | 'DECLINE'; body: MessageRequest } | null
 }
 
+const OPERATION_POLL_MS = 1000
+const OPERATION_POLL_WINDOW_MS = 60_000
+const OPERATION_REQUEST_TIMEOUT_MS = 5_000
+const MAX_WATCHED_OPERATIONS = 20
+const TERMINAL_OPERATION_STATUSES = new Set(['SUCCEEDED', 'FAILED', 'REVIEW_REQUIRED'])
+
+function sameIds(left: string[], right: string[]) {
+  return left.length === right.length && left.every((id, index) => id === right[index])
+}
+
 /** Customer call panel mounted by ChatShell; it shares the chat's session and conversation. */
 export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   session: SessionView
@@ -30,10 +40,33 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   const state = useSyncExternalStore(call.subscribe, call.getState, call.getState)
   const [caption, setCaption] = useState<{ user: string | null; reply: string | null }>({ user: null, reply: null })
   const [offer, setOffer] = useState<Offer | null>(null)
-  const [operation, setOperation] = useState<OperationView | null>(null)
-  const [watchId, setWatchId] = useState<string | null>(null)
+  const [operations, setOperations] = useState<OperationView[]>([])
+  const [watchIds, setWatchIds] = useState<string[]>([])
+  const [trackingRetry, setTrackingRetry] = useState(0)
+  const [trackingExhaustedKey, setTrackingExhaustedKey] = useState<string | null>(null)
   const lastPhase = useRef<CallState['phase']>('idle')
   const textDecisionPending = useRef(false)
+
+  const syncOperations = useCallback(async (additionalIds: string[] = []) => {
+    setTrackingExhaustedKey(null)
+    setTrackingRetry((attempt) => attempt + 1)
+    if (additionalIds.length) {
+      setWatchIds((current) => {
+        const next = [...new Set([...current, ...additionalIds])].slice(-MAX_WATCHED_OPERATIONS)
+        return sameIds(current, next) ? current : next
+      })
+    }
+    try {
+      const conversation = await customerApi.getConversation(conversationId, AbortSignal.timeout(OPERATION_REQUEST_TIMEOUT_MS))
+      const canonicalIds = [...conversation.operation_ids,
+        ...conversation.messages.flatMap((message) => message.result?.operation_ids ?? [])]
+      const next = [...new Set([...canonicalIds, ...additionalIds])].slice(-MAX_WATCHED_OPERATIONS)
+      setWatchIds((current) => sameIds(current, next) ? current : next)
+    } catch {
+      // Keep IDs already present in a successful Voice result and retry the canonical
+      // refresh on the next Voice result without changing its external wire contract.
+    }
+  }, [conversationId])
 
   useEffect(() => {
     call.setHandlers({
@@ -42,17 +75,14 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
       onResolveResult: (result: VoiceResolveResult) => {
         setCaption((previous) => ({ ...previous, reply: result.reply_text }))
         setOffer(result.proposal ? { data: result.proposal, sending: false, error: null, retry: null } : null)
-        if (result.operation_status) {
-          void customerApi.getConversation(conversationId).then((conversation) => {
-            const id = conversation.messages.findLast((message) => message.result?.operation_ids.length)?.result?.operation_ids.at(-1)
-            if (id) setWatchId(id)
-          }).catch(() => {})
-        }
+        // operation_status is only a coarse Voice wire hint and does not contain IDs.
+        // Resolve's scoped conversation is the source of truth, including older pending work.
+        void syncOperations()
       },
       onFallback: (_responseId, text) => setCaption((previous) => ({ ...previous, reply: text })),
     })
     return () => call.dispose()
-  }, [call, conversationId])
+  }, [call, syncOperations])
 
   useEffect(() => {
     if (state.phase === 'ended' && lastPhase.current !== 'ended' && !textDecisionPending.current) onCallEnd()
@@ -60,24 +90,41 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   }, [state.phase, onCallEnd])
 
   useEffect(() => {
-    if (!watchId) return
+    if (!watchIds.length) return
     let cancelled = false
-    let timer = 0
+    let timer: number | undefined
     let attempts = 0
+    const expiresAt = Date.now() + OPERATION_POLL_WINDOW_MS
+    const watchKey = watchIds.join('|')
     const poll = async () => {
-      try {
-        const result = await customerApi.getOperation(watchId)
-        if (cancelled) return
-        setOperation(result)
-        if (['SUCCEEDED', 'FAILED', 'REVIEW_REQUIRED'].includes(result.status) || attempts++ >= 60) return
-      } catch {
-        if (cancelled || attempts++ >= 60) return
+      if (cancelled) return
+      if (attempts >= 60 || Date.now() >= expiresAt) {
+        setTrackingExhaustedKey(watchKey)
+        return
       }
-      timer = window.setTimeout(() => void poll(), 1000)
+      attempts++
+      const requestTimeout = Math.max(1, Math.min(OPERATION_REQUEST_TIMEOUT_MS, expiresAt - Date.now()))
+      const results = await Promise.allSettled(watchIds.map((id) =>
+        customerApi.getOperation(id, AbortSignal.timeout(requestTimeout))))
+      if (cancelled) return
+      const values = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
+      setOperations((current) => {
+        const latest = new Map(current.map((operation) => [operation.id, operation]))
+        values.forEach((operation) => latest.set(operation.id, operation))
+        return watchIds.flatMap((id) => latest.has(id) ? [latest.get(id)!] : [])
+      })
+      const allTerminal = results.length === watchIds.length && results.every((result) =>
+        result.status === 'fulfilled' && TERMINAL_OPERATION_STATUSES.has(result.value.status))
+      if (allTerminal) return
+      if (attempts >= 60 || Date.now() >= expiresAt) {
+        setTrackingExhaustedKey(watchKey)
+        return
+      }
+      timer = window.setTimeout(() => void poll(), OPERATION_POLL_MS)
     }
     void poll()
-    return () => { cancelled = true; window.clearTimeout(timer) }
-  }, [watchId])
+    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer) }
+  }, [watchIds, trackingRetry])
 
   const close = () => {
     if (textDecisionPending.current) return
@@ -106,7 +153,7 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
       const result = await customerApi.sendMessage(conversationId, body)
       setCaption({ user: decision === 'ACCEPT' ? 'Yes, go ahead' : 'No, leave it', reply: result.reply_text })
       setOffer(null)
-      if (result.operation_ids.length) setWatchId(result.operation_ids.at(-1) ?? null)
+      void syncOperations(result.operation_ids)
       textDecisionPending.current = false
       onCallEnd()
     } catch (error) {
@@ -123,6 +170,8 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   const byTap = state.phase !== 'live' || proposalStatus === 'text-only' || proposalStatus === 'interrupted'
   const expired = offer ? Date.parse(offer.data.expires_at) <= Date.now() : false
   const active = state.phase === 'live'
+  const visibleOperations = operations.filter((item) => watchIds.includes(item.id))
+  const operationTrackingExhausted = trackingExhaustedKey === watchIds.join('|')
 
   if (session.role !== 'CUSTOMER') return (
     <section className="rounded-3xl bg-muted/70 p-6 text-center">
@@ -198,9 +247,20 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         </p>}
       </div>}
 
-      {operation && <div className="mx-auto flex w-full max-w-md items-center gap-3 rounded-2xl border bg-card p-4">
-        <Activity className="size-5" aria-hidden /><span className="flex-1 text-sm">Action status</span>
-        <OperationBadge status={operation.status} />
+      {watchIds.length > 0 && <div className="mx-auto w-full max-w-md space-y-2" aria-label="Action statuses">
+        {visibleOperations.map((item) => <div key={item.id} className="flex items-center gap-3 rounded-2xl border bg-card p-4">
+          <Activity className="size-5" aria-hidden /><span className="flex-1 text-sm">Action status</span>
+          <OperationBadge status={item.status} />
+        </div>)}
+        {visibleOperations.length < watchIds.length && !operationTrackingExhausted &&
+          <p role="status" className="rounded-2xl border bg-card p-4 text-sm">Checking action status…</p>}
+        {operationTrackingExhausted && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card p-4 text-sm">
+          <span>Status is unconfirmed. The action may still be processing.</span>
+          <Button variant="outline" size="sm" onClick={() => {
+            setTrackingExhaustedKey(null)
+            setTrackingRetry((attempt) => attempt + 1)
+          }}>Check again</Button>
+        </div>}
       </div>}
 
       {API_MODE === 'mock' && <p className="mx-auto max-w-md text-center text-xs text-muted-foreground">

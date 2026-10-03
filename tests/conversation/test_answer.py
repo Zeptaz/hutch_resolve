@@ -86,6 +86,8 @@ RELOAD = next(c for c in draft_cards() if c.article_key == "how-to-reload").cont
         ("Go to hutchpay.lk to reload.", False),  # invented site
         ("Email reloads@hutch.lk for help.", False),  # invented e-mail
         ("Open https://reloadpay.hutch.lk now.", False),  # link where the card has none
+        ("Open reloadpay.hutch.lk/evil-path now.", False),  # supplied host, invented destination
+        ("Open https://reloadpay.hutch.lk.evil.example now.", False),  # lookalike host
         ("You can reload up to LKR 50k.", False),  # reads as a magnitude
         ("Dial #123# to reload.", False),  # invented USSD code
         ("1. Open reloadpay.hutch.lk\n2. Enter the number and amount\n3) Pay by Visa or Mastercard", True),  # step numbers
@@ -102,6 +104,12 @@ def test_answer_may_only_use_facts_from_the_cards(answer: str, ok: bool) -> None
 def test_contacts_on_the_support_card_are_allowed() -> None:
     support = next(c for c in draft_cards() if c.article_key == "contact-support").content
     assert grounded("Call 1788 (24x7) or WhatsApp 0788 777 111, or e-mail cs@hutchison.lk.", support)
+
+
+def test_exact_supplied_url_is_allowed_but_an_altered_path_is_not() -> None:
+    source = "Visit https://help.hutch.lk/support/contact for help."
+    assert grounded("Visit https://help.hutch.lk/support/contact.", source)
+    assert not grounded("Visit https://help.hutch.lk/support/refund.", source)
 
 
 def test_draft_cards_are_marked_unreviewed_and_cite_hutch_pages() -> None:

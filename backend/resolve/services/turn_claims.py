@@ -22,13 +22,14 @@ class TurnClaim:
 
 def claim_turn(engine: Engine, *, sandbox_id: UUID | None, conversation_id: UUID,
                turn_id: UUID, input_hash: str, input_payload: dict[str, Any],
+               expected_version: int | None = None,
                now: datetime | None = None) -> TurnClaim:
     now = now or datetime.now(UTC)
     with engine.begin() as connection:
         # This short lock serializes claims for distinct turn IDs; it never spans
         # the conversation/model/provider work that follows.
         scoped = connection.execute(text("""
-            SELECT id FROM resolve.conversations
+            SELECT id,version FROM resolve.conversations
             WHERE sandbox_id IS NOT DISTINCT FROM :sandbox AND id=:conversation FOR UPDATE
         """), {"sandbox": sandbox_id, "conversation": conversation_id}).scalar_one_or_none()
         if scoped is None:
@@ -43,6 +44,8 @@ def claim_turn(engine: Engine, *, sandbox_id: UUID | None, conversation_id: UUID
         if prior is not None and prior["completed_at"] is not None:
             result = prior["result"]
             return TurnClaim(None, prior["downstream_key"], json.loads(result) if isinstance(result, str) else result)
+        if expected_version is not None and scoped["version"] != expected_version:
+            raise ResolveError(409, "STALE_VERSION", "Conversation changed; refresh before sending", False)
         other = connection.execute(text("""
             SELECT client_turn_id FROM resolve.turn_claims
             WHERE conversation_id=:conversation AND client_turn_id<>:turn AND completed_at IS NULL

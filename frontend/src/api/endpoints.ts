@@ -30,10 +30,13 @@ export const customerApi = {
 
   createConversation: (language: Language, idempotencyKey = newId()) =>
     request<ConversationView>('customer', 'POST', '/conversations', { body: { language }, idempotencyKey }),
-  getConversation: (id: string) => request<ConversationView>('customer', 'GET', `/conversations/${id}`),
+  getConversation: (id: string, signal?: AbortSignal) =>
+    request<ConversationView>('customer', 'GET', `/conversations/${id}`, { signal }),
   /** Reuse body.client_turn_id when retrying the same turn; generate a new one for a new turn. */
   sendMessage: (conversationId: string, body: MessageRequest) =>
     request<TurnResult>('customer', 'POST', `/conversations/${conversationId}/messages`, { body }),
+  resumeTurn: (conversationId: string, turnId: string, signal?: AbortSignal) =>
+    request<TurnResult>('customer', 'POST', `/conversations/${conversationId}/turns/${turnId}/resume`, { body: {}, signal }),
   createVoiceSession: (conversationId: string) =>
     request<VoiceSessionGrant>('customer', 'POST', `/conversations/${conversationId}/voice-sessions`, { body: {} }),
 

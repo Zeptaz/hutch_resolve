@@ -10,6 +10,8 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, text
 
+from .case_status import refresh_case_status
+
 from backend.resolve.app.auth import AuthContext, ResolveError
 from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_quota, reconcile_recharge_records, reconcile_service_status, reconcile_statement
 from .voice_consent import VoiceConsentEvidence
@@ -77,10 +79,12 @@ class ResolveFacade:
     """Typed in-process boundary consumed by the conversation controller."""
 
     def __init__(self, engine: Engine, provider: BalanceProvider | AccountProvider | None = None,
-                 *, cursor_secret: bytes | None = None) -> None:
+                 *, cursor_secret: bytes | None = None,
+                 action_execution_available: bool = True) -> None:
         self._engine = engine
         self._provider = provider or PostgresSandboxProvider(engine)
         self._review = AgentReviewService(engine, self._provider, cursor_secret or secrets.token_bytes(32))
+        self._action_execution_available = action_execution_available
 
     def list_agent_cases(self, context: AuthContext, **kwargs: Any) -> dict[str, Any]:
         return self._review.list_cases(context, **kwargs)
@@ -560,18 +564,18 @@ class ResolveFacade:
                  "review_reasons": result["review_reasons"], "window_start": window_start,
                  "window_end": window_end, "command_key": command_key, "request_hash": request_hash},
             )
-            new_case_status = "REVIEW_REQUIRED" if result["evidence_state"] in {"PARTIAL", "CONFLICTING"} else "OPEN"
             connection.execute(
                 text("""
-                    UPDATE resolve.cases SET version=version+1,status=:status,updated_at=:now,
+                    UPDATE resolve.cases SET version=version+1,updated_at=:now,
                       window_start=coalesce(window_start,:window_start),window_end=coalesce(window_end,:window_end),
                       reported_facts=reported_facts || CAST(:reported_facts AS jsonb)
                     WHERE id=:case_id
                 """),
-                {"status": new_case_status, "now": created_at, "case_id": case_id,
+                {"now": created_at, "case_id": case_id,
                  "window_start": window_start, "window_end": window_end,
                  "reported_facts": json.dumps(facts, ensure_ascii=False)},
             )
+            refresh_case_status(connection, case_id, created_at)
             connection.execute(
                 text("""
                     INSERT INTO resolve.audit_events(id,session_id,case_id,event_type,details,created_at)
@@ -597,16 +601,22 @@ class ResolveFacade:
 
     def propose_action(self, context: AuthContext, *, case_id: UUID, expected_version: int,
                        investigation_id: UUID, action_type: str, target_id: UUID,
-                       request_key: str) -> dict[str, Any]:
+                       request_key: str, escalation_reason: str | None = None) -> dict[str, Any]:
         if context.role != "CUSTOMER" or not context.account_id or not context.sandbox_id:
             raise ResolveError(403, "ROLE_FORBIDDEN", "A customer session is required to propose an action")
         if action_type not in {"DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"}:
             raise ResolveError(422, "ACTION_NOT_ALLOWED", "This action is not supported")
         if not request_key or len(request_key) > 200:
             raise ResolveError(422, "VALIDATION_ERROR", "A stable Idempotency-Key is required")
+        if action_type == "CREATE_REVIEW_TICKET":
+            escalation_reason = escalation_reason.strip() if escalation_reason else None
+            if not escalation_reason or len(escalation_reason) > 2000:
+                raise ResolveError(422, "VALIDATION_ERROR", "A human review reason is required")
+        elif escalation_reason is not None:
+            raise ResolveError(422, "VALIDATION_ERROR", "A review reason is only valid for an escalation")
         request_hash = _fingerprint({"case_id": str(case_id), "expected_version": expected_version,
                                      "investigation_id": str(investigation_id), "action_type": action_type,
-                                     "target_id": str(target_id)})
+                                     "target_id": str(target_id), "escalation_reason": escalation_reason})
         case = self._scoped_case(context, case_id)
         with self._engine.begin() as connection:
             previous = connection.execute(text("SELECT * FROM resolve.action_proposals WHERE case_id=:case_id AND request_key=:key"),
@@ -652,6 +662,8 @@ class ResolveFacade:
                 "SEND_SETTINGS_INSTRUCTIONS": f"Send setup instructions for {target['label']}; this will not change network service.",
                 "CREATE_REVIEW_TICKET": f"Create a human review request for {target['label']}; no account change is made now.",
             }[action_type]
+            if escalation_reason:
+                consequences = f"{consequences} Reason: {escalation_reason}"
             proposal_id, now = uuid4(), datetime.now(UTC)
             proposal_hash = _fingerprint({"id": str(proposal_id), "case_id": str(case_id), "investigation_id": str(investigation_id),
                 "revision": latest["revision"], "session_id": str(context.session_id), "action_type": action_type,
@@ -663,16 +675,43 @@ class ResolveFacade:
                    "expires_at": now + timedelta(minutes=5), "simulation": True}
             connection.execute(text("""INSERT INTO resolve.action_proposals
                  (id,case_id,investigation_id,action_type,target_id,target_version,target_label,consequences,proposal_hash,expires_at,
-                 sandbox_id,actor_session_id,evidence_revision,case_version,request_key,request_hash)
+                 sandbox_id,actor_session_id,evidence_revision,case_version,request_key,request_hash,escalation_reason)
                 VALUES (:id,:case_id,:investigation_id,:action_type,:target_id,:target_version,:target_label,CAST(:consequences AS jsonb),
-                 :proposal_hash,:expires_at,:sandbox_id,:session_id,:revision,:case_version,:request_key,:request_hash)"""),
+                 :proposal_hash,:expires_at,:sandbox_id,:session_id,:revision,:case_version,:request_key,:request_hash,:escalation_reason)"""),
                 {**row, "target_label": target["label"], "consequences": json.dumps({"text": consequences}), "sandbox_id": context.sandbox_id,
                  "session_id": context.session_id, "revision": latest["revision"], "case_version": expected_version,
-                 "request_key": request_key, "request_hash": request_hash})
+                 "request_key": request_key, "request_hash": request_hash, "escalation_reason": escalation_reason})
             connection.execute(text("INSERT INTO resolve.audit_events(id,session_id,case_id,event_type,details,created_at) VALUES (:id,:session_id,:case_id,'ACTION_PROPOSED',CAST(:details AS jsonb),:now)"),
                 {"id": uuid4(), "session_id": context.session_id, "case_id": case_id,
                  "details": json.dumps({"proposal_id": str(proposal_id), "action_type": action_type, "target_id": str(target_id)}), "now": now})
             return row
+
+    def propose_escalation(self, context: AuthContext, *, case_id: UUID, expected_version: int,
+                           investigation_id: UUID, reason: str, request_key: str) -> dict[str, Any]:
+        """Create the ordinary confirmed handoff proposal, retaining its reason."""
+        case = self._scoped_case(context, case_id)
+        if case["version"] != expected_version:
+            raise ResolveError(409, "STALE_VERSION", "Case changed; reload before requesting review")
+        with self._engine.connect() as connection:
+            investigation = connection.execute(text("""
+                SELECT eligible_actions FROM resolve.investigations
+                WHERE sandbox_id=:sandbox AND case_id=:case AND id=:investigation
+            """), {"sandbox": context.sandbox_id, "case": case_id,
+                  "investigation": investigation_id}).mappings().one_or_none()
+        if investigation is None:
+            raise ResolveError(404, "RESOURCE_NOT_FOUND", "Investigation was not found")
+        eligible = investigation["eligible_actions"] or []
+        target = next((item.get("target_id") for item in eligible
+                       if item.get("action_type") == "CREATE_REVIEW_TICKET" and item.get("target_id")), None)
+        if target is None:
+            raise ResolveError(422, "ACTION_NOT_ALLOWED", "Current evidence does not permit a review handoff")
+        try:
+            target_id = UUID(str(target))
+        except ValueError as exc:
+            raise ResolveError(422, "ACTION_NOT_ALLOWED", "Review target is invalid") from exc
+        return self.propose_action(context, case_id=case_id, expected_version=expected_version,
+            investigation_id=investigation_id, action_type="CREATE_REVIEW_TICKET", target_id=target_id,
+            request_key=request_key, escalation_reason=reason)
 
     @staticmethod
     def _proposal_view(row: Any, target_label: str | None = None) -> dict[str, Any]:
@@ -749,6 +788,9 @@ class ResolveFacade:
             raise ResolveError(403, "ROLE_FORBIDDEN", "A customer session is required to confirm an action")
         if decision not in {"ACCEPT", "DECLINE"}:
             raise ResolveError(422, "VALIDATION_ERROR", "Decision must be ACCEPT or DECLINE")
+        if decision == "ACCEPT" and not self._action_execution_available:
+            raise ResolveError(503, "ACTION_EXECUTION_UNAVAILABLE",
+                               "Action execution is unavailable; try again later", True)
         if context.channel == "VOICE" and voice_consent is None:
             raise ResolveError(422, "VOICE_CONSENT_REQUIRED", "Trusted Voice consent evidence is required")
         if context.channel != "VOICE" and voice_consent is not None:

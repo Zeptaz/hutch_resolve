@@ -1367,6 +1367,9 @@
         "security": [
           {
             "CustomerSession": []
+          },
+          {
+            "AgentSession": []
           }
         ],
         "responses": {
@@ -1469,6 +1472,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/ResolveRealm"
           }
         ]
       }
@@ -1785,7 +1791,7 @@
       "post": {
         "operationId": "confirm_or_decline",
         "summary": "confirm or decline",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Customer confirmation is idempotent. ACCEPT is durably queued only when action execution is available; otherwise returns retryable 503 ACTION_EXECUTION_UNAVAILABLE without recording the acceptance. DECLINE remains available.",
         "tags": [
           "Resolve"
         ],
@@ -1876,7 +1882,7 @@
             }
           },
           "503": {
-            "description": "Error; see shared contract codes",
+            "description": "Action execution unavailable or dependency unavailable; see Error.code.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1957,6 +1963,9 @@
         "security": [
           {
             "CustomerSession": []
+          },
+          {
+            "AgentSession": []
           }
         ],
         "responses": {
@@ -2059,6 +2068,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/ResolveRealm"
           }
         ]
       }
@@ -2067,7 +2079,7 @@
       "post": {
         "operationId": "prepare_escalation",
         "summary": "prepare escalation",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Persist the reason with a CREATE_REVIEW_TICKET proposal; normal customer confirmation is still required before delivery.",
         "tags": [
           "Resolve"
         ],
@@ -2229,6 +2241,9 @@
         "security": [
           {
             "CustomerSession": []
+          },
+          {
+            "AgentSession": []
           }
         ],
         "responses": {
@@ -2340,6 +2355,9 @@
               "type": "integer",
               "minimum": 1
             }
+          },
+          {
+            "$ref": "#/components/parameters/ResolveRealm"
           }
         ]
       }
@@ -3336,7 +3354,7 @@
       "get": {
         "operationId": "readiness",
         "summary": "readiness",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Reports database readiness and independent runtime capabilities. Optional model and Voice integrations may be unavailable while text remains usable; actions require the sandbox writer and operation worker.",
         "tags": [
           "Resolve"
         ],
@@ -3348,7 +3366,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Health"
+                  "$ref": "#/components/schemas/Readiness"
                 }
               }
             },
@@ -3423,7 +3441,122 @@
             }
           },
           "503": {
-            "description": "Error; see shared contract codes",
+            "description": "Database unavailable; all capability flags are false",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations/{id}/turns/{turn_id}/resume": {
+      "post": {
+        "operationId": "resume_turn",
+        "summary": "Resume an expired conversation turn",
+        "description": "Resumes only a persisted text turn using its stored normalized input and stable command keys. Voice consent is never reconstructed from browser data.",
+        "tags": [
+          "Conversation"
+        ],
+        "x-owner": "Harry/Tevin",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canonical turn result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origin or CSRF rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation or pending turn unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Turn still active or recovery conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -5690,6 +5823,16 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          "pending_turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PendingTurn"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -5702,7 +5845,8 @@
           "cases",
           "pending_question",
           "pending_proposal",
-          "operation_ids"
+          "operation_ids",
+          "pending_turn"
         ]
       },
       "ReviewRequest": {
@@ -7575,6 +7719,88 @@
           "response_id"
         ],
         "additionalProperties": false
+      },
+      "PendingTurn": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "IN_PROGRESS",
+              "RECOVERY_REQUIRED"
+            ]
+          },
+          "retry_after": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "turn_id",
+          "state",
+          "retry_after"
+        ]
+      },
+      "Readiness": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "unavailable"
+            ]
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "type": "boolean"
+              },
+              "actions": {
+                "type": "boolean"
+              },
+              "voice": {
+                "type": "boolean"
+              },
+              "model": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "text",
+              "actions",
+              "voice",
+              "model"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "capabilities"
+        ]
+      }
+    },
+    "parameters": {
+      "ResolveRealm": {
+        "name": "X-Resolve-Realm",
+        "in": "header",
+        "required": false,
+        "description": "Selects the browser session realm for shared customer/agent reads. Required when both cookies are present.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "customer",
+            "agent"
+          ]
+        }
       }
     }
   }

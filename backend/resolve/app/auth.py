@@ -19,11 +19,13 @@ AGENT_COOKIE = "resolve_agent_session"
 
 
 class ResolveError(Exception):
-    def __init__(self, status_code: int, code: str, message: str, retryable: bool = False) -> None:
+    def __init__(self, status_code: int, code: str, message: str, retryable: bool = False,
+                 details: dict[str, Any] | None = None) -> None:
         self.status_code = status_code
         self.code = code
         self.message = message
         self.retryable = retryable
+        self.details = details or {}
 
 
 class EmptyBody(BaseModel):
@@ -116,9 +118,20 @@ def authenticated_context(
 
 
 def authenticated_context_any_role(request: Request, allowed_roles: set[str]) -> AuthContext:
-    if AGENT_COOKIE in request.cookies:
-        return authenticated_context(request, cookie_name=AGENT_COOKIE, allowed_roles=allowed_roles)
-    return authenticated_context(request, cookie_name=CUSTOMER_COOKIE, allowed_roles=allowed_roles)
+    realm = request.headers.get("X-Resolve-Realm")
+    if realm is not None:
+        normalized = realm.strip().lower()
+        cookie_name = {"customer": CUSTOMER_COOKIE, "agent": AGENT_COOKIE}.get(normalized)
+        if cookie_name is None:
+            raise ResolveError(400, "AUTH_REALM_INVALID", "X-Resolve-Realm must be customer or agent")
+        return authenticated_context(request, cookie_name=cookie_name, allowed_roles=allowed_roles)
+
+    has_customer = bool(request.cookies.get(CUSTOMER_COOKIE))
+    has_agent = bool(request.cookies.get(AGENT_COOKIE))
+    if has_customer and has_agent:
+        raise ResolveError(400, "AUTH_REALM_REQUIRED", "Select customer or agent session with X-Resolve-Realm")
+    cookie_name = AGENT_COOKIE if has_agent else CUSTOMER_COOKIE
+    return authenticated_context(request, cookie_name=cookie_name, allowed_roles=allowed_roles)
 
 
 def authenticated_customer_mutation(request: Request, origin: str | None, csrf_header: str | None) -> AuthContext:
@@ -129,7 +142,7 @@ def authenticated_customer_mutation(request: Request, origin: str | None, csrf_h
     credential = request.cookies.get(CUSTOMER_COOKIE, "")
     expected = _csrf_token(configured.app_secret_key, credential)
     if csrf_header is None or not hmac.compare_digest(expected, csrf_header):
-        raise ResolveError(403, "CSRF_INVALID", "A valid CSRF token is required")
+        raise ResolveError(403, "CSRF_FAILED", "A valid CSRF token is required")
     return context
 
 
@@ -141,7 +154,7 @@ def authenticated_agent_mutation(request: Request, origin: str | None, csrf_head
     credential = request.cookies.get(AGENT_COOKIE, "")
     expected = _csrf_token(configured.app_secret_key, credential)
     if csrf_header is None or not hmac.compare_digest(expected, csrf_header):
-        raise ResolveError(403, "CSRF_INVALID", "A valid CSRF token is required")
+        raise ResolveError(403, "CSRF_FAILED", "A valid CSRF token is required")
     return context
 
 
@@ -266,6 +279,8 @@ def build_auth_router() -> APIRouter:
         del body
         require_origin(origin, settings(request))
         require_json(request)
+        from .auth_rate_limit import client_address, enforce
+        enforce(request, f"guest:{client_address(request)}", settings(request).auth_guest_limit)
         return create_session(
             request,
             response,
@@ -287,6 +302,11 @@ def build_auth_router() -> APIRouter:
         configured = settings(request)
         require_origin(origin, configured)
         require_json(request)
+        from .auth_rate_limit import client_address, enforce
+        address = client_address(request)
+        enforce(request, f"login-ip:{address}", configured.auth_login_ip_limit)
+        normalized_identity = body.demo_identity.strip().casefold()
+        enforce(request, f"login-identity:{address}:{normalized_identity}", configured.auth_login_identity_limit)
         identity = configured.demo_identities.get(body.demo_identity)
         supplied_hash = hashlib.sha256(body.credential.encode("utf-8")).hexdigest()
         if identity is None or identity.role != expected_role or not hmac.compare_digest(

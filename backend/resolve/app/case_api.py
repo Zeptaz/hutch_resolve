@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Header, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from .auth import ResolveError, authenticated_context, authenticated_context_any_role
+from .auth import ResolveError, authenticated_context, authenticated_context_any_role, authenticated_customer_mutation
 
 
 class StrictModel(BaseModel):
@@ -180,9 +180,11 @@ def build_case_router() -> APIRouter:
         case_id: UUID,
         body: InvestigationRequest,
         request: Request,
+        origin: str | None = Header(default=None),
+        csrf_header: str | None = Header(default=None, alias="X-CSRF-Token"),
         idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=200),
     ) -> dict[str, Any]:
-        context = authenticated_context(request, allowed_roles={"CUSTOMER"})
+        context = authenticated_customer_mutation(request, origin, csrf_header)
         return _facade(request).investigate(
             context,
             case_id=case_id,

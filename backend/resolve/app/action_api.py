@@ -41,6 +41,12 @@ class ConfirmationRequest(StrictModel):
     client_turn_id: UUID
 
 
+class EscalationRequest(StrictModel):
+    expected_version: int = Field(ge=1)
+    investigation_id: UUID
+    reason: str = Field(min_length=1, max_length=2000)
+
+
 class ConfirmationView(StrictModel):
     id: UUID
     proposal_id: UUID
@@ -100,10 +106,33 @@ def build_action_router() -> APIRouter:
     def confirm(proposal_id: UUID, body: ConfirmationRequest, request: Request, response: Response,
                 origin: str | None = Header(default=None), csrf: str | None = Header(default=None, alias="X-CSRF-Token")) -> dict[str, Any]:
         context = authenticated_customer_mutation(request, origin, csrf)
+        if body.decision == "ACCEPT" and not request.app.state.action_execution_available:
+            raise ResolveError(
+                503,
+                "ACTION_EXECUTION_UNAVAILABLE",
+                "Action execution is temporarily unavailable; no action was accepted",
+                True,
+            )
         result = _facade(request).confirm_action(context, proposal_id=proposal_id, proposal_hash=body.proposal_hash,
             decision=body.decision, client_turn_id=body.client_turn_id)
         response.status_code = 202 if result.get("operation_id") else 200
         return result
+
+    @router.post("/cases/{case_id}/escalations", response_model=ProposalView, status_code=201, tags=["Actions"])
+    def prepare_escalation(case_id: UUID, body: EscalationRequest, request: Request, response: Response,
+                           origin: str | None = Header(default=None), csrf: str | None = Header(default=None, alias="X-CSRF-Token"),
+                           key: str = Header(..., alias="Idempotency-Key", min_length=36, max_length=36)) -> dict[str, Any]:
+        try:
+            UUID(key)
+        except ValueError as exc:
+            raise ResolveError(422, "VALIDATION_ERROR", "Idempotency-Key must be a UUID") from exc
+        context = authenticated_customer_mutation(request, origin, csrf)
+        reason = body.reason.strip()
+        if not reason:
+            raise ResolveError(422, "VALIDATION_ERROR", "A human review reason is required")
+        return _facade(request).propose_escalation(context, case_id=case_id,
+            expected_version=body.expected_version, investigation_id=body.investigation_id,
+            reason=reason, request_key=key)
 
     @router.get("/operations/{operation_id}", response_model=OperationView, tags=["Actions"])
     def get_operation(operation_id: UUID, request: Request) -> dict[str, Any]:

@@ -21,6 +21,8 @@ Use localhost consistently for the UI origin. Deployment uses same-origin HTTPS 
 
 Opaque random session credentials are stored hashed. Cookies: `resolve_customer_session` and `resolve_agent_session`, HttpOnly, SameSite=Lax, Secure under HTTPS. Separate cookies allow agent/customer testing in one browser. Session GET returns a separate CSRF token; cookie mutations require `X-CSRF-Token` and an exact allowed Origin. No permanent browser token in localStorage or URLs.
 
+Shared customer/agent reads use `X-Resolve-Realm: customer|agent`. If exactly one session cookie exists, the server may infer that realm; if both exist and the header is absent, it returns `400 AUTH_REALM_REQUIRED`. Invalid values return `400 AUTH_REALM_INVALID`; a selected invalid or expired session never falls back to the other cookie. The React transport sends the realm on every request.
+
 Anonymous creation and login require exact Origin, JSON content type and throttling. They are exempt from CSRF only when not upgrading an existing session; guest upgrade also requires its CSRF token. Environment-configured demo identities map to credential hashes and permitted synthetic account/run or AGENT role. Login never accepts arbitrary role/account IDs. Sessions expire after 30 minutes.
 
 Roles: GUEST (public FAQ), CUSTOMER (own session/account), AGENT (review data in assigned run), SIMULATOR (operator CLI only). AuthContext is `{session_id, principal_id, role, sandbox_id?, account_id?, request_id, channel}`; callers/models cannot supply trusted context. Guest upgrade rotates credentials and atomically scopes its public conversation. Changing an already private identity creates a new session/conversation. Logout/reset/expiry invalidates Voice callbacks. Retained private history is not automatically attached to a new login.
@@ -36,10 +38,10 @@ Resolve generates session/conversation/case/investigation/proposal/operation/rec
 - Languages en/si/ta; text max4000; investigation window max30days; agent note max2000. Synthetic results have simulation=true.
 - Versions begin at1. Mutable writes include expected_version. Lists use `{items,next_cursor}`, default limit25/max100; opaque cursor binds filters/order. Provider pagination is separately100/max500.
 - DTOs reject unknown fields except immutable source payload/telemetry maps explicitly allowing them.
-- Mutations require Idempotency-Key except session lifecycle, messages (client_turn_id) and Voice callbacks (event/turn IDs). Persist subject+route+key, canonical request fingerprint and result. Matching retry replays response; changed body409. Authenticate scope before replay; check replay before stale-version rejection.
+- Mutations require Idempotency-Key except session lifecycle, messages (client_turn_id) and Voice callbacks (event/turn IDs). Browser Idempotency-Key values are UUIDs. Persist subject+route+key, canonical request fingerprint and result. Matching retry replays response; changed body409. Authenticate scope before replay; check replay before stale-version rejection. Voice grant replay returns the same encrypted-at-rest, short-lived grant; expired or uncertain grants cannot be minted again under the same key.
 - Persist one active turn claim per conversation before remote/model calls, without holding locks during calls. Identical in-progress turn returns409 TURN_IN_PROGRESS/retryable=true. Other concurrent turns return CONVERSATION_BUSY or STALE_VERSION. Recover abandoned claims with original downstream keys. Persist final messages/result and advance conversation.version once.
 
-Error envelope: `{error:{code,message,retryable,request_id,details}}`; return X-Request-Id. Details contain safe validation/current-version information, never another account's data.
+Error envelope: `{error:{code,message,retryable,request_id,details}}`; return X-Request-Id. Details contain safe validation/current-version information, never another account's data. Unhandled exceptions return `500 INTERNAL_ERROR` with this envelope; exception messages and customer/provider payloads are not exposed. Investigation writes require Origin and CSRF. Anonymous creation/login use shared PostgreSQL fixed-window buckets; defaults are 30 anonymous creations/client/10 minutes, 30 login attempts/client/10 minutes and 10/client+identity/10 minutes. `TRUSTED_PROXY_IPS` is empty by default; a single sanitized X-Forwarded-For address is honored only from an exact listed proxy IP. Rate-limit failures return `429 RATE_LIMITED` with `Retry-After: 600`.
 
 | HTTP | Codes | Handling |
 | --- | --- | --- |
@@ -49,7 +51,7 @@ Error envelope: `{error:{code,message,retryable,request_id,details}}`; return X-
 | 409 | STALE_VERSION, IDEMPOTENCY_CONFLICT, PROPOSAL_INVALIDATED, TURN_IN_PROGRESS, CONVERSATION_BUSY | Refresh/clarify; same-ID retry only when retryable |
 | 422 | VALIDATION_ERROR, ACTION_NOT_ALLOWED, PROPOSAL_EXPIRED, CONFIRMATION_REQUIRED | Fix input/request new proposal |
 | 429 | RATE_LIMITED | Honor Retry-After |
-| 503 | DEPENDENCY_UNAVAILABLE | Safe fallback; bounded idempotent retry |
+| 503 | DEPENDENCY_UNAVAILABLE, ACTION_EXECUTION_UNAVAILABLE | Safe fallback; bounded idempotent retry. An accepted action is never persisted when its worker/writer is unavailable. |
 
 PARTIAL/CONFLICTING investigations are valid200 results. Accepted durable operations return202; acceptance never claims completion.
 
@@ -67,6 +69,7 @@ All paths use `/api/v1`; OpenAPI defines exact fields and response models. Sessi
 | POST /conversations | Customer/guest cookie, Origin, CSRF, UUID Idempotency-Key; language ->201 ConversationView, identical replay returns same ID, changed body409 |
 | GET /conversations/{id} | Scoped ID ->conversation, messages, cases and pending state |
 | POST /conversations/{id}/messages | client_turn_id, expected_version, language, input ->200 TurnResult |
+| POST /conversations/{id}/turns/{turn_id}/resume | Customer/guest cookie, Origin, CSRF; no body ->200 canonical TurnResult. Resumes only an expired, persisted text turn using original normalized input and command keys. A live claim returns retryable 409; Voice consent is never reconstructed by the browser. |
 | GET /account | No account selector ->scoped AccountView |
 | GET /cases/{id} | Scoped ID ->CaseView/current investigation |
 | POST /cases/{id}/investigations | expected_version, complaint_type, window_start/end, reported_facts ->200 InvestigationResult |
@@ -80,7 +83,7 @@ All paths use `/api/v1`; OpenAPI defines exact fields and response models. Sessi
 | GET /agent/cases | Implemented: filters, exact case/line alias search, signed cursor -> scoped queue |
 | GET /agent/cases/{id} | Implemented: sandbox-scoped AgentCaseDetail |
 | PATCH /agent/cases/{id}/review | Implemented: versioned/idempotent review and internal note; delivered mock ticket gets a durable sync job |
-| GET /healthz; /readyz | Process/DB-migration readiness |
+| GET /healthz; /readyz | Process/DB-migration readiness; `/readyz` reports text/actions/voice/model capability flags and returns 503 when PostgreSQL is unavailable. Text remains usable when optional Voice/model integrations are down; actions require the sandbox writer and worker. |
 
 Case creation is an internal facade operation invoked by conversation intake. Public FAQ cannot create account cases. Health routes are under `/api/v1` in Resolve; Voice retains existing `/healthz`.
 

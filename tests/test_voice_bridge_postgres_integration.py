@@ -31,7 +31,7 @@ APP_SECRET = b"resolve-voice-postgres-test-secret-value-at-least-32-bytes"
 
 
 class FakeVoiceClient:
-    async def request_session(self, payload: dict) -> dict:
+    async def request_session(self, payload: dict, *, event_id: str | None = None) -> dict:
         return {
             "binding_id": payload["binding_id"],
             "voice_session_id": payload["voice_session_id"],
@@ -82,6 +82,7 @@ def test_voice_binding_and_signed_turn_persist_and_replay_on_postgres():
             database_url=url, app_origins=frozenset({ORIGIN}), app_secret_key=APP_SECRET,
             cookie_secure=False, session_minutes=30, demo_identities={},
             voice_base_url="http://voice.test", voice_hmac_secret=VOICE_SECRET,
+            voice_grant_encryption_key=b"g" * 32,
         )
         service = FakeConversationService()
         app = create_app(database=Database(engine), settings=settings, auth_store=AuthStore(engine),
@@ -91,7 +92,8 @@ def test_voice_binding_and_signed_turn_persist_and_replay_on_postgres():
             client.cookies.set("resolve_customer_session", credential)
             session_response = client.post(
                 f"/api/v1/conversations/{conversation['id']}/voice-sessions", json={},
-                headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, credential)},
+                headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, credential),
+                         "Idempotency-Key": str(uuid4())},
             )
             assert session_response.status_code == 201, session_response.text
             grant = session_response.json()

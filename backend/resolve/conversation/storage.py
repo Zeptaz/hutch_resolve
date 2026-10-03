@@ -28,13 +28,40 @@ def _plain(value: object) -> object:
     return json.loads(_json(value)) if isinstance(value, str) else value
 
 
+def _durable_turn_input(channel: Channel, fingerprint: str, input_payload: dict | None) -> dict:
+    """Keep enough normalized input for recovery without treating Voice evidence as replayable."""
+    supplied = input_payload or {}
+    durable = {
+        "channel": channel.value,
+        "fingerprint": fingerprint,
+        "language": supplied.get("language"),
+        "expected_version": supplied.get("expected_version"),
+        "input": supplied.get("input"),
+    }
+    evidence = supplied.get("voice_evidence")
+    if evidence and evidence.get("binding_id"):
+        durable["binding_id"] = evidence["binding_id"]
+    return durable
+
+
+def _resumable_text_input(payload: dict) -> dict:
+    """Recover only persisted text turns; never replay a Voice decision without fresh evidence."""
+    if payload.get("channel") != Channel.TEXT.value:
+        raise AppError(409, "CONVERSATION_BUSY",
+                       "Retry this Voice turn through its original authenticated event", False)
+    if not isinstance(payload.get("input"), dict):
+        raise AppError(409, "CONVERSATION_BUSY",
+                       "This interrupted turn predates recoverable input; support reconciliation is required", False)
+    return {"language": payload.get("language"), "input": payload["input"]}
+
+
 def _raise_port_error(error: AppError) -> None:
     code = error.code
     if code == "NOT_FOUND":
         code = "RESOURCE_NOT_FOUND"
     if code == "TURN_CLAIM_LOST":
         code = "CONVERSATION_BUSY"
-    raise ResolveError(code, error.message, retryable=error.retryable) from error
+    raise ResolveError(code, error.message, retryable=error.retryable, details=error.details) from error
 
 
 class PostgresConversationRepository:
@@ -72,6 +99,12 @@ class PostgresConversationRepository:
                 JOIN resolve.cases c ON c.id=o.case_id
                 WHERE c.conversation_id=:conversation ORDER BY o.created_at,o.id
             """), {"conversation": conversation_id}).scalars().all()
+            pending_turn = connection.execute(text("""
+                SELECT client_turn_id,lease_until,claimed_at,input_payload
+                FROM resolve.turn_claims
+                WHERE conversation_id=:conversation AND completed_at IS NULL
+                ORDER BY claimed_at,client_turn_id LIMIT 1
+            """), {"conversation": conversation_id}).mappings().one_or_none()
             state = DialogueState.model_validate(row["dialogue_state"] or {})
             proposal = None
             if state.pending_proposal is not None:
@@ -105,7 +138,24 @@ class PostgresConversationRepository:
             "cases": [dict(item) for item in cases],
             "pending_question": state.pending_question.model_dump(mode="json") if state.pending_question else None,
             "pending_proposal": proposal, "operation_ids": operations,
+            "pending_turn": ({"turn_id": pending_turn["client_turn_id"],
+                "state": "IN_PROGRESS" if pending_turn["lease_until"] > datetime.now(UTC) else "RECOVERY_REQUIRED",
+                "retry_after": pending_turn["lease_until"]} if pending_turn else None),
         }
+
+    def resume_payload(self, ctx: AuthContext, conversation_id: UUID, turn_id: UUID) -> dict:
+        with self.engine.begin() as connection:
+            self._scoped(connection, ctx, conversation_id, lock=True)
+            claim = connection.execute(text("""
+                SELECT lease_until,input_payload,completed_at FROM resolve.turn_claims
+                WHERE conversation_id=:conversation AND client_turn_id=:turn FOR UPDATE
+            """), {"conversation": conversation_id, "turn": turn_id}).mappings().one_or_none()
+            if claim is None or claim["completed_at"] is not None:
+                raise ResolveError("RESOURCE_NOT_FOUND", "Pending turn is unavailable")
+            if claim["lease_until"] > datetime.now(UTC):
+                raise ResolveError("TURN_IN_PROGRESS", "This turn is still being processed", retryable=True)
+            payload = _plain(claim["input_payload"] or {})
+            return _resumable_text_input(payload)
 
     async def claim_turn(self, ctx: AuthContext, conversation_id: UUID, turn_id: UUID,
                          fingerprint: str, expected_version: int,
@@ -120,9 +170,8 @@ class PostgresConversationRepository:
             claimed = claim_fenced_turn(
                 self.engine, sandbox_id=ctx.sandbox_id, conversation_id=conversation_id,
                 turn_id=turn_id, input_hash=fingerprint,
-                input_payload={"channel": ctx.channel.value, "fingerprint": fingerprint,
-                               "binding_id": (input_payload or {}).get("voice_evidence", {}).get("binding_id")
-                                   if (input_payload or {}).get("voice_evidence") else None},
+                input_payload=_durable_turn_input(ctx.channel, fingerprint, input_payload),
+                expected_version=expected_version,
             )
         except AppError as error:
             _raise_port_error(error)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -47,6 +48,9 @@ def harness(transform=lambda english: f"[si] {english}") -> tuple[Harness, Rewri
         ("Balance is LKR 420.00 on 2 Oct, 12:00.", "Oyage balance eka LKR 420.00, Oct 2, 12:00 ta.", True),
         ("Balance is LKR 420.00.", "Oyage balance eka LKR 42.00.", False),  # changed amount
         ("Balance is LKR 420.00.", "Balance LKR 420.00, refund LKR 500 karanawa.", False),  # added number
+        ("Balance is LKR 80.00.", "Balance is LKR 8000.", False),  # decimal/magnitude substitution
+        ("Debit was LKR -70.00.", "Debit was LKR 70.00.", False),  # sign reversal
+        ("Paid LKR 80.00 then LKR 20.00.", "Paid LKR 20.00 then LKR 80.00.", True),  # lexical check cannot prove association
         ("Request ID 013eac3f-c7a3-47f9-9f15-c625026d75a0.", "Request ID eka 013eac3f-c7a3-47f9-9f15-c625026d75a0.", True),
         ("Request ID 013eac3f-c7a3-47f9-9f15-c625026d75a0.", "Request ID eka 013eac3f.", False),  # truncated ID
         ("Line SIM-LK-0001 is active.", "SIM-LK-0001 line eka active.", True),
@@ -70,10 +74,10 @@ def test_singlish_message_gets_singlish_style_reply_without_language_picker() ->
     ctx = customer(ACCOUNT_E)
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, text("Mage reload eka watila na"), language="en"))  # UI still says English
-    assert result.reply_text.startswith("[si] ")
-    assert "Singlish" in model.styles[0]
+    assert "LKR 500" in result.reply_text and not result.reply_text.startswith("[si] ")
+    assert model.sources == []  # findings and handoff wording remain deterministic
     assert h.state(conv).language == "si" and h.state(conv).script == "LATIN"
-    assert any(r.purpose == "REPLY_REWRITE" and r.outcome == "OK" for r in h.telemetry.records)
+    assert not any(r.purpose == "REPLY_REWRITE" for r in h.telemetry.records)
 
 
 def test_language_sticks_for_button_clicks() -> None:
@@ -85,18 +89,18 @@ def test_language_sticks_for_button_clicks() -> None:
     card = next(c for c in offered.cards if c.type == "confirmation").data
     decided = h.send(ctx, h.turn(conv, {"type": "action_decision", "proposal_id": str(card.id),
                                          "proposal_hash": card.proposal_hash, "decision": "DECLINE"}, language="en"))
-    assert decided.reply_text.startswith("[si] ")
-    assert len(model.sources) == 2
+    assert "Nothing on your account was changed" in decided.reply_text
+    assert model.sources == []
 
 
-def test_rewrite_that_changes_a_number_falls_back_to_english() -> None:
-    h, _ = harness(lambda english: english.replace("420", "520"))
+def test_financial_case_reply_never_uses_freeform_rewrite() -> None:
+    h, model = harness(lambda english: english.replace("420", "520"))
     h.model.on("mage balance eka adu wela", SINGLISH)
     ctx = customer(ACCOUNT_A)
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela")))
     assert "reconcile to LKR 420" in result.reply_text and "520" not in result.reply_text
-    assert any(r.purpose == "REPLY_REWRITE" and r.outcome == "FACT_CHECK" for r in h.telemetry.records)
+    assert model.sources == []  # financial case text never enters freeform rewriting
 
 
 def test_rewriter_outage_keeps_english() -> None:
@@ -134,18 +138,18 @@ def test_tamil_script_targets_tamil_script() -> None:
     ctx = customer(ACCOUNT_A)
     conv = h.open(ctx)
     h.send(ctx, h.turn(conv, text("என் பேலன்ஸ் குறைந்துவிட்டது")))
-    assert model.styles == ["Tamil in Tamil script"]
+    assert model.styles == []  # this response contains case findings
 
 
 def test_english_original_is_kept_with_the_rewritten_reply() -> None:
-    h, _ = harness()
+    h, model = harness()
     h.model.on("mage balance eka adu wela", SINGLISH)
     ctx = customer(ACCOUNT_A)
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela")))
-    original = h.repo.source_texts[result.message_id]
-    assert result.reply_text == f"[si] {original}"
-    assert "reconcile to LKR 420" in original  # Resolve's exact wording survives for audit
+    assert not result.reply_text.startswith("[si] ")
+    assert h.repo.source_texts == {}
+    assert model.sources == []
 
 
 def test_reviewed_faq_text_is_never_machine_rewritten() -> None:
@@ -156,6 +160,24 @@ def test_reviewed_faq_text_is_never_machine_rewritten() -> None:
     result = h.send(ctx, h.turn(conv, text("package eka activate karanne kohomada")))
     assert result.reply_text.startswith("HUTCH self-care publicly lists plan activation.")
     assert result.citations and model.sources == []
+
+
+def test_critical_operation_outcome_never_enters_rewriter() -> None:
+    from uuid import uuid4
+
+    from resolve.conversation.ports import TurnDraft
+
+    h, model = harness(lambda _english: "Your action succeeded.")
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    state = h.state(conv)
+    turn = h.turn(conv, text("hello"))
+    draft = TurnDraft(reply_text="Your action is pending.", operation_ids=[uuid4()])
+
+    result = asyncio.run(h.service._localize(ctx, turn, draft, state))
+
+    assert result is draft
+    assert model.sources == []
 
 
 def test_voice_turn_skips_rewrite_when_the_deadline_is_near() -> None:

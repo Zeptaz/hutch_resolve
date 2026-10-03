@@ -21,6 +21,9 @@ export class CallAudio {
   readonly ctx: AudioContext
   private stream: MediaStream | null = null
   private capture: AudioWorkletNode | null = null
+  private source: MediaStreamAudioSourceNode | null = null
+  private sink: GainNode | null = null
+  private closed = false
   private outputGain: GainNode
   private outputAnalyser: AnalyserNode
   private analyserData: Uint8Array<ArrayBuffer>
@@ -51,26 +54,42 @@ export class CallAudio {
   }
 
   async startMic() {
+    if (this.closed) throw new MicError('unsupported')
     if (!navigator.mediaDevices?.getUserMedia) throw new MicError('unsupported')
+    let stream: MediaStream
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       })
     } catch (e) {
       const name = (e as DOMException).name
       throw new MicError(name === 'NotFoundError' || name === 'OverconstrainedError' ? 'missing' : 'denied')
     }
-    await this.ctx.audioWorklet.addModule(captureWorkletUrl)
-    const source = this.ctx.createMediaStreamSource(this.stream)
-    this.capture = new AudioWorkletNode(this.ctx, 'pcm-capture')
-    this.capture.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; level: number }>) => {
-      this.inputLevel = e.data.level
-      this.onFrame(e.data.pcm)
+    // getUserMedia may resolve after the caller leaves the call while the browser
+    // permission prompt is open. Never attach or retain that late stream.
+    if (this.closed) {
+      stream.getTracks().forEach((track) => track.stop())
+      return
     }
-    // The worklet must be pulled by the graph to run; a muted gain keeps the mic out of the speakers.
-    const sink = this.ctx.createGain()
-    sink.gain.value = 0
-    source.connect(this.capture).connect(sink).connect(this.ctx.destination)
+    this.stream = stream
+    try {
+      await this.ctx.audioWorklet.addModule(captureWorkletUrl)
+      if (this.closed) return
+      this.source = this.ctx.createMediaStreamSource(stream)
+      this.capture = new AudioWorkletNode(this.ctx, 'pcm-capture')
+      this.capture.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; level: number }>) => {
+        if (this.closed) return
+        this.inputLevel = e.data.level
+        this.onFrame(e.data.pcm)
+      }
+      // The worklet must be pulled by the graph to run; a muted gain keeps the mic out of the speakers.
+      this.sink = this.ctx.createGain()
+      this.sink.gain.value = 0
+      this.source.connect(this.capture).connect(this.sink).connect(this.ctx.destination)
+    } catch (error) {
+      this.releaseMicrophone()
+      throw error
+    }
   }
 
   /** Microphone level 0..1, eased for display. */
@@ -164,9 +183,25 @@ export class CallAudio {
   }
 
   close() {
+    if (this.closed) return
+    this.closed = true
     this.flush()
-    this.capture?.port.close()
-    this.stream?.getTracks().forEach((t) => t.stop())
-    void this.ctx.close()
+    this.releaseMicrophone()
+    if (this.ctx.state !== 'closed') void this.ctx.close().catch(() => {})
+  }
+
+  private releaseMicrophone() {
+    if (this.capture) {
+      this.capture.port.onmessage = null
+      try { this.capture.port.close() } catch { /* already closed */ }
+      try { this.capture.disconnect() } catch { /* already disconnected */ }
+      this.capture = null
+    }
+    try { this.source?.disconnect() } catch { /* already disconnected */ }
+    try { this.sink?.disconnect() } catch { /* already disconnected */ }
+    this.source = null
+    this.sink = null
+    this.stream?.getTracks().forEach((track) => track.stop())
+    this.stream = null
   }
 }
