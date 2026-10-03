@@ -1,6 +1,6 @@
 # Tevin: conversation backend
 
-Read [context.md](../../context.md) and [shared contracts](../contracts.md). Update both this plan and context after meaningful progress; record tests and unresolved work. No chatbot backend currently exists. Run as a module inside Harry's Resolve application, not a separate service.
+Read [context.md](../../context.md) and [shared contracts](../contracts.md). Update both this plan and context after meaningful progress; record tests and unresolved work. The conversation module is now mounted inside Harry's Resolve application. Do not deploy a separate chatbot service.
 
 ## Boundary and interfaces
 
@@ -53,4 +53,17 @@ Acceptance: a full A journey produces the same case/action/receipt through text 
 
 | Date | Task | Evidence | Remaining |
 | --- | --- | --- | --- |
+| 2026-10-03 | Package query/selection integration | Added typed package-query/selection turns; conversation gets catalogue/usage and asks ResolveFacade to create case/evidence/proposal. No duplicate package policy. Tests: 347 passed, 16 database-gated skipped. Resolve-backed package selection/action was separately verified through disposable PostgreSQL, including concurrent confirmation. | Usage lacks explicit coverage so no personalized best-fit claim is exposed; full customer Voice/browser journey remains open. |
 | 2026-10-02 | Baseline | No conversation implementation found; master and frozen contract define intended behavior | T-01 through T-04 pending |
+| 2026-10-02 | Resolve integration | Imported the conversation module and contract tests from `HutchChat`; text and signed Voice turns use one mounted service with persisted scoped turn claims. Revision 0007 stores dialogue state and model telemetry. Contract examples validate. Full default suite 420 passed/34 opt-in skipped; five disposable PostgreSQL conversation/Voice/guest tests passed. | Browser and real-model qualification, native-language human review, full six-scenario end-to-end matrix and release disclosure remain open. Package activation is now in the v1.1 contract but remains disabled pending PostgreSQL qualification. |
+
+
+## Audit remediation checkpoint — 2026-10-03
+
+[Audit findings and verification limits](../audits/2026-10-03-resolve.md). AUD-01 deterministic replies for actions/cases/financial outcomes now bypass freeform rewriting; number/sign, outcome polarity and supplied-link regression tests are added. Unit/conversation tests pass, but no real-model semantic qualification has run. For AUD-03, normalized TEXT input is saved and same-ID recovery uses atomic expected-version claims; trusted Voice consent is never reconstructed. Abandoned Voice and legacy claims with no saved payload fail closed and can still block later conversation turns until an authorized reconciliation policy exists. See current aggregate results and PostgreSQL blockers in [`context.md`](../../context.md).
+
+Update this plan and root context.md after each implemented and verified correction, recording commands/results and remaining work.
+
+### 2026-10-03 grounded response follow-up
+
+Resolve conversation answers now reject outcome claims unsupported by the available grounded facts, preventing the freeform response path from inventing a customer outcome. Focused conversation answer tests passed (**40 passed**); the aggregate Resolve suite is **439 passed, 36 PostgreSQL-gated skipped**. No real-model semantic qualification has run, so model answer quality and native-language phrasing remain open.

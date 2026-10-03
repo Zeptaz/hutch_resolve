@@ -20,13 +20,44 @@ export type ConversationView = Schemas['ConversationView']
 export type MessageView = Schemas['MessageView']
 export type MessageRequest = Schemas['MessageRequest']
 export type TurnResult = Schemas['TurnResult']
+export type TurnInput = Schemas['TurnInput']
+export type PendingQuestion = Schemas['PendingQuestion']
+export type Citation = Schemas['Citation']
 export type Card = Schemas['Card']
+export type CardOf<T extends Card['type']> = Extract<Card, { type: T }>
+
+export type InvestigationResult = Schemas['InvestigationResult']
+export type Calculation = Schemas['Calculation']
+export type Finding = Schemas['Finding']
+export type ProposalView = Schemas['ProposalView']
+export type Decision = Schemas['Decision']
+export type OperationView = Schemas['OperationView']
+export type Handoff = Schemas['Handoff']
+export type ReceiptView = Schemas['ReceiptView']
+export type EscalationRequest = Schemas['EscalationRequest']
+export type ReportedFacts = Schemas['ReportedFacts']
 
 export type AccountView = Schemas['AccountView']
 export type CaseView = Schemas['CaseView']
 export type CaseQueue = Schemas['CaseQueue']
 export type CaseQueueRow = Schemas['CaseQueueRow']
 export type AgentCaseDetail = Schemas['AgentCaseDetail']
+export type ReviewNote = Schemas['ReviewNote']
+export type AuditEvent = Schemas['AuditEvent']
+export type ConfirmationView = Schemas['ConfirmationView']
+export type SourceStatus = Schemas['SourceStatus']
+export type Disposition = 'REVIEW_COMPLETE' | 'NEEDS_OPERATOR_FOLLOWUP' | 'CUSTOMER_WITHDREW'
+// The OpenAPI ReviewRequest oneOf constraints generate `unknown` arms; keep its wire fields explicit.
+export type ReviewRequest = {
+  expected_version: number
+  review_status?: ReviewStatus
+  disposition?: Disposition
+  note?: string
+  reopen_reason?: string
+}
+export type ReviewResult = Schemas['ReviewResult']
+export type ReviewSyncState = ReviewResult['review_sync_state']
+export type VoiceSessionGrant = Schemas['VoiceSessionGrant']
 
 export type QueueFilters = {
   review_status?: ReviewStatus

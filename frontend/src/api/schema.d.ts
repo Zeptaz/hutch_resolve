@@ -263,7 +263,7 @@ export interface paths {
         put?: never;
         /**
          * confirm or decline
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Customer confirmation is idempotent. ACCEPT is durably queued only when action execution is available; otherwise returns retryable 503 ACTION_EXECUTION_UNAVAILABLE without recording the acceptance. DECLINE remains available.
          */
         post: operations["confirm_or_decline"];
         delete?: never;
@@ -303,7 +303,7 @@ export interface paths {
         put?: never;
         /**
          * prepare escalation
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Persist the reason with a CREATE_REVIEW_TICKET proposal; normal customer confirmation is still required before delivery.
          */
         post: operations["prepare_escalation"];
         delete?: never;
@@ -343,7 +343,7 @@ export interface paths {
         put?: never;
         /**
          * create voice binding
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Implemented: customer session, exact Origin and CSRF required; binding is scoped to the session, account, conversation, active sandbox run, origin and short expiry. Requires configured Voice service.
          */
         post: operations["create_voice_binding"];
         delete?: never;
@@ -363,7 +363,7 @@ export interface paths {
         put?: never;
         /**
          * receive voice turn
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Implemented signed callback. Signature, active binding scope, and event/turn idempotency are checked before an injected ConversationService handles the finalized turn. A missing conversation service returns 503.
          */
         post: operations["receive_voice_turn"];
         delete?: never;
@@ -383,7 +383,7 @@ export interface paths {
         put?: never;
         /**
          * receive voice event
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Implemented signed lifecycle callback. Signature and active binding scope are checked before durable event replay/acknowledgement.
          */
         post: operations["receive_voice_event"];
         delete?: never;
@@ -412,7 +412,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/agent/cases/{id}": {
+    "/agent/cases/{case_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -432,7 +432,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/agent/cases/{id}/review": {
+    "/agent/cases/{case_id}/review": {
         parameters: {
             query?: never;
             header?: never;
@@ -481,7 +481,7 @@ export interface paths {
         };
         /**
          * readiness
-         * @description Proposed interface; not implemented at documentation baseline.
+         * @description Reports database readiness and independent runtime capabilities. Optional model and Voice integrations may be unavailable while text remains usable; actions require the sandbox writer and operation worker.
          */
         get: operations["readiness"];
         put?: never;
@@ -492,25 +492,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/conversations/{id}/turns/{turn_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume an expired conversation turn
+         * @description Resumes only a persisted text turn using its stored normalized input and stable command keys. Voice consent is never reconstructed from browser data.
+         */
+        post: operations["resume_turn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/conversations/{conversation_id}/turns/{turn_id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * reconcile a stalled turn
+         * @description Agent-only terminal reconciliation of an expired turn claim. Refuses while related account operations are PENDING, RUNNING or UNKNOWN. Never replays the turn or its Voice consent.
+         */
+        post: operations["reconcile_stalled_conversation_turn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @enum {string} */
+        /**
+         * Language
+         * @enum {string}
+         */
         Language: "en" | "si" | "ta";
         /** @enum {string} */
-        ComplaintType: "BALANCE_RECHARGE" | "DATA_DEPLETION" | "CONNECTIVITY" | "VAS_DISPUTE";
-        /** @enum {string} */
+        ComplaintType: "BALANCE_RECHARGE" | "DATA_DEPLETION" | "CONNECTIVITY" | "VAS_DISPUTE" | "PACKAGE_ACTIVATION";
+        /**
+         * EvidenceState
+         * @enum {string}
+         */
         EvidenceState: "SUFFICIENT" | "PARTIAL" | "CONFLICTING";
         /** @enum {string} */
-        ActionType: "DEACTIVATE_VAS" | "SEND_SETTINGS_INSTRUCTIONS" | "CREATE_REVIEW_TICKET";
-        /** @enum {string} */
+        ActionType: "DEACTIVATE_VAS" | "SEND_SETTINGS_INSTRUCTIONS" | "CREATE_REVIEW_TICKET" | "ACTIVATE_PACKAGE";
+        /**
+         * OperationStatus
+         * @enum {string}
+         */
         OperationStatus: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "UNKNOWN" | "REVIEW_REQUIRED";
-        /** @enum {string} */
+        /**
+         * ReviewStatus
+         * @enum {string}
+         */
         ReviewStatus: "NEW" | "IN_REVIEW" | "CLOSED";
-        /** @enum {string} */
+        /**
+         * DeliveryState
+         * @enum {string}
+         */
         DeliveryState: "PENDING" | "DELIVERED" | "FAILED" | "REVIEW_REQUIRED";
-        /** @enum {string} */
+        /**
+         * Decision
+         * @enum {string}
+         */
         Decision: "ACCEPT" | "DECLINE";
         Empty: Record<string, never>;
         Error: {
@@ -560,265 +618,548 @@ export interface components {
         CreateConversation: {
             language: components["schemas"]["Language"];
         };
+        /**
+         * ReportedFacts
+         * @description Customer-reported facts. Never source evidence.
+         */
         ReportedFacts: {
-            amount_minor?: number;
-            recharge_reference?: string;
-            /** Format: uuid */
-            subscription_id?: string;
-            description?: string;
+            /**
+             * Amount Minor
+             * @default null
+             */
+            amount_minor: number | null;
+            /**
+             * Recharge Reference
+             * @default null
+             */
+            recharge_reference: string | null;
+            /**
+             * Subscription Id
+             * @default null
+             */
+            subscription_id: string | null;
+            /**
+             * Description
+             * @default null
+             */
+            description: string | null;
         };
+        /** TextInput */
         TextInput: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "text";
+            /** Text */
             text: string;
         };
+        /** CategoryInput */
         CategoryInput: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "category_selection";
             complaint_type: components["schemas"]["ComplaintType"];
         };
+        /** DetailsInput */
         DetailsInput: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "complaint_details";
             complaint_type: components["schemas"]["ComplaintType"];
-            /** Format: date-time */
+            /**
+             * Window Start
+             * Format: date-time
+             */
             window_start: string;
-            /** Format: date-time */
+            /**
+             * Window End
+             * Format: date-time
+             */
             window_end: string;
             reported_facts: components["schemas"]["ReportedFacts"];
         };
+        /** DecisionInput */
         DecisionInput: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "action_decision";
-            /** Format: uuid */
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
             proposal_id: string;
+            /** Proposal Hash */
             proposal_hash: string;
             decision: components["schemas"]["Decision"];
         };
+        /** CaseSelectionInput */
         CaseSelectionInput: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "case_selection";
-            /** Format: uuid */
+            /**
+             * Case Id
+             * Format: uuid
+             */
             case_id: string;
         };
-        TurnInput: components["schemas"]["TextInput"] | components["schemas"]["CategoryInput"] | components["schemas"]["DetailsInput"] | components["schemas"]["DecisionInput"] | components["schemas"]["CaseSelectionInput"];
+        TurnInput: components["schemas"]["TextInput"] | components["schemas"]["CategoryInput"] | components["schemas"]["DetailsInput"] | components["schemas"]["DecisionInput"] | components["schemas"]["CaseSelectionInput"] | components["schemas"]["PackageQueryInput"] | components["schemas"]["PackageSelectionInput"];
         MessageRequest: {
-            /** Format: uuid */
+            /**
+             * Client Turn Id
+             * Format: uuid
+             */
             client_turn_id: string;
+            /** Expected Version */
             expected_version: number;
             language: components["schemas"]["Language"];
-            input: components["schemas"]["TurnInput"];
+            /** Input */
+            input: components["schemas"]["TextInput"] | components["schemas"]["CategoryInput"] | components["schemas"]["DetailsInput"] | components["schemas"]["DecisionInput"] | components["schemas"]["CaseSelectionInput"] | components["schemas"]["PackageQueryInput"] | components["schemas"]["PackageSelectionInput"];
         };
+        /** PendingQuestion */
         PendingQuestion: {
+            /** Code */
             code: string;
+            /** Text */
             text: string;
-            allowed_input_types: ("text" | "category_selection" | "complaint_details" | "action_decision" | "case_selection")[];
+            /** Allowed Input Types */
+            allowed_input_types: ("text" | "category_selection" | "complaint_details" | "action_decision" | "case_selection" | "package_query" | "package_selection")[];
         };
+        /** Citation */
         Citation: {
-            /** Format: uuid */
+            /**
+             * Article Id
+             * Format: uuid
+             */
             article_id: string;
+            /** Title */
             title: string;
-            /** Format: uri */
+            /** Url */
             url: string;
-            /** Format: date */
+            /**
+             * Reviewed At
+             * Format: date
+             */
             reviewed_at: string;
+            /** Version */
             version: number;
-            /** @enum {string} */
+            /**
+             * Scope
+             * @enum {string}
+             */
             scope: "PUBLIC" | "SYNTHETIC";
         };
+        /** SourceStatus */
         SourceStatus: {
+            /** Source */
             source: string;
-            /** Format: date-time */
+            /**
+             * Fetched At
+             * Format: date-time
+             */
             fetched_at: string;
+            /** As Of */
             as_of: string | null;
+            /** Complete Through */
             complete_through: string | null;
+            /** Source Version */
             source_version: string | null;
+            /** Complete */
             complete: boolean;
+            /** Next Cursor */
             next_cursor: string | null;
+            /** Warnings */
             warnings: string[];
         };
+        /** EvidenceItem */
         EvidenceItem: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
+            /** Source */
             source: string;
+            /** Source Record Id */
             source_record_id: string;
+            /** Source Version */
             source_version: string;
-            /** Format: date-time */
+            /**
+             * Observed At
+             * Format: date-time
+             */
             observed_at: string;
-            /** Format: date-time */
+            /**
+             * Fetched At
+             * Format: date-time
+             */
             fetched_at: string;
+            /** Value */
             value: string | number | boolean | null;
+            /** Unit */
             unit: string | null;
+            /** Source Payload */
             source_payload: {
                 [key: string]: unknown;
             };
         };
+        /** Finding */
         Finding: {
+            /** Code */
             code: string;
+            /** Text */
             text: string;
+            /** Evidence Ids */
             evidence_ids: string[];
         };
+        /** CalculationTerm */
         CalculationTerm: {
-            /** Format: uuid */
+            /**
+             * Evidence Id
+             * Format: uuid
+             */
             evidence_id: string;
+            /** Label */
             label: string;
+            /** Value */
             value: number;
         };
+        /** Calculation */
         Calculation: {
+            /** Code */
             code: string;
+            /** Unit */
             unit: string;
+            /** Opening */
             opening: number;
+            /** Terms */
             terms: components["schemas"]["CalculationTerm"][];
+            /** Expected */
             expected: number;
+            /** Observed */
             observed: number | null;
+            /** Delta */
             delta: number | null;
+            /** Evidence Ids */
             evidence_ids: string[];
         };
+        /** EligibleAction */
         EligibleAction: {
             action_type: components["schemas"]["ActionType"];
-            /** Format: uuid */
+            /**
+             * Target Id
+             * Format: uuid
+             */
             target_id: string;
+            /** Target Label */
             target_label: string;
         };
         InvestigationRequest: {
+            /** Expected Version */
             expected_version: number;
             complaint_type: components["schemas"]["ComplaintType"];
-            /** Format: date-time */
+            /**
+             * Window Start
+             * Format: date-time
+             */
             window_start: string;
-            /** Format: date-time */
+            /**
+             * Window End
+             * Format: date-time
+             */
             window_end: string;
             reported_facts: components["schemas"]["ReportedFacts"];
         };
+        /** InvestigationResult */
         InvestigationResult: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
-            /** Format: uuid */
+            /**
+             * Case Id
+             * Format: uuid
+             */
             case_id: string;
+            /** Revision */
             revision: number;
             complaint_type: components["schemas"]["ComplaintType"];
-            /** Format: date-time */
+            /**
+             * Window Start
+             * Format: date-time
+             */
             window_start: string;
-            /** Format: date-time */
+            /**
+             * Window End
+             * Format: date-time
+             */
             window_end: string;
             evidence_state: components["schemas"]["EvidenceState"];
+            /** Findings */
             findings: components["schemas"]["Finding"][];
+            /** Calculations */
             calculations: components["schemas"]["Calculation"][];
+            /** Evidence */
             evidence: components["schemas"]["EvidenceItem"][];
+            /** Source Status */
             source_status: components["schemas"]["SourceStatus"][];
+            /** Missing */
             missing: string[];
+            /** Conflicts */
             conflicts: string[];
+            /** Eligible Actions */
             eligible_actions: components["schemas"]["EligibleAction"][];
+            /** Review Reasons */
             review_reasons: string[];
-            /** Format: date-time */
+            /**
+             * Created At
+             * Format: date-time
+             */
             created_at: string;
-            /** @constant */
+            /**
+             * Simulation
+             * @constant
+             */
             simulation: true;
         };
+        /** Balance */
         Balance: {
+            /** Wallet */
             wallet: string;
+            /** Amount Minor */
             amount_minor: number;
-            /** @enum {string} */
+            /**
+             * Currency
+             * @constant
+             */
             currency: "LKR";
-            /** Format: date-time */
+            /**
+             * As Of
+             * Format: date-time
+             */
             as_of: string;
         };
+        /** SubscriptionSummary */
         SubscriptionSummary: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
+            /** Name */
             name: string;
-            /** @enum {string} */
+            /**
+             * Kind
+             * @enum {string}
+             */
             kind: "PACKAGE" | "VAS";
+            /** Status */
             status: string;
+            /** Version */
             version: number;
+            /** Remaining Bytes */
             remaining_bytes: number | null;
+            /** Expires At */
             expires_at: string | null;
+            /** Renewal */
             renewal: boolean;
         };
+        /** AccountView */
         AccountView: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
+            /** Line Alias */
             line_alias: string;
+            /** Display Name */
             display_name: string;
+            /** Region */
             region: string;
-            /** @enum {string} */
+            /**
+             * Status
+             * @enum {string}
+             */
             status: "ACTIVE" | "SUSPENDED" | "CLOSED";
+            /** Balances */
             balances: components["schemas"]["Balance"][];
+            /** Subscriptions */
             subscriptions: components["schemas"]["SubscriptionSummary"][];
+            /** Source Status */
             source_status: components["schemas"]["SourceStatus"][];
-            /** @constant */
+            /**
+             * Simulation
+             * @constant
+             */
             simulation: true;
         };
         ProposalRequest: {
+            /** Expected Version */
             expected_version: number;
-            /** Format: uuid */
+            /**
+             * Investigation Id
+             * Format: uuid
+             */
             investigation_id: string;
             action_type: components["schemas"]["ActionType"];
-            /** Format: uuid */
+            /**
+             * Target Id
+             * Format: uuid
+             */
             target_id: string;
         };
+        /** ProposalView */
         ProposalView: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
-            /** Format: uuid */
+            /**
+             * Case Id
+             * Format: uuid
+             */
             case_id: string;
-            /** Format: uuid */
+            /**
+             * Investigation Id
+             * Format: uuid
+             */
             investigation_id: string;
             action_type: components["schemas"]["ActionType"];
-            /** Format: uuid */
+            /**
+             * Target Id
+             * Format: uuid
+             */
             target_id: string;
+            /** Target Version */
             target_version: number | null;
+            /** Target Label */
             target_label: string;
+            /** Consequences */
             consequences: string;
+            /** Proposal Hash */
             proposal_hash: string;
-            /** Format: date-time */
+            /**
+             * Expires At
+             * Format: date-time
+             */
             expires_at: string;
-            /** @constant */
+            /** @default null */
+            package_terms: components["schemas"]["PackageTerms"] | null;
+            /**
+             * Simulation
+             * @constant
+             */
             simulation: true;
         };
         ConfirmationRequest: {
+            /** Proposal Hash */
             proposal_hash: string;
             decision: components["schemas"]["Decision"];
-            /** Format: uuid */
+            /**
+             * Client Turn Id
+             * Format: uuid
+             */
             client_turn_id: string;
         };
+        /** ConfirmationView */
         ConfirmationView: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
-            /** Format: uuid */
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
             proposal_id: string;
+            /** Proposal Hash */
             proposal_hash: string;
             decision: components["schemas"]["Decision"];
-            /** @enum {string} */
-            channel: "TEXT" | "VOICE";
-            /** Format: uuid */
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "TEXT" | "VOICE" | "AGENT";
+            /**
+             * Client Turn Id
+             * Format: uuid
+             */
             client_turn_id: string;
-            /** Format: date-time */
+            /**
+             * Created At
+             * Format: date-time
+             */
             created_at: string;
+            /** Operation Id */
             operation_id: string | null;
+            /** Operation Status */
+            operation_status: "PENDING" | null;
+            /**
+             * Simulation
+             * @constant
+             */
+            simulation: true;
         };
         OperationOutcome: {
+            /** Code */
             code: string | null;
+            /** Message */
             message: string | null;
+            /** Actual Target Status */
             actual_target_status: string | null;
+            /** Provider Ticket Id */
             provider_ticket_id: string | null;
         };
         OperationView: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
-            /** Format: uuid */
+            /**
+             * Case Id
+             * Format: uuid
+             */
             case_id: string;
-            /** Format: uuid */
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
             proposal_id: string;
             action_type: components["schemas"]["ActionType"];
             status: components["schemas"]["OperationStatus"];
-            /** Format: date-time */
+            /**
+             * Created At
+             * Format: date-time
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Updated At
+             * Format: date-time
+             */
             updated_at: string;
+            /** Provider Operation Id */
             provider_operation_id: string | null;
             outcome: components["schemas"]["OperationOutcome"];
+            /** Next Step */
             next_step: string;
-            /** @constant */
+            /**
+             * Simulation
+             * @constant
+             */
             simulation: true;
         };
         ConfirmationResult: {
@@ -826,92 +1167,169 @@ export interface components {
             operation: components["schemas"]["OperationView"] | null;
         };
         EscalationRequest: {
+            /** Expected Version */
             expected_version: number;
-            /** Format: uuid */
+            /**
+             * Investigation Id
+             * Format: uuid
+             */
             investigation_id: string;
+            /** Reason */
             reason: string;
         };
+        /** Handoff */
         Handoff: {
-            /** Format: uuid */
+            /**
+             * Reference
+             * Format: uuid
+             */
             reference: string;
-            /** @enum {string} */
+            /**
+             * Queue
+             * @enum {string}
+             */
             queue: "BILLING_REVIEW" | "TECHNICAL_SUPPORT";
             delivery_state: components["schemas"]["DeliveryState"];
+            /** Provider Ticket Id */
             provider_ticket_id: string | null;
-            /** @enum {string} */
-            review_sync_state: "NOT_APPLICABLE" | "PENDING" | "SYNCED" | "FAILED";
+            /**
+             * Review Sync State
+             * @enum {string}
+             */
+            review_sync_state: "NOT_APPLICABLE" | "PENDING" | "SYNCED" | "FAILED" | "UNKNOWN" | "REVIEW_REQUIRED";
+            /** Next Step */
             next_step: string;
         };
+        /** ReceiptAction */
         ReceiptAction: {
-            /** Format: uuid */
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
             proposal_id: string;
             action_type: components["schemas"]["ActionType"];
+            /** Requested */
             requested: boolean;
             decision: components["schemas"]["Decision"] | null;
+            /** Operation Id */
             operation_id: string | null;
             operation_status: components["schemas"]["OperationStatus"] | null;
+            /** Completed */
             completed: boolean;
         };
+        /** EvidenceReference */
         EvidenceReference: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
+            /** Source */
             source: string;
+            /** Source Record Id */
             source_record_id: string;
-            /** Format: date-time */
+            /**
+             * Observed At
+             * Format: date-time
+             */
             observed_at: string;
         };
         ReceiptView: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
-            /** Format: uuid */
+            /**
+             * Case Id
+             * Format: uuid
+             */
             case_id: string;
+            /** Revision */
             revision: number;
-            /** Format: date-time */
+            /**
+             * Issued At
+             * Format: date-time
+             */
             issued_at: string;
+            /** Issue */
             issue: string;
-            window: {
-                /** Format: date-time */
-                start: string;
-                /** Format: date-time */
-                end: string;
-            };
+            window: components["schemas"]["ReceiptWindow"];
+            /** Findings */
             findings: components["schemas"]["Finding"][];
+            /** Calculations */
             calculations: components["schemas"]["Calculation"][];
+            /** Evidence References */
             evidence_references: components["schemas"]["EvidenceReference"][];
+            /** Missing */
             missing: string[];
+            /** Conflicts */
             conflicts: string[];
+            /** Actions */
             actions: components["schemas"]["ReceiptAction"][];
             handoff: components["schemas"]["Handoff"] | null;
+            /** Next Step */
             next_step: string;
-            /** @constant */
+            /**
+             * Simulation
+             * @constant
+             */
             simulation: true;
+            /** Digest Sha256 */
             digest_sha256: string;
         };
         ReceiptReference: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
+            /** Revision */
             revision: number;
         };
         CaseView: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
-            /** Format: uuid */
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
             conversation_id: string;
-            /** Format: uuid */
+            /**
+             * Account Id
+             * Format: uuid
+             */
             account_id: string;
             complaint_type: components["schemas"]["ComplaintType"];
-            /** @enum {string} */
+            /**
+             * Status
+             * @enum {string}
+             */
             status: "OPEN" | "AWAITING_CUSTOMER" | "ACTION_PENDING" | "REVIEW_REQUIRED" | "RESOLVED";
             review_status: components["schemas"]["ReviewStatus"];
+            /** Version */
             version: number;
-            /** Format: date-time */
+            /**
+             * Created At
+             * Format: date-time
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Updated At
+             * Format: date-time
+             */
             updated_at: string;
             investigation: components["schemas"]["InvestigationResult"] | null;
+            /** Operation Ids */
             operation_ids: string[];
             receipt: components["schemas"]["ReceiptReference"] | null;
-            /** @constant */
+            /**
+             * Simulation
+             * @constant
+             */
             simulation: true;
         };
         CaseSummary: {
@@ -920,85 +1338,147 @@ export interface components {
             complaint_type: components["schemas"]["ComplaintType"];
             status: string;
         };
+        /** TimelineItem */
         TimelineItem: {
-            /** Format: uuid */
+            /**
+             * Evidence Id
+             * Format: uuid
+             */
             evidence_id: string;
-            /** Format: date-time */
+            /**
+             * Occurred At
+             * Format: date-time
+             */
             occurred_at: string;
-            /** Format: date-time */
+            /**
+             * Recorded At
+             * Format: date-time
+             */
             recorded_at: string;
+            /** Label */
             label: string;
+            /** Amount Minor */
             amount_minor: number | null;
+            /** Bytes */
             bytes: number | null;
         };
+        /** AccountCard */
         AccountCard: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "account";
             data: components["schemas"]["AccountView"];
         };
+        /** TimelineCard */
         TimelineCard: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "timeline";
-            data: {
-                items: components["schemas"]["TimelineItem"][];
-            };
+            data: components["schemas"]["TimelineData"];
         };
+        /** CalculationCard */
         CalculationCard: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "calculation";
             data: components["schemas"]["Calculation"];
         };
+        /** FindingCard */
         FindingCard: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "finding";
             data: components["schemas"]["Finding"];
         };
+        /** ConfirmationCard */
         ConfirmationCard: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "confirmation";
             data: components["schemas"]["ProposalView"];
         };
+        /** TicketCard */
         TicketCard: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "ticket";
             data: components["schemas"]["Handoff"];
         };
+        /** ReceiptCard */
         ReceiptCard: {
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "receipt";
-            data: {
-                /** Format: uuid */
-                case_id: string;
-                /** Format: uuid */
-                receipt_id: string;
-                revision: number;
-            };
+            data: components["schemas"]["ReceiptCardData"];
         };
-        Card: components["schemas"]["AccountCard"] | components["schemas"]["TimelineCard"] | components["schemas"]["CalculationCard"] | components["schemas"]["FindingCard"] | components["schemas"]["ConfirmationCard"] | components["schemas"]["TicketCard"] | components["schemas"]["ReceiptCard"];
+        Card: components["schemas"]["AccountCard"] | components["schemas"]["TimelineCard"] | components["schemas"]["CalculationCard"] | components["schemas"]["FindingCard"] | components["schemas"]["ConfirmationCard"] | components["schemas"]["TicketCard"] | components["schemas"]["ReceiptCard"] | components["schemas"]["PackageCatalogueCard"];
+        /** TurnResult */
         TurnResult: {
-            /** Format: uuid */
+            /**
+             * Message Id
+             * Format: uuid
+             */
             message_id: string;
-            /** Format: uuid */
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
             conversation_id: string;
+            /** Conversation Version */
             conversation_version: number;
+            /** Case Id */
             case_id: string | null;
+            /** Reply Text */
             reply_text: string;
-            cards: components["schemas"]["Card"][];
+            /** Cards */
+            cards: (components["schemas"]["AccountCard"] | components["schemas"]["TimelineCard"] | components["schemas"]["CalculationCard"] | components["schemas"]["FindingCard"] | components["schemas"]["ConfirmationCard"] | components["schemas"]["TicketCard"] | components["schemas"]["ReceiptCard"] | components["schemas"]["PackageCatalogueCard"])[];
+            /** Citations */
             citations: components["schemas"]["Citation"][];
             pending_question: components["schemas"]["PendingQuestion"] | null;
+            /** Operation Ids */
             operation_ids: string[];
-            /** @constant */
+            /**
+             * Simulation
+             * @constant
+             */
             simulation: true;
         };
         MessageView: {
-            /** Format: uuid */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
-            /** Format: uuid */
+            /**
+             * Client Turn Id
+             * Format: uuid
+             */
             client_turn_id: string;
-            /** @enum {string} */
+            /**
+             * Speaker
+             * @enum {string}
+             */
             speaker: "USER" | "ASSISTANT";
+            /** Body */
             body: string;
-            /** Format: date-time */
+            /**
+             * Created At
+             * Format: date-time
+             */
             created_at: string;
             result: components["schemas"]["TurnResult"] | null;
         };
@@ -1015,6 +1495,7 @@ export interface components {
             pending_question: components["schemas"]["PendingQuestion"] | null;
             pending_proposal: components["schemas"]["ProposalView"] | null;
             operation_ids: string[];
+            pending_turn: components["schemas"]["PendingTurn"] | null;
         };
         ReviewRequest: ({
             expected_version: number;
@@ -1042,7 +1523,7 @@ export interface components {
             disposition: string | null;
             note: components["schemas"]["ReviewNote"] | null;
             /** @enum {string} */
-            review_sync_state: "NOT_APPLICABLE" | "PENDING" | "SYNCED" | "FAILED";
+            review_sync_state: "NOT_APPLICABLE" | "PENDING" | "UNKNOWN" | "SYNCED" | "FAILED" | "REVIEW_REQUIRED";
             /** Format: date-time */
             updated_at: string;
         };
@@ -1150,13 +1631,14 @@ export interface components {
              * Action Type
              * @enum {string}
              */
-            action_type: "DEACTIVATE_VAS" | "SEND_SETTINGS_INSTRUCTIONS" | "CREATE_REVIEW_TICKET";
+            action_type: "DEACTIVATE_VAS" | "SEND_SETTINGS_INSTRUCTIONS" | "CREATE_REVIEW_TICKET" | "ACTIVATE_PACKAGE";
             /** Target Label */
             target_label: string;
             /** Consequences */
             consequences: string;
             /** Expires At */
             expires_at: string;
+            package_terms: components["schemas"]["PackageTerms"] | null;
         };
         /** VoiceTurnResponse */
         VoiceTurnResponse: {
@@ -1412,11 +1894,14 @@ export interface components {
             proposal: components["schemas"]["Proposal"] | null;
             operation_status: string | null;
             end_session: boolean;
+            speech_text: string;
+            sensitive_audio: boolean;
         };
         VoiceProposalAck: {
             /** @constant */
             type: "proposal_ack";
             accepted: boolean;
+            response_id: string;
         };
         VoiceError: {
             /** @constant */
@@ -1429,7 +1914,7 @@ export interface components {
             type: "ended";
             reason: string;
         };
-        /** @description Proposed additive event, not implemented at baseline. Clear queued audio and proposal presentation eligibility. */
+        /** @description Implemented v2 event: discard queued audio and pending proposal acknowledgement. */
         VoiceInterrupted: {
             /** @constant */
             type: "interrupted";
@@ -1440,12 +1925,232 @@ export interface components {
             type: "proposal_presented";
             proposal_id: string;
             proposal_hash: string;
+            response_id: string;
         };
-        VoiceServerControl: components["schemas"]["VoiceReady"] | components["schemas"]["VoiceGreeting"] | components["schemas"]["VoiceTranscript"] | components["schemas"]["VoiceResolveResult"] | components["schemas"]["VoiceProposalAck"] | components["schemas"]["VoiceError"] | components["schemas"]["VoiceEnded"] | components["schemas"]["VoiceInterrupted"];
-        VoiceClientControl: components["schemas"]["VoicePresentation"];
+        VoiceServerControl: components["schemas"]["VoiceReady"] | components["schemas"]["VoiceGreeting"] | components["schemas"]["VoiceTranscript"] | components["schemas"]["VoiceResolveResult"] | components["schemas"]["VoiceProposalAck"] | components["schemas"]["VoiceError"] | components["schemas"]["VoiceEnded"] | components["schemas"]["VoiceInterrupted"] | components["schemas"]["VoiceAudioStart"] | components["schemas"]["VoiceAudioEnd"] | components["schemas"]["VoiceAudioFallback"] | components["schemas"]["VoicePlaybackAck"];
+        VoiceClientControl: components["schemas"]["VoicePlaybackComplete"] | components["schemas"]["VoicePresentation"];
+        VoiceAudioStart: {
+            /** @constant */
+            type: "audio_start";
+            response_id: string;
+        };
+        VoiceAudioEnd: {
+            /** @constant */
+            type: "audio_end";
+            response_id: string;
+        };
+        VoiceAudioFallback: {
+            /** @constant */
+            type: "audio_fallback";
+            response_id: string;
+            text: string;
+            reason: string;
+        };
+        VoicePlaybackAck: {
+            /** @constant */
+            type: "playback_ack";
+            response_id: string;
+            accepted: boolean;
+        };
+        VoicePlaybackComplete: {
+            /** @constant */
+            type: "playback_complete";
+            response_id: string;
+        };
+        PendingTurn: {
+            /** Format: uuid */
+            turn_id: string;
+            /** @enum {string} */
+            state: "IN_PROGRESS" | "RECOVERY_REQUIRED";
+            /** Format: date-time */
+            retry_after: string;
+        };
+        Readiness: {
+            /** @enum {string} */
+            status: "ready" | "unavailable";
+            capabilities: {
+                text: boolean;
+                actions: boolean;
+                voice: boolean;
+                model: boolean;
+                package_activation: boolean;
+            };
+        };
+        /** PackageQueryInput */
+        PackageQueryInput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "package_query";
+        };
+        /** PackageSelectionInput */
+        PackageSelectionInput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "package_selection";
+            /**
+             * Offer Id
+             * Format: uuid
+             */
+            offer_id: string;
+        };
+        /** PackageCatalogueCard */
+        PackageCatalogueCard: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "package_catalogue";
+            /** Offers */
+            offers: components["schemas"]["PackageCatalogueEntry"][];
+        };
+        /** PackageCatalogueEntry */
+        PackageCatalogueEntry: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Price Minor */
+            price_minor: number;
+            /**
+             * Currency
+             * @constant
+             */
+            currency: "LKR";
+            /** Data Bytes */
+            data_bytes: number;
+            /** Validity Seconds */
+            validity_seconds: number;
+            /**
+             * Recurring
+             * @constant
+             */
+            recurring: false;
+            /** Recommended */
+            recommended: boolean;
+            /** Can Purchase */
+            can_purchase: boolean;
+            /** Recommendation Reason */
+            recommendation_reason: string | null;
+        };
+        /** PackageTerms */
+        PackageTerms: {
+            /** Name */
+            name: string;
+            /** Price Minor */
+            price_minor: number;
+            /**
+             * Currency
+             * @constant
+             */
+            currency: "LKR";
+            /** Data Bytes */
+            data_bytes: number;
+            /** Validity Seconds */
+            validity_seconds: number;
+            /**
+             * Recurring
+             * @constant
+             */
+            recurring: false;
+        };
+        /** ReceiptCardData */
+        ReceiptCardData: {
+            /**
+             * Case Id
+             * Format: uuid
+             */
+            case_id: string;
+            /**
+             * Receipt Id
+             * Format: uuid
+             */
+            receipt_id: string;
+            /** Revision */
+            revision: number;
+        };
+        /** TimelineData */
+        TimelineData: {
+            /** Items */
+            items: components["schemas"]["TimelineItem"][];
+        };
+        /** ReceiptWindow */
+        ReceiptWindow: {
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+        };
+        PackageOfferView: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Price Minor */
+            price_minor: number;
+            /**
+             * Currency
+             * @constant
+             */
+            currency: "LKR";
+            /** Data Bytes */
+            data_bytes: number;
+            /** Validity Seconds */
+            validity_seconds: number;
+            /**
+             * Recurring
+             * @constant
+             */
+            recurring: false;
+            /** Can Purchase */
+            can_purchase: boolean;
+            /**
+             * Simulation
+             * @constant
+             */
+            simulation: true;
+        };
+        TurnReconciliationRequest: {
+            /** @description Agent rationale recorded in the immutable reconciliation audit event. */
+            note: string;
+        };
+        TurnReconciliationOperation: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            status: "SUCCEEDED" | "FAILED" | "REVIEW_REQUIRED";
+        };
+        TurnReconciliationResult: {
+            /** Format: uuid */
+            conversation_id: string;
+            /** Format: uuid */
+            turn_id: string;
+            /** @constant */
+            state: "ABANDONED";
+            case_ids: string[];
+            operations: components["schemas"]["TurnReconciliationOperation"][];
+        };
     };
     responses: never;
-    parameters: never;
+    parameters: {
+        /** @description Selects the browser session realm for shared customer/agent reads. Required when both cookies are present. */
+        ResolveRealm: "customer" | "agent";
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -2430,7 +3135,10 @@ export interface operations {
     get_case: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Selects the browser session realm for shared customer/agent reads. Required when both cookies are present. */
+                "X-Resolve-Realm"?: components["parameters"]["ResolveRealm"];
+            };
             path: {
                 id: string;
             };
@@ -2797,7 +3505,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Error; see shared contract codes */
+            /** @description Action execution unavailable or dependency unavailable; see Error.code. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -2811,7 +3519,10 @@ export interface operations {
     get_operation: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Selects the browser session realm for shared customer/agent reads. Required when both cookies are present. */
+                "X-Resolve-Realm"?: components["parameters"]["ResolveRealm"];
+            };
             path: {
                 id: string;
             };
@@ -2995,7 +3706,10 @@ export interface operations {
             query?: {
                 revision?: number;
             };
-            header?: never;
+            header?: {
+                /** @description Selects the browser session realm for shared customer/agent reads. Required when both cookies are present. */
+                "X-Resolve-Realm"?: components["parameters"]["ResolveRealm"];
+            };
             path: {
                 id: string;
             };
@@ -3737,7 +4451,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Health"];
+                    "application/json": components["schemas"]["Readiness"];
                 };
             };
             /** @description Error; see shared contract codes */
@@ -3794,8 +4508,154 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Error; see shared contract codes */
+            /** @description Database unavailable; all capability flags are false */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Readiness"];
+                };
+            };
+        };
+    };
+    resume_turn: {
+        parameters: {
+            query?: never;
+            header: {
+                Origin: string;
+                "X-CSRF-Token": string;
+            };
+            path: {
+                id: string;
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Canonical turn result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TurnResult"];
+                };
+            };
+            /** @description Origin or CSRF rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conversation or pending turn unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Turn still active or recovery conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rate limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    reconcile_stalled_conversation_turn: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": string;
+                Origin: string;
+            };
+            path: {
+                conversation_id: string;
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TurnReconciliationRequest"];
+            };
+        };
+        responses: {
+            /** @description Turn marked abandoned with case and operation context */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TurnReconciliationResult"];
+                };
+            };
+            /** @description Error; see shared contract codes */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; see shared contract codes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; see shared contract codes */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; see shared contract codes */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; see shared contract codes */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

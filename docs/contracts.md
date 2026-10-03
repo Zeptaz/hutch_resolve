@@ -1,6 +1,6 @@
-# Shared implementation contracts v1.0.0
+# Shared implementation contracts v1.2.0
 
-**Proposed Resolve interfaces, not deployed endpoints.** The database exists; Resolve application work remains unchecked in [context](../context.md). Existing external Voice interfaces are implemented but have known streaming failures. [OpenAPI 3.1](contracts/openapi.json) defines wire shapes; [examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts. Change these documents and affected owner plans before implementations diverge.
+**Mixed implementation status.** Resolve implements health/readiness, session lifecycle, scoped case APIs, deterministic investigation and action services, receipts, agent review, text conversation routes and the signed Voice bridge. The conversation controller is mounted in the same process and uses Resolve's persisted turn claims and facade. The combined customer chat/call and agent frontend builds. PostgreSQL verifies text replay, guest upgrade, action/worker recovery, dashboard review, package/quota behavior and signed Voice consent. Agent-authorized stalled-turn reconciliation is defined below and covered on disposable PostgreSQL. Real browser microphone/model qualification and release soak remain open. See [OpenAPI 3.1](contracts/openapi.json). [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
 
 ## Ownership and connections
 
@@ -11,7 +11,7 @@ One Resolve process hosts Tevin's conversation controller and Harry's business s
 | Browser -> Resolve | `/api/v1`; Vite localhost:5173 proxies to localhost:8080 | Customer/agent session cookie and CSRF |
 | Conversation -> Resolve facade | In-process async methods | AuthContext from middleware or validated Voice binding |
 | Resolve -> PostgreSQL | localhost:55432/hutch_resolve | Resolve role; separate sandbox-provider role |
-| Resolve -> Voice | VOICE_BASE_URL default http://localhost:8088 + /api/hutch/sessions | Existing HMAC |
+| Resolve -> Voice | VOICE_BASE_URL default http://localhost:8088 + /api/hutch/sessions | HMAC-SHA256, same event ID/body on one retry |
 | Voice -> Resolve | HUTCH_RESOLVE_BASE_URL includes /api/v1 | HMAC plus stored binding scope |
 | Browser -> Voice | Returned absolute WebSocket URL | Exact Origin, single-use grant subprotocol |
 
@@ -20,6 +20,8 @@ Use localhost consistently for the UI origin. Deployment uses same-origin HTTPS 
 ## Authentication and identifiers
 
 Opaque random session credentials are stored hashed. Cookies: `resolve_customer_session` and `resolve_agent_session`, HttpOnly, SameSite=Lax, Secure under HTTPS. Separate cookies allow agent/customer testing in one browser. Session GET returns a separate CSRF token; cookie mutations require `X-CSRF-Token` and an exact allowed Origin. No permanent browser token in localStorage or URLs.
+
+Shared customer/agent reads use `X-Resolve-Realm: customer|agent`. If exactly one session cookie exists, the server may infer that realm; if both exist and the header is absent, it returns `400 AUTH_REALM_REQUIRED`. Invalid values return `400 AUTH_REALM_INVALID`; a selected invalid or expired session never falls back to the other cookie. The React transport sends the realm on every request.
 
 Anonymous creation and login require exact Origin, JSON content type and throttling. They are exempt from CSRF only when not upgrading an existing session; guest upgrade also requires its CSRF token. Environment-configured demo identities map to credential hashes and permitted synthetic account/run or AGENT role. Login never accepts arbitrary role/account IDs. Sessions expire after 30 minutes.
 
@@ -36,20 +38,20 @@ Resolve generates session/conversation/case/investigation/proposal/operation/rec
 - Languages en/si/ta; text max4000; investigation window max30days; agent note max2000. Synthetic results have simulation=true.
 - Versions begin at1. Mutable writes include expected_version. Lists use `{items,next_cursor}`, default limit25/max100; opaque cursor binds filters/order. Provider pagination is separately100/max500.
 - DTOs reject unknown fields except immutable source payload/telemetry maps explicitly allowing them.
-- Mutations require Idempotency-Key except session lifecycle, messages (client_turn_id) and Voice callbacks (event/turn IDs). Persist subject+route+key, canonical request fingerprint and result. Matching retry replays response; changed body409. Authenticate scope before replay; check replay before stale-version rejection.
-- Persist one active turn claim per conversation before remote/model calls, without holding locks during calls. Identical in-progress turn returns409 TURN_IN_PROGRESS/retryable=true. Other concurrent turns return CONVERSATION_BUSY or STALE_VERSION. Recover abandoned claims with original downstream keys. Persist final messages/result and advance conversation.version once.
+- Mutations require Idempotency-Key except session lifecycle, messages (client_turn_id) and Voice callbacks (event/turn IDs). Browser Idempotency-Key values are UUIDs. Persist subject+route+key, canonical request fingerprint and result. Matching retry replays response; changed body409. Authenticate scope before replay; check replay before stale-version rejection. Voice grant replay returns the same encrypted-at-rest, short-lived grant; expired or uncertain grants cannot be minted again under the same key.
+- Persist one active turn claim per conversation before remote/model calls, without holding locks during calls. Identical in-progress turn returns409 TURN_IN_PROGRESS/retryable=true. Other concurrent turns return CONVERSATION_BUSY or STALE_VERSION. An expired text claim can be retried with its original downstream key; a Voice claim is never automatically replayed without fresh signed evidence. An agent may explicitly reconcile a stalled claim only after confirming no related operation is PENDING, RUNNING or UNKNOWN. Reconciliation is audited and terminal: the same turn returns409 TURN_ABANDONED and cannot be replayed; the customer starts a new turn.
 
-Error envelope: `{error:{code,message,retryable,request_id,details}}`; return X-Request-Id. Details contain safe validation/current-version information, never another account's data.
+Error envelope: `{error:{code,message,retryable,request_id,details}}`; return X-Request-Id. Details contain safe validation/current-version information, never another account's data. Unhandled exceptions return `500 INTERNAL_ERROR` with this envelope; exception messages and customer/provider payloads are not exposed. Investigation writes require Origin and CSRF. Anonymous creation/login use shared PostgreSQL fixed-window buckets; defaults are 30 anonymous creations/client/10 minutes, 30 login attempts/client/10 minutes and 10/client+identity/10 minutes. `TRUSTED_PROXY_IPS` is empty by default; a single sanitized X-Forwarded-For address is honored only from an exact listed proxy IP. Rate-limit failures return `429 RATE_LIMITED` with `Retry-After: 600`.
 
 | HTTP | Codes | Handling |
 | --- | --- | --- |
 | 401 | UNAUTHENTICATED, SESSION_EXPIRED, INVALID_SERVICE_SIGNATURE | Reauthenticate |
 | 403 | ROLE_FORBIDDEN, CSRF_FAILED, ORIGIN_FORBIDDEN | Correct permission/context |
 | 404 | RESOURCE_NOT_FOUND | Hide inaccessible entity details |
-| 409 | STALE_VERSION, IDEMPOTENCY_CONFLICT, PROPOSAL_INVALIDATED, TURN_IN_PROGRESS, CONVERSATION_BUSY | Refresh/clarify; same-ID retry only when retryable |
+| 409 | STALE_VERSION, IDEMPOTENCY_CONFLICT, PROPOSAL_INVALIDATED, TURN_IN_PROGRESS, CONVERSATION_BUSY, TURN_ABANDONED, TURN_ALREADY_SETTLED, TURN_OUTCOME_UNRESOLVED | Refresh/clarify; same-ID retry only when retryable; reconcile unresolved operations before settling a stalled turn |
 | 422 | VALIDATION_ERROR, ACTION_NOT_ALLOWED, PROPOSAL_EXPIRED, CONFIRMATION_REQUIRED | Fix input/request new proposal |
 | 429 | RATE_LIMITED | Honor Retry-After |
-| 503 | DEPENDENCY_UNAVAILABLE | Safe fallback; bounded idempotent retry |
+| 503 | DEPENDENCY_UNAVAILABLE, ACTION_EXECUTION_UNAVAILABLE | Safe fallback; bounded idempotent retry. An accepted action is never persisted when its worker/writer is unavailable. |
 
 PARTIAL/CONFLICTING investigations are valid200 results. Accepted durable operations return202; acceptance never claims completion.
 
@@ -64,29 +66,39 @@ All paths use `/api/v1`; OpenAPI defines exact fields and response models. Sessi
 | GET /session; DELETE /session | Customer cookie ->SessionView /204 |
 | POST /agent/sessions | demo_identity, credential ->200 AgentSessionView |
 | GET /agent/session; DELETE /agent/session | Agent cookie ->AgentSessionView /204 |
-| POST /conversations | language ->201 ConversationView |
+| POST /conversations | Customer/guest cookie, Origin, CSRF, UUID Idempotency-Key; language ->201 ConversationView, identical replay returns same ID, changed body409 |
 | GET /conversations/{id} | Scoped ID ->conversation, messages, cases and pending state |
 | POST /conversations/{id}/messages | client_turn_id, expected_version, language, input ->200 TurnResult |
+| POST /conversations/{id}/turns/{turn_id}/resume | Customer/guest cookie, Origin, CSRF; no body ->200 canonical TurnResult. Resumes only an expired, persisted text turn using original normalized input and command keys. A live claim returns retryable 409; Voice consent is never reconstructed by the browser. |
 | GET /account | No account selector ->scoped AccountView |
 | GET /cases/{id} | Scoped ID ->CaseView/current investigation |
 | POST /cases/{id}/investigations | expected_version, complaint_type, window_start/end, reported_facts ->200 InvestigationResult |
-| POST /cases/{id}/action-proposals | expected_version, investigation_id, action_type, target_id ->201 ProposalView |
-| POST /action-proposals/{id}/confirmations | proposal_hash, ACCEPT/DECLINE, client_turn_id ->202 accepted operation or200 decline |
-| GET /operations/{id} | Scoped ID ->OperationView |
+| POST /cases/{id}/action-proposals | Customer cookie, Origin, CSRF, Idempotency-Key; expected_version, investigation_id, action_type, target_id ->201 ProposalView |
+| POST /action-proposals/{id}/confirmations | Customer cookie, Origin, CSRF; proposal_hash, ACCEPT/DECLINE, client_turn_id ->202 persisted PENDING operation or200 decline |
+| GET /operations/{id} | Customer session or agent run scope ->OperationView |
 | POST /cases/{id}/escalations | expected_version, investigation_id, reason ->201 CREATE_REVIEW_TICKET ProposalView |
-| GET /cases/{id}/receipt | Optional revision ->stored ReceiptView |
-| POST /conversations/{id}/voice-sessions | Empty JSON, server-derived scope/origin ->201 VoiceSessionGrant |
-| POST /integrations/voice/turns; /events | Existing signed Voice body ->strict Voice result/ack |
-| GET /agent/cases | Filters/search/cursor ->queue |
-| GET /agent/cases/{id} | Scoped ID ->AgentCaseDetail |
-| PATCH /agent/cases/{id}/review | Versioned review/note ->updated review/version |
-| GET /healthz; /readyz | Process/DB-migration readiness |
+| GET /cases/{id}/receipt | Customer session or agent run scope, optional revision ->stored ReceiptView |
+| POST /conversations/{id}/voice-sessions | Implemented: customer session, Origin+CSRF, session/account/run-scoped binding, outbound Voice grant ->201 VoiceSessionGrant |
+| POST /integrations/voice/turns; /events | Implemented: strict signed body, active binding scope and durable event/turn replay -> Voice result/ack through the mounted conversation service |
+| GET /agent/cases | Implemented: filters, exact case/line alias search, signed cursor -> scoped queue |
+| GET /agent/cases/{id} | Implemented: sandbox-scoped AgentCaseDetail |
+| PATCH /agent/cases/{id}/review | Implemented: versioned/idempotent review and internal note; delivered mock ticket gets a durable sync job |
+| POST /agent/conversations/{conversation_id}/turns/{turn_id}/reconcile | Implemented: AGENT cookie, exact Origin and CSRF required; note required; expired claim only; refuses unresolved related operations; audited terminal state; never replays the customer/Voice turn |
+| GET /healthz; /readyz | Process/DB-migration readiness; `/readyz` reports text/actions/voice/model capability flags and returns 503 when PostgreSQL is unavailable. Text remains usable when optional Voice/model integrations are down; actions require the sandbox writer and worker. |
 
 Case creation is an internal facade operation invoked by conversation intake. Public FAQ cannot create account cases. Health routes are under `/api/v1` in Resolve; Voice retains existing `/healthz`.
 
-Turn input is a discriminated union: text(text); category_selection(complaint_type); complaint_details(complaint_type,window_start,window_end,reported_facts); action_decision(proposal_id,proposal_hash,decision); case_selection(case_id). Complaint types: BALANCE_RECHARGE, DATA_DEPLETION, CONNECTIVITY, VAS_DISPUTE. Reported facts may include amount_minor, recharge_reference, subscription_id and description; they are customer reports, never source evidence.
+Turn input is a discriminated union: text(text); category_selection(complaint_type); complaint_details(complaint_type,window_start,window_end,reported_facts); action_decision(proposal_id,proposal_hash,decision); case_selection(case_id); package_query; package_selection(offer_id). Complaint types: BALANCE_RECHARGE, DATA_DEPLETION, CONNECTIVITY, VAS_DISPUTE, PACKAGE_ACTIVATION. Reported facts may include amount_minor, recharge_reference, subscription_id and description; they are customer reports, never source evidence.
 
-TurnResult fields: message_id, conversation_id, conversation_version, nullable case_id, reply_text, cards[], citations[], nullable pending_question, operation_ids[], simulation. PendingQuestion includes code/text/allowed_input_types. Fixed cards: account, timeline, calculation, finding, confirmation, ticket, receipt. No model HTML. ConversationView persists language, version, messages, cases, active_case_id, pending_question/proposal, operation_ids and expiry.
+TurnResult fields: message_id, conversation_id, conversation_version, nullable case_id, reply_text, cards[], citations[], nullable pending_question, operation_ids[], simulation. PendingQuestion includes code/text/allowed_input_types. Fixed cards: account, timeline, calculation, finding, confirmation, ticket, receipt, package_catalogue. No model HTML. ConversationView persists language, version, messages, cases, active_case_id, pending_question/proposal, operation_ids and expiry.
+
+### Synthetic one-shot package action
+
+`package_query` returns a fixed `package_catalogue` card with `offers[]`: `id`, `name`, integer `price_minor`, `currency=LKR`, integer `data_bytes`, `validity_seconds`, `recurring=false`, `recommended`, Resolve-computed `can_purchase`, and nullable `recommendation_reason`. Values come only from the synthetic sandbox catalogue and account. Deterministic ranking may personalize recommendations only from a complete 30-day usage window with explicit source coverage. The current seed schema has no usage coverage marker, so Resolve conservatively returns an unranked catalogue without a best-fit claim.
+
+`package_selection(offer_id)` creates a `PACKAGE_ACTIVATION` case, evidence snapshot, and normal five-minute `ACTIVATE_PACKAGE` proposal. `ProposalView.package_terms` is required only for that action and contains the exact offer name, price_minor, currency, data_bytes, validity_seconds and recurring=false. Consequences must state the same offer terms, one MAIN debit, existing packages are retained, and auto-renewal is off. The user must explicitly accept or decline. Voice acceptance additionally requires playback and exact proposal presentation acknowledgements plus a fresh affirmative transcript.
+
+The idempotent synthetic provider rechecks offer version, eligibility, available MAIN balance and duplicate active offer, then atomically writes one money debit, a new subscription, activation event, quota bucket/grant and provider operation record. It never replaces packages or auto-renews. Operations use the standard worker/readback/recovery path; terminal states create a Trust Receipt. `RESOLVE_PACKAGE_ACTIVATION_ENABLED=false` by default and requires the sandbox writer. `/readyz` reports `capabilities.package_activation`.
 
 ## Domain data and safe execution
 
@@ -96,11 +108,13 @@ InvestigationResult: id, case_id, revision, complaint_type, window_start/end, ev
 
 CaseView: id, conversation_id, account_id, complaint_type, status, review_status, version, timestamps, latest investigation, operation IDs and receipt reference. Case.status OPEN/AWAITING_CUSTOMER/ACTION_PENDING/REVIEW_REQUIRED/RESOLVED is independent of review.status NEW/IN_REVIEW/CLOSED. Resolve determines these values.
 
-ProposalView: id, case_id, investigation_id, action_type, target_id/version, target_label, consequences, hash, expiry and simulation. Five-minute hash-bound proposal also binds authenticated subject and evidence revision. Target is subscription for DEACTIVATE_VAS, account for SEND_SETTINGS_INSTRUCTIONS/CREATE_REVIEW_TICKET. Existing Voice gets its narrower six-field proposal projection. Reinvestigation/changed target invalidates affected proposals.
+ProposalView: id, case_id, investigation_id, action_type, target_id/version, target_label, consequences, hash, expiry and simulation. `package_terms` is present for ACTIVATE_PACKAGE only. Five-minute hash-bound proposal also binds authenticated session and evidence revision; current target status/version is re-read before confirmation. Target is subscription for DEACTIVATE_VAS, account for SEND_SETTINGS_INSTRUCTIONS/CREATE_REVIEW_TICKET, and a purchasable synthetic offer for ACTIVATE_PACKAGE. Existing Voice gets its narrow proposal projection including typed package terms when applicable. Reinvestigation/changed target invalidates affected proposals.
 
-Public confirmation uses an explicit authenticated decision. Internal Voice confirmation additionally includes original final transcript, fresh turn and presented ID/hash; Resolve owns the decision gate. Ambiguous yes or no valid presentation context cannot accept. Decline persists a confirmation record without an operation. Accept atomically persists confirmation and operation; database uniqueness permits one operation per accepted proposal even with different request keys.
+Public confirmation uses an explicit authenticated decision. Internal Voice confirmation additionally includes original final transcript, fresh turn and presented ID/hash; Resolve owns the decision gate. Ambiguous yes or no valid presentation context cannot accept. Decline persists a confirmation record without an operation. Accept atomically persists confirmation and operation; the response reports `operation_status=PENDING`, never completion. Database uniqueness permits one operation per proposal. Both actions require customer Origin and CSRF validation.
 
 Operation states: PENDING -> RUNNING -> SUCCEEDED/FAILED/UNKNOWN; UNKNOWN -> SUCCEEDED/FAILED/REVIEW_REQUIRED. Reconcile unknown at0/2/10seconds via provider lookup/readback. Persist lease/retry state, recover after restart, never mint a new provider key. No lock spans external calls; provider writes use a separate transaction.
+
+Forward revisions `0002_domain_lifecycle` through `0009_package_activation` add scoped lifecycle, investigation, proposal/confirmation persistence, review sync, Voice consent fencing and dialogue state after baseline adoption. Revision 0004 binds proposals to sandbox, actor session, case version, evidence revision, request key/hash and target label; confirmation client turns and accepted operations are uniquely scoped. Revision 0007 allows public guest turn claims and adds dialogue state and model-call metadata. Confirmation and review history rows remain append-only. The runtime PostgreSQL role may append confirmations/review history/investigations but cannot update or delete their records. Accepted operations are durably `PENDING`. A lifespan-managed in-process worker claims action and review-sync jobs with leases, uses a separate sandbox database role and stable provider keys, records actual mock readback, retries UNKNOWN after 2/10 seconds and appends digest-protected receipts for terminal actions. CRM review sync writes a separate review object/note and does not change the CRM ticket's own status. Receipt, operation and agent review projections are scoped.
 
 ReceiptView: id, case_id, revision, issued_at, issue, window, findings, calculations, evidence_references, missing, conflicts, actions, handoff, next_step, simulation, digest_sha256. Store append-only. Digest is SHA256 over UTF-8 JSON with sorted keys/no whitespace/integer numbers, excluding digest_sha256 itself. It is neither a signature nor proof of source truth. Internal notes are excluded from customer receipts.
 
@@ -110,6 +124,8 @@ Human-review request creates a CREATE_REVIEW_TICKET proposal; normal confirmatio
 
 Agent cookie/role/run required. GET queue filters: review_status, complaint_type, evidence_state, delivery_state, search(case UUID or exact synthetic line), cursor, limit. Queue membership is a case with status REVIEW_REQUIRED, an accepted escalation/delivery record, or an existing agent review event; a merely proposed/unconfirmed handoff does not add a case. Sort updated_at DESC then ID DESC. Rows contain case_id,line_alias,complaint_type,evidence_state,review_status,delivery_state,updated_at,version. No analytics/admin scope.
 
+Review updates append local review history and audit first. If a delivered mock ticket is linked, Resolve enqueues one sync job per review event. Sync state is `PENDING`, `UNKNOWN`, `SYNCED`, `FAILED`, or `REVIEW_REQUIRED`; it is separate from the provider ticket's own status. The worker uses the review event ID as its stable provider idempotency key. No linked ticket yields `NOT_APPLICABLE`. The response is never reported as synchronized until the mock provider write is confirmed.
+
 Detail returns case, account, conversation, investigations, proposals, confirmations, operations, receipts, handoff, review_notes and audit_events. Include source freshness and missing evidence. Agent-only source payload detail is not automatically exposed to customer responses.
 
 PATCH review fields: expected_version, optional review_status/disposition/note/reopen_reason; at least note or status required. NEW -> IN_REVIEW -> CLOSED; CLOSED -> IN_REVIEW requires reopen_reason. Closing requires note and disposition REVIEW_COMPLETE/NEEDS_OPERATOR_FOLLOWUP/CUSTOMER_WITHDREW. Notes-only writes preserve status and increment case.version. Append actor/time/old-new version/status to immutable history. No customer action or financial adjustment is triggered by review status.
@@ -118,16 +134,17 @@ Commit local review/audit atomically. If provider ticket exists, queue its statu
 
 ## In-process facade and events
 
-Tevin exports `ConversationService.handle_turn(AuthContext, NormalizedTurn) -> TurnResult`. Text supplies expected conversation version; Voice bridge obtains it from the validated binding's conversation. NormalizedTurn includes channel, stable turn ID, input, language and optional trusted Voice presentation evidence. Browser body cannot set trusted channel/presentation fields.
+Tevin exports `ConversationService.handle_turn(AuthContext, NormalizedTurn) -> TurnResult`. Text supplies expected conversation version; Voice bridge obtains conversation/account/session scope from the validated binding. For Voice, it passes `channel=VOICE`, stable turn/downstream UUIDs, transcript/language, and trusted VoiceConsentEvidence constructed only after HMAC and binding validation. The service's Voice result projection is `response_id`, optional `case_id`, `reply_text`, `speech_text`, optional `pending_question`, `proposal`, `operation_status`, and `end_session`. Browser body cannot set trusted channel/presentation fields.
 
-Harry exports ResolveFacade methods get_account/create_case/get_case/investigate/propose_action/confirm_action/prepare_escalation/get_operation/get_receipt. Each accepts AuthContext plus typed request; return types match corresponding public domain DTOs. Also provide scoped ConversationRepository (claim/load/save turn, dialogue state, active-case selection) and KnowledgeRepository (bounded lexical lookup with reviewed citation/version). Tevin owns dialogue schema; Harry owns storage/migrations.
+Harry exports ResolveFacade methods create_conversation/get_account/create_case/get_case/investigate/propose_action/confirm_action/prepare_escalation/get_operation/get_receipt. The mounted conversation service uses scoped conversation storage, a bounded knowledge repository and the same persisted turn claims for text and Voice. `POST /conversations` requires a UUID `Idempotency-Key`; identical retry returns the same conversation, while a changed body conflicts. Guest login upgrade transfers public conversation history and completed turns to the new customer session. The single in-process worker claims leased operations and records sandbox results using separate provider credentials. Tevin owns dialogue logic; Harry owns storage/migrations.
 
 | Internal method | Input after AuthContext | Result |
 | --- | --- | --- |
+| create_conversation | language | ConversationView; session scope comes only from AuthContext |
 | get_account | No account selector | AccountView |
-| create_case | conversation_id, stable originating turn_id, complaint_type | CaseView; replay scoped originating turn rather than duplicate case |
+| create_case | conversation_id, expected conversation version, stable client_turn_id, complaint_type/window/reported_facts | CaseView; replay scoped originating turn rather than duplicate case |
 | get_case | case_id | CaseView |
-| investigate | case_id, InvestigationRequest, stable command key | InvestigationResult |
+| investigate | case_id, expected case version, complaint/window, stable command key | InvestigationResult; replay returns stored revision |
 | propose_action | case_id, ProposalRequest, stable command key | ProposalView |
 | confirm_action | proposal_id, ConfirmationRequest, stable command key, optional trusted VoiceConsentEvidence | ConfirmationResult |
 | prepare_escalation | case_id, EscalationRequest, stable command key | ProposalView |
@@ -140,21 +157,21 @@ Internal events persist in PostgreSQL, not a broker. Envelope: event_id, event_t
 
 ## Voice compatibility
 
-The [existing wire contract](https://github.com/Zeptaz/hutch_zeptazvoice/blob/main/docs/hutch-resolve-contract.md) remains authoritative for current Voice shapes. OpenAPI mirrors strict VoiceTurnRequest/Response/EventRequest. Do not append fields without coordinating strict-model compatibility.
+The [Voice wire contract](https://github.com/Zeptaz/hutch_zeptazvoice/blob/adapter_buildation/docs/hutch-resolve-contract.md) defines the deployed adapter branch. OpenAPI mirrors strict VoiceTurnRequest/Response/EventRequest. Do not append HTTP fields without coordinating strict-model compatibility.
 
-Resolve session creation body: binding_id, conversation_id, voice_session_id, account_id, origin, expires_at(Unix seconds). Voice returns browser_grant, websocket_path, websocket_url and expires_at. Grant at most60s, single use, origin/session bound. Browser protocols `zeptaz-hutch-v1` and `hutch-grant.{token}`. Binary mono PCM16 in16kHz/out24kHz; existing16KiB frame/120s call/3.84MB audio limits.
+Resolve session creation body: binding_id, conversation_id, voice_session_id, account_id, origin, expires_at(Unix seconds). Resolve stores the scoped binding before calling Voice and revokes it if grant provisioning fails. Binding max180s covers the 60-second browser grant window plus a full 120-second call; the browser grant itself is single use and origin/session bound. Voice returns browser_grant, websocket_path, websocket_url and expires_at. Browser protocols `zeptaz-hutch-v2` and `hutch-grant.{token}`. Binary mono PCM16 in16kHz/out24kHz; existing16KiB frame/120s call/3.84MB audio limits.
 
-Voice turn: binding_id, voice_session_id, event_id, turn_id, transcript, language, is_final=true, nullable presented_proposal_id/hash. Response: response_id, nullable case_id, reply_text, speech_text, nullable pending_question/proposal/operation_status, end_session. Detailed cards/receipts are fetched by browser from Resolve. Events connected/disconnected/error/usage carry binding/session/event IDs and details; Resolve returns accepted/event_id. Delivery is currently best effort; missing events do not prove call state.
+Voice turn: binding_id, voice_session_id, event_id, turn_id, transcript, language, is_final=true, nullable presented_proposal_id/hash. Response: response_id, nullable case_id, reply_text, speech_text, nullable pending_question/proposal/operation_status, end_session. Detailed cards/receipts are fetched by browser from Resolve. Events connected/disconnected/error/usage carry binding/session/event IDs and details; Resolve returns accepted/event_id. Delivery is currently best effort; missing events do not prove call state. Signed callback bodies are capped at 16 KiB (413 otherwise).
 
-HMAC headers: X-Voice-Timestamp, X-Voice-Event-Id, X-Voice-Body-Sha256, X-Voice-Signature. HMAC-SHA256 over UTF-8 `timestamp.event_id.body_sha256`; hash exact transmitted bytes; max60s skew. Header/body event IDs match. Verify signature and binding scope before deduplication; same event/body replays result, changed body409. Deduplicate turn_id separately under conversation so two envelopes cannot repeat a turn.
+HMAC headers: X-Voice-Timestamp, X-Voice-Event-Id, X-Voice-Body-Sha256, X-Voice-Signature. HMAC-SHA256 over UTF-8 `timestamp.event_id.body_sha256`; hash exact transmitted bytes; max60s skew. Header/body event IDs match. Resolve verifies signature and active binding scope before deduplication; same event/body replays result, changed body409. It deduplicates `turn_id` separately under conversation, leases a turn before the Tevin call, and reuses its persisted downstream key on recovery.
 
-Existing connect timeout2s/read8s; at most one turn retry on network timeout/5xx, identical body/event/turn IDs. Resolve returns within budget and does not wait for account execution. Model extraction uses a total6s budget including at most one repair; structured fallback handles exhaustion.
+Voice uses a 2s connect/8s response timeout and an 18s total retry budget. It retries retryable `TURN_IN_PROGRESS`/`CONVERSATION_BUSY` and transient transport/5xx with the same body/event/turn IDs; a pending result retains those IDs for the next identical caller retry. Resolve returns within budget and does not wait for account execution. Model extraction uses a total6s budget including at most one repair; structured fallback handles exhaustion.
 
-Browser events: ready,greeting,transcript,resolve_result,proposal_ack,error,ended plus binary audio. Client sends proposal_presented with exact ID/hash only after complete playback; interruption/disconnect cancels eligibility. Adapter attaches it once to next fresh final turn; Resolve still validates consent.
+Browser protocol `zeptaz-hutch-v2` is required. `resolve_result` includes `speech_text` and `sensitive_audio`. Each audio reply is bracketed by `audio_start`/`audio_end` with `response_id`; `audio_fallback` contains verified display text if sensitive provider speech cannot be matched. The client sends `playback_complete` with that `response_id` only after draining the audio queue. Voice replies with `playback_ack`. For a proposal it then sends `proposal_presented` with the same `response_id` and exact proposal ID/hash; Voice returns `proposal_ack`. Interrupted output is discarded. Resolve independently validates the affirmative final transcript, scoped binding, latest persisted proposal response and hash before recording Voice confirmation.
 
-Finalize one additive **proposed** server event for H-08/J-03: `{"type":"interrupted","response_id":null}` (response_id is the interrupted Resolve response ID when known). On provider interruption, Voice clears proposal-presentation eligibility and emits this event before further output; the browser stops and discards queued audio and pending acknowledgement. This event does not exist in the current app. It changes no existing HTTP model. A fresh response must be presented completely before confirmation is eligible again. The remaining existing browser JSON events and the new event are specified by VoiceServerControl/VoiceClientControl components in OpenAPI for tooling only; they are not extra HTTP endpoints.
+Voice emits `{"type":"interrupted","response_id":null}` (the affected response ID when known) before later output and clears proposal eligibility. Jayith's browser must discard queued audio and suppress pending acknowledgements. The v2 browser control change requires a coordinated frontend deployment; it changes no HTTP Voice turn/event schema.
 
-For explicit end_session=true, Voice delivers the final grounded output, emits ended with reason resolve_requested after playback/turn completion or bounded timeout, then closes. Normal disconnect/text continuation never discards Resolve state. H-08 must test these transitions. Intended behavior is not a claim of completed qualification.
+For explicit end_session=true, Voice delivers the final grounded output, emits ended with reason resolve_requested after playback/turn completion or bounded timeout, then closes. Normal disconnect/text continuation never discards Resolve state. Fake runtime tests pass; live browser/model qualification remains open.
 
 ## Mock provider boundary
 
@@ -166,9 +183,11 @@ Typed in-process ports: get_account, get_statement, list_recharges, list_offers/
 | --- | --- | --- |
 | DATABASE_URL / SANDBOX_DATABASE_URL | Resolve server | Separate Resolve/provider DB role DSNs |
 | APP_ORIGIN | Resolve server | http://localhost:5173; exact HTTPS origin on deployment |
-| DEMO_IDENTITIES_JSON | Resolve secret config | Identity -> credential hash/role/synthetic account selector; never client-selectable role |
+| DEMO_IDENTITIES_JSON | Resolve secret config | JSON map: identity -> `{credential_sha256, role, principal_id, sandbox_id, account_id?}`; credential hashes and fixed synthetic scope are server-side |
+| APP_SECRET_KEY | Resolve secret config | Random secret >=32 bytes for CSRF derivation; replace the example value |
 | VOICE_BASE_URL | Resolve server | http://localhost:8088 |
-| HUTCH_RESOLVE_HMAC_SECRET | Both servers | Same random secret, minimum32 characters |
+| VOICE_HMAC_SECRET | Resolve server | Random secret >=32 bytes; set the same value as Voice's `HUTCH_RESOLVE_HMAC_SECRET` |
+| HUTCH_RESOLVE_HMAC_SECRET | Voice server | Same random secret as Resolve `VOICE_HMAC_SECRET`, minimum32 bytes |
 | HUTCH_RESOLVE_BASE_URL | Voice server | http://localhost:8080/api/v1 |
 | ZEPTAZ_PUBLIC_BASE_URL | Voice server | Reachable HTTP(S) Voice base for returned WS URL |
 | HUTCH_VOICE_ALLOWED_ORIGINS | Voice server | Exact UI origins, no wildcard |

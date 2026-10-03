@@ -1,7 +1,7 @@
 import { ApiError } from './errors'
 
 export const API_BASE = '/api/v1'
-export const API_MODE: 'mock' | 'live' = import.meta.env.VITE_API_MODE === 'live' ? 'live' : 'mock'
+export const API_MODE: 'mock' | 'live' = import.meta.env.VITE_API_MODE === 'mock' ? 'mock' : 'live'
 
 /** Customer and agent sessions use separate cookies and CSRF tokens (docs/contracts.md). */
 export type Realm = 'customer' | 'agent'
@@ -20,11 +20,13 @@ export type RawResponse = { status: number; body: unknown }
 
 type Transport = (realm: Realm, method: Method, path: string, opts: RequestOptions) => Promise<RawResponse>
 
-const liveTransport: Transport = async (_realm, method, path, opts) => {
-  const headers: Record<string, string> = { Accept: 'application/json' }
+const liveTransport: Transport = async (realm, method, path, opts) => {
+  // Resolve uses one origin for customer and agent APIs, so every request must
+  // carry the selected realm explicitly (the realm also selects the CSRF token).
+  const headers: Record<string, string> = { Accept: 'application/json', 'X-Resolve-Realm': realm }
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
   if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey
-  const csrf = method === 'GET' ? null : csrfTokens[_realm]
+  const csrf = method === 'GET' ? null : csrfTokens[realm]
   if (csrf) headers['X-CSRF-Token'] = csrf
 
   let res: Response
@@ -93,8 +95,10 @@ export async function request<T>(realm: Realm, method: Method, path: string, opt
 
   const envelope = (body as { error?: ConstructorParameters<typeof ApiError>[1] } | null)?.error
   const err = new ApiError(status, envelope ?? { code: 'UNEXPECTED_RESPONSE', message: `HTTP ${status}` })
-  // A failed restore (GET /session) is expected on first visit; don't broadcast it as an expiry.
-  if (status === 401 && !path.endsWith('/session')) unauthorizedListeners[realm].forEach((fn) => fn())
+  // Initial restore and refused sign-in do not mean an active session expired.
+  if (status === 401 && !path.endsWith('/session') && !path.endsWith('/sessions')) {
+    unauthorizedListeners[realm].forEach((fn) => fn())
+  }
   throw err
 }
 

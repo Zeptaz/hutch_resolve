@@ -1,0 +1,1 @@
+"""HUTCH Resolve application package."""

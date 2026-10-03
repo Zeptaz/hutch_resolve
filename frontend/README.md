@@ -2,7 +2,7 @@
 
 One React 19 + TypeScript + Vite app with two areas:
 
-- `/`: customer chat (starts a guest session; no sign-in page)
+- `/`: customer chat and call panel (starts a guest session and offers demo customer sign-in)
 - `/agent`: internal review dashboard (agent sign-in required)
 
 Owner: Jayith. See [the plan](../docs/plans/jayith.md) and [shared contracts](../docs/contracts.md).
@@ -11,18 +11,18 @@ Owner: Jayith. See [the plan](../docs/plans/jayith.md) and [shared contracts](..
 
 ```sh
 cd frontend
-npm install
+npm ci
 npm run dev        # http://localhost:5173
 ```
 
-`VITE_API_MODE` selects the data source (`.env.development` defaults to `mock`):
+`VITE_API_MODE` selects the data source. The integrated development default is `live`:
 
 | Mode | Behaviour |
 | --- | --- |
-| `mock` | Answers API calls from `docs/contracts/examples.json`. Any agent identity/credential works. The banner's **Mock controls** expire the session, toggle a 503 outage or reset data. |
+| `mock` | Explicit standalone scripted UI demo using `docs/contracts/examples.json`. Any agent identity/credential works. The banner's **Mock controls** expire the session, toggle a 503 outage or reset data. Mock voice uses a local scripted socket, not Zeptaz Voice. |
 | `live` | Calls Resolve through the Vite proxy (`/api` → `http://localhost:8080`). |
 
-Create `frontend/.env.development.local` with `VITE_API_MODE=live` to switch without editing tracked files.
+Copy `.env.example` to `.env.development.local` to run against Resolve. Set `VITE_API_MODE=mock` only for an offline UI demo; check the visible mock banner before presenting results.
 
 ## Scripts
 
@@ -32,6 +32,10 @@ Create `frontend/.env.development.local` with `VITE_API_MODE=live` to switch wit
 | `npm run typecheck` | TypeScript project check |
 | `npm run lint` | oxlint |
 | `npm run build` | Typecheck and production build |
+| `npm run test:e2e` | Mock dashboard and customer browser checks; starts an isolated Vite server |
+| `npm run test:e2e:live` | Opt-in review workflow checks against a disposable Resolve stack; see [e2e/README.md](e2e/README.md) |
+
+The agent dashboard shows server-filtered cases, investigation evidence, action/ticket/receipt history and internal review notes. Review updates send the current case version and a stable retry key. A stale update keeps the unsent draft until the agent reviews the refreshed case. The customer chat/call experience continues on `/` using the same session and conversation.
 
 ## Layout
 

@@ -1,14 +1,14 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "HUTCH Resolve planned API",
-    "version": "1.0.0",
-    "description": "Design contract only. No Resolve endpoints implemented at baseline 8df74d7. Existing Voice strict models imported without runtime changes. See docs/contracts.md for scope, confirmation and error rules."
+    "title": "HUTCH Resolve API",
+    "version": "1.2.0",
+    "description": "Shared Resolve wire contract v1.2.0. Adds agent-authorized stalled-turn reconciliation; see docs/contracts.md for safety and verification status."
   },
   "servers": [
     {
       "url": "http://localhost:8080/api/v1",
-      "description": "Proposed local Resolve runtime"
+      "description": "Local Resolve runtime"
     }
   ],
   "paths": {
@@ -1367,6 +1367,9 @@
         "security": [
           {
             "CustomerSession": []
+          },
+          {
+            "AgentSession": []
           }
         ],
         "responses": {
@@ -1469,6 +1472,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/ResolveRealm"
           }
         ]
       }
@@ -1785,7 +1791,7 @@
       "post": {
         "operationId": "confirm_or_decline",
         "summary": "confirm or decline",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Customer confirmation is idempotent. ACCEPT is durably queued only when action execution is available; otherwise returns retryable 503 ACTION_EXECUTION_UNAVAILABLE without recording the acceptance. DECLINE remains available.",
         "tags": [
           "Resolve"
         ],
@@ -1876,7 +1882,7 @@
             }
           },
           "503": {
-            "description": "Error; see shared contract codes",
+            "description": "Action execution unavailable or dependency unavailable; see Error.code.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1957,6 +1963,9 @@
         "security": [
           {
             "CustomerSession": []
+          },
+          {
+            "AgentSession": []
           }
         ],
         "responses": {
@@ -2059,6 +2068,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/ResolveRealm"
           }
         ]
       }
@@ -2067,7 +2079,7 @@
       "post": {
         "operationId": "prepare_escalation",
         "summary": "prepare escalation",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Persist the reason with a CREATE_REVIEW_TICKET proposal; normal customer confirmation is still required before delivery.",
         "tags": [
           "Resolve"
         ],
@@ -2229,6 +2241,9 @@
         "security": [
           {
             "CustomerSession": []
+          },
+          {
+            "AgentSession": []
           }
         ],
         "responses": {
@@ -2340,6 +2355,9 @@
               "type": "integer",
               "minimum": 1
             }
+          },
+          {
+            "$ref": "#/components/parameters/ResolveRealm"
           }
         ]
       }
@@ -2348,7 +2366,7 @@
       "post": {
         "operationId": "create_voice_binding",
         "summary": "create voice binding",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Implemented: customer session, exact Origin and CSRF required; binding is scoped to the session, account, conversation, active sandbox run, origin and short expiry. Requires configured Voice service.",
         "tags": [
           "Resolve"
         ],
@@ -2502,7 +2520,7 @@
       "post": {
         "operationId": "receive_voice_turn",
         "summary": "receive voice turn",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Implemented signed callback. Signature, active binding scope, and event/turn idempotency are checked before an injected ConversationService handles the finalized turn. A missing conversation service returns 503.",
         "tags": [
           "Voice integration"
         ],
@@ -2647,7 +2665,7 @@
       "post": {
         "operationId": "receive_voice_event",
         "summary": "receive voice event",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Implemented signed lifecycle callback. Signature and active binding scope are checked before durable event replay/acknowledgement.",
         "tags": [
           "Voice integration"
         ],
@@ -2957,7 +2975,7 @@
         ]
       }
     },
-    "/agent/cases/{id}": {
+    "/agent/cases/{case_id}": {
       "get": {
         "operationId": "get_agent_case",
         "summary": "get agent case",
@@ -3075,7 +3093,7 @@
         ]
       }
     },
-    "/agent/cases/{id}/review": {
+    "/agent/cases/{case_id}/review": {
       "patch": {
         "operationId": "update_review",
         "summary": "update review",
@@ -3336,7 +3354,7 @@
       "get": {
         "operationId": "readiness",
         "summary": "readiness",
-        "description": "Proposed interface; not implemented at documentation baseline.",
+        "description": "Reports database readiness and independent runtime capabilities. Optional model and Voice integrations may be unavailable while text remains usable; actions require the sandbox writer and operation worker.",
         "tags": [
           "Resolve"
         ],
@@ -3348,7 +3366,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Health"
+                  "$ref": "#/components/schemas/Readiness"
                 }
               }
             },
@@ -3423,6 +3441,245 @@
             }
           },
           "503": {
+            "description": "Database unavailable; all capability flags are false",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations/{id}/turns/{turn_id}/resume": {
+      "post": {
+        "operationId": "resume_turn",
+        "summary": "Resume an expired conversation turn",
+        "description": "Resumes only a persisted text turn using its stored normalized input and stable command keys. Voice consent is never reconstructed from browser data.",
+        "tags": [
+          "Conversation"
+        ],
+        "x-owner": "Harry/Tevin",
+        "security": [
+          {
+            "CustomerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canonical turn result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origin or CSRF rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation or pending turn unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Turn still active or recovery conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/conversations/{conversation_id}/turns/{turn_id}/reconcile": {
+      "post": {
+        "operationId": "reconcile_stalled_conversation_turn",
+        "summary": "reconcile a stalled turn",
+        "description": "Agent-only terminal reconciliation of an expired turn claim. Refuses while related account operations are PENDING, RUNNING or UNKNOWN. Never replays the turn or its Voice consent.",
+        "tags": [
+          "Agent"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "AgentSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TurnReconciliationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Turn marked abandoned with case and operation context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnReconciliationResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
             "description": "Error; see shared contract codes",
             "content": {
               "application/json": {
@@ -3457,12 +3714,13 @@
     },
     "schemas": {
       "Language": {
-        "type": "string",
         "enum": [
           "en",
           "si",
           "ta"
-        ]
+        ],
+        "title": "Language",
+        "type": "string"
       },
       "ComplaintType": {
         "type": "string",
@@ -3470,27 +3728,29 @@
           "BALANCE_RECHARGE",
           "DATA_DEPLETION",
           "CONNECTIVITY",
-          "VAS_DISPUTE"
+          "VAS_DISPUTE",
+          "PACKAGE_ACTIVATION"
         ]
       },
       "EvidenceState": {
-        "type": "string",
         "enum": [
           "SUFFICIENT",
           "PARTIAL",
           "CONFLICTING"
-        ]
+        ],
+        "title": "EvidenceState",
+        "type": "string"
       },
       "ActionType": {
         "type": "string",
         "enum": [
           "DEACTIVATE_VAS",
           "SEND_SETTINGS_INSTRUCTIONS",
-          "CREATE_REVIEW_TICKET"
+          "CREATE_REVIEW_TICKET",
+          "ACTIVATE_PACKAGE"
         ]
       },
       "OperationStatus": {
-        "type": "string",
         "enum": [
           "PENDING",
           "RUNNING",
@@ -3498,31 +3758,36 @@
           "FAILED",
           "UNKNOWN",
           "REVIEW_REQUIRED"
-        ]
+        ],
+        "title": "OperationStatus",
+        "type": "string"
       },
       "ReviewStatus": {
-        "type": "string",
         "enum": [
           "NEW",
           "IN_REVIEW",
           "CLOSED"
-        ]
+        ],
+        "title": "ReviewStatus",
+        "type": "string"
       },
       "DeliveryState": {
-        "type": "string",
         "enum": [
           "PENDING",
           "DELIVERED",
           "FAILED",
           "REVIEW_REQUIRED"
-        ]
+        ],
+        "title": "DeliveryState",
+        "type": "string"
       },
       "Decision": {
-        "type": "string",
         "enum": [
           "ACCEPT",
           "DECLINE"
-        ]
+        ],
+        "title": "Decision",
+        "type": "string"
       },
       "Empty": {
         "type": "object",
@@ -3709,54 +3974,94 @@
         ]
       },
       "ReportedFacts": {
-        "type": "object",
         "additionalProperties": false,
+        "description": "Customer-reported facts. Never source evidence.",
         "properties": {
           "amount_minor": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Amount Minor"
           },
           "recharge_reference": {
-            "type": "string",
-            "maxLength": 128
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recharge Reference"
           },
           "subscription_id": {
-            "type": "string",
-            "format": "uuid"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subscription Id"
           },
           "description": {
-            "type": "string",
-            "maxLength": 4000
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
           }
         },
-        "required": []
+        "title": "ReportedFacts",
+        "type": "object"
       },
       "TextInput": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
             "const": "text",
+            "title": "Type",
             "type": "string"
           },
           "text": {
-            "type": "string",
+            "maxLength": 4000,
             "minLength": 1,
-            "maxLength": 4000
+            "title": "Text",
+            "type": "string"
           }
         },
         "required": [
           "type",
           "text"
-        ]
+        ],
+        "title": "TextInput",
+        "type": "object"
       },
       "CategoryInput": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
             "const": "category_selection",
+            "title": "Type",
             "type": "string"
           },
           "complaint_type": {
@@ -3766,26 +4071,30 @@
         "required": [
           "type",
           "complaint_type"
-        ]
+        ],
+        "title": "CategoryInput",
+        "type": "object"
       },
       "DetailsInput": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
             "const": "complaint_details",
+            "title": "Type",
             "type": "string"
           },
           "complaint_type": {
             "$ref": "#/components/schemas/ComplaintType"
           },
           "window_start": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Window Start",
+            "type": "string"
           },
           "window_end": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Window End",
+            "type": "string"
           },
           "reported_facts": {
             "$ref": "#/components/schemas/ReportedFacts"
@@ -3797,23 +4106,27 @@
           "window_start",
           "window_end",
           "reported_facts"
-        ]
+        ],
+        "title": "DetailsInput",
+        "type": "object"
       },
       "DecisionInput": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
             "const": "action_decision",
+            "title": "Type",
             "type": "string"
           },
           "proposal_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Proposal Id",
+            "type": "string"
           },
           "proposal_hash": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$"
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Proposal Hash",
+            "type": "string"
           },
           "decision": {
             "$ref": "#/components/schemas/Decision"
@@ -3824,27 +4137,44 @@
           "proposal_id",
           "proposal_hash",
           "decision"
-        ]
+        ],
+        "title": "DecisionInput",
+        "type": "object"
       },
       "CaseSelectionInput": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
             "const": "case_selection",
+            "title": "Type",
             "type": "string"
           },
           "case_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
           }
         },
         "required": [
           "type",
           "case_id"
-        ]
+        ],
+        "title": "CaseSelectionInput",
+        "type": "object"
       },
       "TurnInput": {
+        "discriminator": {
+          "mapping": {
+            "action_decision": "#/components/schemas/DecisionInput",
+            "case_selection": "#/components/schemas/CaseSelectionInput",
+            "category_selection": "#/components/schemas/CategoryInput",
+            "complaint_details": "#/components/schemas/DetailsInput",
+            "package_query": "#/components/schemas/PackageQueryInput",
+            "package_selection": "#/components/schemas/PackageSelectionInput",
+            "text": "#/components/schemas/TextInput"
+          },
+          "propertyName": "type"
+        },
         "oneOf": [
           {
             "$ref": "#/components/schemas/TextInput"
@@ -3860,29 +4190,68 @@
           },
           {
             "$ref": "#/components/schemas/CaseSelectionInput"
+          },
+          {
+            "$ref": "#/components/schemas/PackageQueryInput"
+          },
+          {
+            "$ref": "#/components/schemas/PackageSelectionInput"
           }
-        ],
-        "discriminator": {
-          "propertyName": "type"
-        }
+        ]
       },
       "MessageRequest": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "client_turn_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Client Turn Id",
+            "type": "string"
           },
           "expected_version": {
-            "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "title": "Expected Version",
+            "type": "integer"
           },
           "language": {
             "$ref": "#/components/schemas/Language"
           },
           "input": {
-            "$ref": "#/components/schemas/TurnInput"
+            "discriminator": {
+              "mapping": {
+                "action_decision": "#/components/schemas/DecisionInput",
+                "case_selection": "#/components/schemas/CaseSelectionInput",
+                "category_selection": "#/components/schemas/CategoryInput",
+                "complaint_details": "#/components/schemas/DetailsInput",
+                "package_query": "#/components/schemas/PackageQueryInput",
+                "package_selection": "#/components/schemas/PackageSelectionInput",
+                "text": "#/components/schemas/TextInput"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TextInput"
+              },
+              {
+                "$ref": "#/components/schemas/CategoryInput"
+              },
+              {
+                "$ref": "#/components/schemas/DetailsInput"
+              },
+              {
+                "$ref": "#/components/schemas/DecisionInput"
+              },
+              {
+                "$ref": "#/components/schemas/CaseSelectionInput"
+              },
+              {
+                "$ref": "#/components/schemas/PackageQueryInput"
+              },
+              {
+                "$ref": "#/components/schemas/PackageSelectionInput"
+              }
+            ],
+            "title": "Input"
           }
         },
         "required": [
@@ -3890,67 +4259,78 @@
           "expected_version",
           "language",
           "input"
-        ]
+        ],
+        "type": "object"
       },
       "PendingQuestion": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "code": {
+            "title": "Code",
             "type": "string"
           },
           "text": {
+            "title": "Text",
             "type": "string"
           },
           "allowed_input_types": {
-            "type": "array",
             "items": {
-              "type": "string",
               "enum": [
                 "text",
                 "category_selection",
                 "complaint_details",
                 "action_decision",
-                "case_selection"
-              ]
-            }
+                "case_selection",
+                "package_query",
+                "package_selection"
+              ],
+              "type": "string"
+            },
+            "title": "Allowed Input Types",
+            "type": "array"
           }
         },
         "required": [
           "code",
           "text",
           "allowed_input_types"
-        ]
+        ],
+        "title": "PendingQuestion",
+        "type": "object"
       },
       "Citation": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "article_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Article Id",
+            "type": "string"
           },
           "title": {
+            "title": "Title",
             "type": "string"
           },
           "url": {
-            "type": "string",
-            "format": "uri"
+            "title": "Url",
+            "type": "string"
           },
           "reviewed_at": {
-            "type": "string",
-            "format": "date"
+            "format": "date",
+            "title": "Reviewed At",
+            "type": "string"
           },
           "version": {
-            "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
           },
           "scope": {
-            "type": "string",
             "enum": [
               "PUBLIC",
               "SYNTHETIC"
-            ]
+            ],
+            "title": "Scope",
+            "type": "string"
           }
         },
         "required": [
@@ -3960,40 +4340,45 @@
           "reviewed_at",
           "version",
           "scope"
-        ]
+        ],
+        "title": "Citation",
+        "type": "object"
       },
       "SourceStatus": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "source": {
+            "title": "Source",
             "type": "string"
           },
           "fetched_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
           },
           "as_of": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "As Of"
           },
           "complete_through": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Complete Through"
           },
           "source_version": {
             "anyOf": [
@@ -4003,9 +4388,11 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Source Version"
           },
           "complete": {
+            "title": "Complete",
             "type": "boolean"
           },
           "next_cursor": {
@@ -4016,13 +4403,15 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Next Cursor"
           },
           "warnings": {
-            "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
@@ -4034,40 +4423,56 @@
           "complete",
           "next_cursor",
           "warnings"
-        ]
+        ],
+        "title": "SourceStatus",
+        "type": "object"
       },
       "EvidenceItem": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "source": {
+            "title": "Source",
             "type": "string"
           },
           "source_record_id": {
+            "title": "Source Record Id",
             "type": "string"
           },
           "source_version": {
+            "title": "Source Version",
             "type": "string"
           },
           "observed_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
           },
           "fetched_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
           },
           "value": {
-            "type": [
-              "string",
-              "integer",
-              "boolean",
-              "null"
-            ]
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
           },
           "unit": {
             "anyOf": [
@@ -4077,11 +4482,13 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Unit"
           },
           "source_payload": {
-            "type": "object",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "title": "Source Payload",
+            "type": "object"
           }
         },
         "required": [
@@ -4094,111 +4501,128 @@
           "value",
           "unit",
           "source_payload"
-        ]
+        ],
+        "title": "EvidenceItem",
+        "type": "object"
       },
       "Finding": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "code": {
+            "title": "Code",
             "type": "string"
           },
           "text": {
+            "title": "Text",
             "type": "string"
           },
           "evidence_ids": {
-            "type": "array",
             "items": {
-              "type": "string",
-              "format": "uuid"
-            }
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
           }
         },
         "required": [
           "code",
           "text",
           "evidence_ids"
-        ]
+        ],
+        "title": "Finding",
+        "type": "object"
       },
       "CalculationTerm": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "evidence_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Evidence Id",
+            "type": "string"
           },
           "label": {
+            "title": "Label",
             "type": "string"
           },
           "value": {
-            "type": "integer",
+            "maximum": 9007199254740991,
             "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+            "title": "Value",
+            "type": "integer"
           }
         },
         "required": [
           "evidence_id",
           "label",
           "value"
-        ]
+        ],
+        "title": "CalculationTerm",
+        "type": "object"
       },
       "Calculation": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "code": {
+            "title": "Code",
             "type": "string"
           },
           "unit": {
+            "title": "Unit",
             "type": "string"
           },
           "opening": {
-            "type": "integer",
+            "maximum": 9007199254740991,
             "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+            "title": "Opening",
+            "type": "integer"
           },
           "terms": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/CalculationTerm"
-            }
+            },
+            "title": "Terms",
+            "type": "array"
           },
           "expected": {
-            "type": "integer",
+            "maximum": 9007199254740991,
             "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+            "title": "Expected",
+            "type": "integer"
           },
           "observed": {
             "anyOf": [
               {
-                "type": "integer",
+                "maximum": 9007199254740991,
                 "minimum": -9007199254740991,
-                "maximum": 9007199254740991
+                "type": "integer"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Observed"
           },
           "delta": {
             "anyOf": [
               {
-                "type": "integer",
+                "maximum": 9007199254740991,
                 "minimum": -9007199254740991,
-                "maximum": 9007199254740991
+                "type": "integer"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Delta"
           },
           "evidence_ids": {
-            "type": "array",
             "items": {
-              "type": "string",
-              "format": "uuid"
-            }
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
           }
         },
         "required": [
@@ -4210,20 +4634,23 @@
           "observed",
           "delta",
           "evidence_ids"
-        ]
+        ],
+        "title": "Calculation",
+        "type": "object"
       },
       "EligibleAction": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "action_type": {
             "$ref": "#/components/schemas/ActionType"
           },
           "target_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
           },
           "target_label": {
+            "title": "Target Label",
             "type": "string"
           }
         },
@@ -4231,26 +4658,30 @@
           "action_type",
           "target_id",
           "target_label"
-        ]
+        ],
+        "title": "EligibleAction",
+        "type": "object"
       },
       "InvestigationRequest": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "expected_version": {
-            "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "title": "Expected Version",
+            "type": "integer"
           },
           "complaint_type": {
             "$ref": "#/components/schemas/ComplaintType"
           },
           "window_start": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Window Start",
+            "type": "string"
           },
           "window_end": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Window End",
+            "type": "string"
           },
           "reported_facts": {
             "$ref": "#/components/schemas/ReportedFacts"
@@ -4262,93 +4693,108 @@
           "window_start",
           "window_end",
           "reported_facts"
-        ]
+        ],
+        "type": "object"
       },
       "InvestigationResult": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "case_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
           },
           "revision": {
-            "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "title": "Revision",
+            "type": "integer"
           },
           "complaint_type": {
             "$ref": "#/components/schemas/ComplaintType"
           },
           "window_start": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Window Start",
+            "type": "string"
           },
           "window_end": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Window End",
+            "type": "string"
           },
           "evidence_state": {
             "$ref": "#/components/schemas/EvidenceState"
           },
           "findings": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/Finding"
-            }
+            },
+            "title": "Findings",
+            "type": "array"
           },
           "calculations": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/Calculation"
-            }
+            },
+            "title": "Calculations",
+            "type": "array"
           },
           "evidence": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/EvidenceItem"
-            }
+            },
+            "title": "Evidence",
+            "type": "array"
           },
           "source_status": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/SourceStatus"
-            }
+            },
+            "title": "Source Status",
+            "type": "array"
           },
           "missing": {
-            "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "title": "Missing",
+            "type": "array"
           },
           "conflicts": {
-            "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "title": "Conflicts",
+            "type": "array"
           },
           "eligible_actions": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/EligibleAction"
-            }
+            },
+            "title": "Eligible Actions",
+            "type": "array"
           },
           "review_reasons": {
-            "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "title": "Review Reasons",
+            "type": "array"
           },
           "created_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
           },
           "simulation": {
-            "type": "boolean",
-            "const": true
+            "const": true,
+            "title": "Simulation",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4369,29 +4815,32 @@
           "review_reasons",
           "created_at",
           "simulation"
-        ]
+        ],
+        "title": "InvestigationResult",
+        "type": "object"
       },
       "Balance": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "wallet": {
+            "title": "Wallet",
             "type": "string"
           },
           "amount_minor": {
-            "type": "integer",
+            "maximum": 9007199254740991,
             "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+            "title": "Amount Minor",
+            "type": "integer"
           },
           "currency": {
-            "type": "string",
-            "enum": [
-              "LKR"
-            ]
+            "const": "LKR",
+            "title": "Currency",
+            "type": "string"
           },
           "as_of": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
           }
         },
         "required": [
@@ -4399,57 +4848,66 @@
           "amount_minor",
           "currency",
           "as_of"
-        ]
+        ],
+        "title": "Balance",
+        "type": "object"
       },
       "SubscriptionSummary": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "name": {
+            "title": "Name",
             "type": "string"
           },
           "kind": {
-            "type": "string",
             "enum": [
               "PACKAGE",
               "VAS"
-            ]
+            ],
+            "title": "Kind",
+            "type": "string"
           },
           "status": {
+            "title": "Status",
             "type": "string"
           },
           "version": {
-            "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
           },
           "remaining_bytes": {
             "anyOf": [
               {
-                "type": "integer",
+                "maximum": 9007199254740991,
                 "minimum": 0,
-                "maximum": 9007199254740991
+                "type": "integer"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Remaining Bytes"
           },
           "expires_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Expires At"
           },
           "renewal": {
+            "title": "Renewal",
             "type": "boolean"
           }
         },
@@ -4462,54 +4920,64 @@
           "remaining_bytes",
           "expires_at",
           "renewal"
-        ]
+        ],
+        "title": "SubscriptionSummary",
+        "type": "object"
       },
       "AccountView": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "line_alias": {
+            "title": "Line Alias",
             "type": "string"
           },
           "display_name": {
+            "title": "Display Name",
             "type": "string"
           },
           "region": {
+            "title": "Region",
             "type": "string"
           },
           "status": {
-            "type": "string",
             "enum": [
               "ACTIVE",
               "SUSPENDED",
               "CLOSED"
-            ]
+            ],
+            "title": "Status",
+            "type": "string"
           },
           "balances": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/Balance"
-            }
+            },
+            "title": "Balances",
+            "type": "array"
           },
           "subscriptions": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/SubscriptionSummary"
-            }
+            },
+            "title": "Subscriptions",
+            "type": "array"
           },
           "source_status": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/SourceStatus"
-            }
+            },
+            "title": "Source Status",
+            "type": "array"
           },
           "simulation": {
-            "type": "boolean",
-            "const": true
+            "const": true,
+            "title": "Simulation",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4522,26 +4990,30 @@
           "subscriptions",
           "source_status",
           "simulation"
-        ]
+        ],
+        "title": "AccountView",
+        "type": "object"
       },
       "ProposalRequest": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "expected_version": {
-            "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "title": "Expected Version",
+            "type": "integer"
           },
           "investigation_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Investigation Id",
+            "type": "string"
           },
           "action_type": {
             "$ref": "#/components/schemas/ActionType"
           },
           "target_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
           }
         },
         "required": [
@@ -4549,59 +5021,80 @@
           "investigation_id",
           "action_type",
           "target_id"
-        ]
+        ],
+        "type": "object"
       },
       "ProposalView": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "case_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
           },
           "investigation_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Investigation Id",
+            "type": "string"
           },
           "action_type": {
             "$ref": "#/components/schemas/ActionType"
           },
           "target_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
           },
           "target_version": {
             "anyOf": [
               {
-                "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "type": "integer"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Target Version"
           },
           "target_label": {
+            "title": "Target Label",
             "type": "string"
           },
           "consequences": {
+            "title": "Consequences",
             "type": "string"
           },
           "proposal_hash": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$"
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Proposal Hash",
+            "type": "string"
           },
           "expires_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "package_terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PackageTerms"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "simulation": {
-            "type": "boolean",
-            "const": true
+            "const": true,
+            "title": "Simulation",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4616,74 +5109,102 @@
           "proposal_hash",
           "expires_at",
           "simulation"
-        ]
+        ],
+        "title": "ProposalView",
+        "type": "object"
       },
       "ConfirmationRequest": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "proposal_hash": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$"
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Proposal Hash",
+            "type": "string"
           },
           "decision": {
             "$ref": "#/components/schemas/Decision"
           },
           "client_turn_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Client Turn Id",
+            "type": "string"
           }
         },
         "required": [
           "proposal_hash",
           "decision",
           "client_turn_id"
-        ]
+        ],
+        "type": "object"
       },
       "ConfirmationView": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "proposal_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Proposal Id",
+            "type": "string"
           },
           "proposal_hash": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$"
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Proposal Hash",
+            "type": "string"
           },
           "decision": {
             "$ref": "#/components/schemas/Decision"
           },
           "channel": {
-            "type": "string",
             "enum": [
               "TEXT",
-              "VOICE"
-            ]
+              "VOICE",
+              "AGENT"
+            ],
+            "title": "Channel",
+            "type": "string"
           },
           "client_turn_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Client Turn Id",
+            "type": "string"
           },
           "created_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
           },
           "operation_id": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "uuid"
+                "format": "uuid",
+                "type": "string"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Operation Id"
+          },
+          "operation_status": {
+            "anyOf": [
+              {
+                "const": "PENDING",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Status"
+          },
+          "simulation": {
+            "const": true,
+            "title": "Simulation",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4694,11 +5215,14 @@
           "channel",
           "client_turn_id",
           "created_at",
-          "operation_id"
-        ]
+          "operation_id",
+          "operation_status",
+          "simulation"
+        ],
+        "title": "ConfirmationView",
+        "type": "object"
       },
       "OperationOutcome": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "code": {
@@ -4709,7 +5233,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Code"
           },
           "message": {
             "anyOf": [
@@ -4719,7 +5244,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Message"
           },
           "actual_target_status": {
             "anyOf": [
@@ -4729,7 +5255,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Actual Target Status"
           },
           "provider_ticket_id": {
             "anyOf": [
@@ -4739,7 +5266,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Provider Ticket Id"
           }
         },
         "required": [
@@ -4747,23 +5275,26 @@
           "message",
           "actual_target_status",
           "provider_ticket_id"
-        ]
+        ],
+        "type": "object"
       },
       "OperationView": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "case_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
           },
           "proposal_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Proposal Id",
+            "type": "string"
           },
           "action_type": {
             "$ref": "#/components/schemas/ActionType"
@@ -4772,12 +5303,14 @@
             "$ref": "#/components/schemas/OperationStatus"
           },
           "created_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
           },
           "updated_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
           },
           "provider_operation_id": {
             "anyOf": [
@@ -4787,17 +5320,20 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Provider Operation Id"
           },
           "outcome": {
             "$ref": "#/components/schemas/OperationOutcome"
           },
           "next_step": {
+            "title": "Next Step",
             "type": "string"
           },
           "simulation": {
-            "type": "boolean",
-            "const": true
+            "const": true,
+            "title": "Simulation",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4812,10 +5348,10 @@
           "outcome",
           "next_step",
           "simulation"
-        ]
+        ],
+        "type": "object"
       },
       "ConfirmationResult": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "confirmation": {
@@ -4835,46 +5371,51 @@
         "required": [
           "confirmation",
           "operation"
-        ]
+        ],
+        "type": "object"
       },
       "EscalationRequest": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "expected_version": {
-            "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "title": "Expected Version",
+            "type": "integer"
           },
           "investigation_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Investigation Id",
+            "type": "string"
           },
           "reason": {
-            "type": "string",
+            "maxLength": 2000,
             "minLength": 1,
-            "maxLength": 2000
+            "title": "Reason",
+            "type": "string"
           }
         },
         "required": [
           "expected_version",
           "investigation_id",
           "reason"
-        ]
+        ],
+        "type": "object"
       },
       "Handoff": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "reference": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Reference",
+            "type": "string"
           },
           "queue": {
-            "type": "string",
             "enum": [
               "BILLING_REVIEW",
               "TECHNICAL_SUPPORT"
-            ]
+            ],
+            "title": "Queue",
+            "type": "string"
           },
           "delivery_state": {
             "$ref": "#/components/schemas/DeliveryState"
@@ -4887,18 +5428,23 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Provider Ticket Id"
           },
           "review_sync_state": {
-            "type": "string",
             "enum": [
               "NOT_APPLICABLE",
               "PENDING",
               "SYNCED",
-              "FAILED"
-            ]
+              "FAILED",
+              "UNKNOWN",
+              "REVIEW_REQUIRED"
+            ],
+            "title": "Review Sync State",
+            "type": "string"
           },
           "next_step": {
+            "title": "Next Step",
             "type": "string"
           }
         },
@@ -4909,20 +5455,23 @@
           "provider_ticket_id",
           "review_sync_state",
           "next_step"
-        ]
+        ],
+        "title": "Handoff",
+        "type": "object"
       },
       "ReceiptAction": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "proposal_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Proposal Id",
+            "type": "string"
           },
           "action_type": {
             "$ref": "#/components/schemas/ActionType"
           },
           "requested": {
+            "title": "Requested",
             "type": "boolean"
           },
           "decision": {
@@ -4938,13 +5487,14 @@
           "operation_id": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "uuid"
+                "format": "uuid",
+                "type": "string"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Operation Id"
           },
           "operation_status": {
             "anyOf": [
@@ -4957,6 +5507,7 @@
             ]
           },
           "completed": {
+            "title": "Completed",
             "type": "boolean"
           }
         },
@@ -4968,25 +5519,30 @@
           "operation_id",
           "operation_status",
           "completed"
-        ]
+        ],
+        "title": "ReceiptAction",
+        "type": "object"
       },
       "EvidenceReference": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "source": {
+            "title": "Source",
             "type": "string"
           },
           "source_record_id": {
+            "title": "Source Record Id",
             "type": "string"
           },
           "observed_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
           }
         },
         "required": [
@@ -4994,84 +5550,81 @@
           "source",
           "source_record_id",
           "observed_at"
-        ]
+        ],
+        "title": "EvidenceReference",
+        "type": "object"
       },
       "ReceiptView": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "case_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
           },
           "revision": {
-            "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "title": "Revision",
+            "type": "integer"
           },
           "issued_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Issued At",
+            "type": "string"
           },
           "issue": {
+            "title": "Issue",
             "type": "string"
           },
           "window": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "start": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "end": {
-                "type": "string",
-                "format": "date-time"
-              }
-            },
-            "required": [
-              "start",
-              "end"
-            ]
+            "$ref": "#/components/schemas/ReceiptWindow"
           },
           "findings": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/Finding"
-            }
+            },
+            "title": "Findings",
+            "type": "array"
           },
           "calculations": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/Calculation"
-            }
+            },
+            "title": "Calculations",
+            "type": "array"
           },
           "evidence_references": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/EvidenceReference"
-            }
+            },
+            "title": "Evidence References",
+            "type": "array"
           },
           "missing": {
-            "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "title": "Missing",
+            "type": "array"
           },
           "conflicts": {
-            "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "title": "Conflicts",
+            "type": "array"
           },
           "actions": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/ReceiptAction"
-            }
+            },
+            "title": "Actions",
+            "type": "array"
           },
           "handoff": {
             "anyOf": [
@@ -5084,15 +5637,18 @@
             ]
           },
           "next_step": {
+            "title": "Next Step",
             "type": "string"
           },
           "simulation": {
-            "type": "boolean",
-            "const": true
+            "const": true,
+            "title": "Simulation",
+            "type": "boolean"
           },
           "digest_sha256": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$"
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Digest Sha256",
+            "type": "string"
           }
         },
         "required": [
@@ -5112,69 +5668,78 @@
           "next_step",
           "simulation",
           "digest_sha256"
-        ]
+        ],
+        "type": "object"
       },
       "ReceiptReference": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "revision": {
-            "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "title": "Revision",
+            "type": "integer"
           }
         },
         "required": [
           "id",
           "revision"
-        ]
+        ],
+        "type": "object"
       },
       "CaseView": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "conversation_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Conversation Id",
+            "type": "string"
           },
           "account_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Account Id",
+            "type": "string"
           },
           "complaint_type": {
             "$ref": "#/components/schemas/ComplaintType"
           },
           "status": {
-            "type": "string",
             "enum": [
               "OPEN",
               "AWAITING_CUSTOMER",
               "ACTION_PENDING",
               "REVIEW_REQUIRED",
               "RESOLVED"
-            ]
+            ],
+            "title": "Status",
+            "type": "string"
           },
           "review_status": {
             "$ref": "#/components/schemas/ReviewStatus"
           },
           "version": {
-            "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
           },
           "created_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
           },
           "updated_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
           },
           "investigation": {
             "anyOf": [
@@ -5187,11 +5752,12 @@
             ]
           },
           "operation_ids": {
-            "type": "array",
             "items": {
-              "type": "string",
-              "format": "uuid"
-            }
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Operation Ids",
+            "type": "array"
           },
           "receipt": {
             "anyOf": [
@@ -5204,8 +5770,9 @@
             ]
           },
           "simulation": {
-            "type": "boolean",
-            "const": true
+            "const": true,
+            "title": "Simulation",
+            "type": "boolean"
           }
         },
         "required": [
@@ -5222,7 +5789,8 @@
           "operation_ids",
           "receipt",
           "simulation"
-        ]
+        ],
+        "type": "object"
       },
       "CaseSummary": {
         "type": "object",
@@ -5246,47 +5814,52 @@
         ]
       },
       "TimelineItem": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "evidence_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Evidence Id",
+            "type": "string"
           },
           "occurred_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
           },
           "recorded_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
           },
           "label": {
+            "title": "Label",
             "type": "string"
           },
           "amount_minor": {
             "anyOf": [
               {
-                "type": "integer",
+                "maximum": 9007199254740991,
                 "minimum": -9007199254740991,
-                "maximum": 9007199254740991
+                "type": "integer"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Amount Minor"
           },
           "bytes": {
             "anyOf": [
               {
-                "type": "integer",
+                "maximum": 9007199254740991,
                 "minimum": -9007199254740991,
-                "maximum": 9007199254740991
+                "type": "integer"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Bytes"
           }
         },
         "required": [
@@ -5296,160 +5869,157 @@
           "label",
           "amount_minor",
           "bytes"
-        ]
+        ],
+        "title": "TimelineItem",
+        "type": "object"
       },
       "AccountCard": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
-            "type": "string",
-            "const": "account"
+            "const": "account",
+            "default": "account",
+            "title": "Type",
+            "type": "string"
           },
           "data": {
             "$ref": "#/components/schemas/AccountView"
           }
         },
         "required": [
-          "type",
           "data"
-        ]
+        ],
+        "title": "AccountCard",
+        "type": "object"
       },
       "TimelineCard": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
-            "type": "string",
-            "const": "timeline"
+            "const": "timeline",
+            "default": "timeline",
+            "title": "Type",
+            "type": "string"
           },
           "data": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "items": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/TimelineItem"
-                }
-              }
-            },
-            "required": [
-              "items"
-            ]
+            "$ref": "#/components/schemas/TimelineData"
           }
         },
         "required": [
-          "type",
           "data"
-        ]
+        ],
+        "title": "TimelineCard",
+        "type": "object"
       },
       "CalculationCard": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
-            "type": "string",
-            "const": "calculation"
+            "const": "calculation",
+            "default": "calculation",
+            "title": "Type",
+            "type": "string"
           },
           "data": {
             "$ref": "#/components/schemas/Calculation"
           }
         },
         "required": [
-          "type",
           "data"
-        ]
+        ],
+        "title": "CalculationCard",
+        "type": "object"
       },
       "FindingCard": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
-            "type": "string",
-            "const": "finding"
+            "const": "finding",
+            "default": "finding",
+            "title": "Type",
+            "type": "string"
           },
           "data": {
             "$ref": "#/components/schemas/Finding"
           }
         },
         "required": [
-          "type",
           "data"
-        ]
+        ],
+        "title": "FindingCard",
+        "type": "object"
       },
       "ConfirmationCard": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
-            "type": "string",
-            "const": "confirmation"
+            "const": "confirmation",
+            "default": "confirmation",
+            "title": "Type",
+            "type": "string"
           },
           "data": {
             "$ref": "#/components/schemas/ProposalView"
           }
         },
         "required": [
-          "type",
           "data"
-        ]
+        ],
+        "title": "ConfirmationCard",
+        "type": "object"
       },
       "TicketCard": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
-            "type": "string",
-            "const": "ticket"
+            "const": "ticket",
+            "default": "ticket",
+            "title": "Type",
+            "type": "string"
           },
           "data": {
             "$ref": "#/components/schemas/Handoff"
           }
         },
         "required": [
-          "type",
           "data"
-        ]
+        ],
+        "title": "TicketCard",
+        "type": "object"
       },
       "ReceiptCard": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "type": {
-            "type": "string",
-            "const": "receipt"
+            "const": "receipt",
+            "default": "receipt",
+            "title": "Type",
+            "type": "string"
           },
           "data": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "case_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "receipt_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "revision": {
-                "type": "integer",
-                "minimum": 1
-              }
-            },
-            "required": [
-              "case_id",
-              "receipt_id",
-              "revision"
-            ]
+            "$ref": "#/components/schemas/ReceiptCardData"
           }
         },
         "required": [
-          "type",
           "data"
-        ]
+        ],
+        "title": "ReceiptCard",
+        "type": "object"
       },
       "Card": {
+        "discriminator": {
+          "mapping": {
+            "account": "#/components/schemas/AccountCard",
+            "calculation": "#/components/schemas/CalculationCard",
+            "confirmation": "#/components/schemas/ConfirmationCard",
+            "finding": "#/components/schemas/FindingCard",
+            "package_catalogue": "#/components/schemas/PackageCatalogueCard",
+            "receipt": "#/components/schemas/ReceiptCard",
+            "ticket": "#/components/schemas/TicketCard",
+            "timeline": "#/components/schemas/TimelineCard"
+          },
+          "propertyName": "type"
+        },
         "oneOf": [
           {
             "$ref": "#/components/schemas/AccountCard"
@@ -5471,53 +6041,97 @@
           },
           {
             "$ref": "#/components/schemas/ReceiptCard"
+          },
+          {
+            "$ref": "#/components/schemas/PackageCatalogueCard"
           }
-        ],
-        "discriminator": {
-          "propertyName": "type"
-        }
+        ]
       },
       "TurnResult": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "message_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Message Id",
+            "type": "string"
           },
           "conversation_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Conversation Id",
+            "type": "string"
           },
           "conversation_version": {
-            "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "title": "Conversation Version",
+            "type": "integer"
           },
           "case_id": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "uuid"
+                "format": "uuid",
+                "type": "string"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Case Id"
           },
           "reply_text": {
+            "title": "Reply Text",
             "type": "string"
           },
           "cards": {
-            "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Card"
-            }
+              "discriminator": {
+                "mapping": {
+                  "account": "#/components/schemas/AccountCard",
+                  "calculation": "#/components/schemas/CalculationCard",
+                  "confirmation": "#/components/schemas/ConfirmationCard",
+                  "finding": "#/components/schemas/FindingCard",
+                  "package_catalogue": "#/components/schemas/PackageCatalogueCard",
+                  "receipt": "#/components/schemas/ReceiptCard",
+                  "ticket": "#/components/schemas/TicketCard",
+                  "timeline": "#/components/schemas/TimelineCard"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/AccountCard"
+                },
+                {
+                  "$ref": "#/components/schemas/TimelineCard"
+                },
+                {
+                  "$ref": "#/components/schemas/CalculationCard"
+                },
+                {
+                  "$ref": "#/components/schemas/FindingCard"
+                },
+                {
+                  "$ref": "#/components/schemas/ConfirmationCard"
+                },
+                {
+                  "$ref": "#/components/schemas/TicketCard"
+                },
+                {
+                  "$ref": "#/components/schemas/ReceiptCard"
+                },
+                {
+                  "$ref": "#/components/schemas/PackageCatalogueCard"
+                }
+              ]
+            },
+            "title": "Cards",
+            "type": "array"
           },
           "citations": {
-            "type": "array",
             "items": {
               "$ref": "#/components/schemas/Citation"
-            }
+            },
+            "title": "Citations",
+            "type": "array"
           },
           "pending_question": {
             "anyOf": [
@@ -5530,15 +6144,17 @@
             ]
           },
           "operation_ids": {
-            "type": "array",
             "items": {
-              "type": "string",
-              "format": "uuid"
-            }
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Operation Ids",
+            "type": "array"
           },
           "simulation": {
-            "type": "boolean",
-            "const": true
+            "const": true,
+            "title": "Simulation",
+            "type": "boolean"
           }
         },
         "required": [
@@ -5552,33 +6168,39 @@
           "pending_question",
           "operation_ids",
           "simulation"
-        ]
+        ],
+        "title": "TurnResult",
+        "type": "object"
       },
       "MessageView": {
-        "type": "object",
         "additionalProperties": false,
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "client_turn_id": {
-            "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "Client Turn Id",
+            "type": "string"
           },
           "speaker": {
-            "type": "string",
             "enum": [
               "USER",
               "ASSISTANT"
-            ]
+            ],
+            "title": "Speaker",
+            "type": "string"
           },
           "body": {
+            "title": "Body",
             "type": "string"
           },
           "created_at": {
-            "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
           },
           "result": {
             "anyOf": [
@@ -5598,7 +6220,8 @@
           "body",
           "created_at",
           "result"
-        ]
+        ],
+        "type": "object"
       },
       "ConversationView": {
         "type": "object",
@@ -5668,6 +6291,16 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          "pending_turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PendingTurn"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -5680,7 +6313,8 @@
           "cases",
           "pending_question",
           "pending_proposal",
-          "operation_ids"
+          "operation_ids",
+          "pending_turn"
         ]
       },
       "ReviewRequest": {
@@ -5822,8 +6456,10 @@
             "enum": [
               "NOT_APPLICABLE",
               "PENDING",
+              "UNKNOWN",
               "SYNCED",
-              "FAILED"
+              "FAILED",
+              "REVIEW_REQUIRED"
             ]
           },
           "updated_at": {
@@ -6204,7 +6840,8 @@
             "enum": [
               "DEACTIVATE_VAS",
               "SEND_SETTINGS_INSTRUCTIONS",
-              "CREATE_REVIEW_TICKET"
+              "CREATE_REVIEW_TICKET",
+              "ACTIVATE_PACKAGE"
             ],
             "title": "Action Type",
             "type": "string"
@@ -6220,6 +6857,16 @@
           "expires_at": {
             "title": "Expires At",
             "type": "string"
+          },
+          "package_terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PackageTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6228,7 +6875,8 @@
           "action_type",
           "target_label",
           "consequences",
-          "expires_at"
+          "expires_at",
+          "package_terms"
         ],
         "title": "Proposal",
         "type": "object"
@@ -7262,6 +7910,12 @@
           },
           "end_session": {
             "type": "boolean"
+          },
+          "speech_text": {
+            "type": "string"
+          },
+          "sensitive_audio": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -7272,7 +7926,9 @@
           "pending_question",
           "proposal",
           "operation_status",
-          "end_session"
+          "end_session",
+          "speech_text",
+          "sensitive_audio"
         ],
         "additionalProperties": false
       },
@@ -7285,11 +7941,16 @@
           },
           "accepted": {
             "type": "boolean"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
           "type",
-          "accepted"
+          "accepted",
+          "response_id"
         ],
         "additionalProperties": false
       },
@@ -7353,7 +8014,7 @@
           "response_id"
         ],
         "additionalProperties": false,
-        "description": "Proposed additive event, not implemented at baseline. Clear queued audio and proposal presentation eligibility."
+        "description": "Implemented v2 event: discard queued audio and pending proposal acknowledgement."
       },
       "VoicePresentation": {
         "type": "object",
@@ -7367,12 +8028,17 @@
           },
           "proposal_hash": {
             "type": "string"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
           "type",
           "proposal_id",
-          "proposal_hash"
+          "proposal_hash",
+          "response_id"
         ],
         "additionalProperties": false
       },
@@ -7401,6 +8067,18 @@
           },
           {
             "$ref": "#/components/schemas/VoiceInterrupted"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceAudioStart"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceAudioEnd"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceAudioFallback"
+          },
+          {
+            "$ref": "#/components/schemas/VoicePlaybackAck"
           }
         ],
         "discriminator": {
@@ -7408,7 +8086,589 @@
         }
       },
       "VoiceClientControl": {
-        "$ref": "#/components/schemas/VoicePresentation"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VoicePlaybackComplete"
+          },
+          {
+            "$ref": "#/components/schemas/VoicePresentation"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
+      "VoiceAudioStart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "audio_start"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "type",
+          "response_id"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceAudioEnd": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "audio_end"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "type",
+          "response_id"
+        ],
+        "additionalProperties": false
+      },
+      "VoiceAudioFallback": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "audio_fallback"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "response_id",
+          "text",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "VoicePlaybackAck": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "playback_ack"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "response_id",
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "VoicePlaybackComplete": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "playback_complete"
+          },
+          "response_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "type",
+          "response_id"
+        ],
+        "additionalProperties": false
+      },
+      "PendingTurn": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "IN_PROGRESS",
+              "RECOVERY_REQUIRED"
+            ]
+          },
+          "retry_after": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "turn_id",
+          "state",
+          "retry_after"
+        ]
+      },
+      "Readiness": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "unavailable"
+            ]
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "type": "boolean"
+              },
+              "actions": {
+                "type": "boolean"
+              },
+              "voice": {
+                "type": "boolean"
+              },
+              "model": {
+                "type": "boolean"
+              },
+              "package_activation": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "text",
+              "actions",
+              "voice",
+              "model",
+              "package_activation"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "capabilities"
+        ]
+      },
+      "PackageQueryInput": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "package_query",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "PackageQueryInput",
+        "type": "object"
+      },
+      "PackageSelectionInput": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "package_selection",
+            "title": "Type",
+            "type": "string"
+          },
+          "offer_id": {
+            "format": "uuid",
+            "title": "Offer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "offer_id"
+        ],
+        "title": "PackageSelectionInput",
+        "type": "object"
+      },
+      "PackageCatalogueCard": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "package_catalogue",
+            "default": "package_catalogue",
+            "title": "Type",
+            "type": "string"
+          },
+          "offers": {
+            "items": {
+              "$ref": "#/components/schemas/PackageCatalogueEntry"
+            },
+            "title": "Offers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "offers"
+        ],
+        "title": "PackageCatalogueCard",
+        "type": "object"
+      },
+      "PackageCatalogueEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "price_minor": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Price Minor",
+            "type": "integer"
+          },
+          "currency": {
+            "const": "LKR",
+            "title": "Currency",
+            "type": "string"
+          },
+          "data_bytes": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "title": "Data Bytes",
+            "type": "integer"
+          },
+          "validity_seconds": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "title": "Validity Seconds",
+            "type": "integer"
+          },
+          "recurring": {
+            "const": false,
+            "title": "Recurring",
+            "type": "boolean"
+          },
+          "recommended": {
+            "title": "Recommended",
+            "type": "boolean"
+          },
+          "can_purchase": {
+            "title": "Can Purchase",
+            "type": "boolean"
+          },
+          "recommendation_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommendation Reason"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "price_minor",
+          "currency",
+          "data_bytes",
+          "validity_seconds",
+          "recurring",
+          "recommended",
+          "can_purchase",
+          "recommendation_reason"
+        ],
+        "title": "PackageCatalogueEntry",
+        "type": "object"
+      },
+      "PackageTerms": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "price_minor": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Price Minor",
+            "type": "integer"
+          },
+          "currency": {
+            "const": "LKR",
+            "title": "Currency",
+            "type": "string"
+          },
+          "data_bytes": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "title": "Data Bytes",
+            "type": "integer"
+          },
+          "validity_seconds": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "title": "Validity Seconds",
+            "type": "integer"
+          },
+          "recurring": {
+            "const": false,
+            "title": "Recurring",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "price_minor",
+          "currency",
+          "data_bytes",
+          "validity_seconds",
+          "recurring"
+        ],
+        "title": "PackageTerms",
+        "type": "object"
+      },
+      "ReceiptCardData": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
+          },
+          "receipt_id": {
+            "format": "uuid",
+            "title": "Receipt Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "case_id",
+          "receipt_id",
+          "revision"
+        ],
+        "title": "ReceiptCardData",
+        "type": "object"
+      },
+      "TimelineData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "TimelineData",
+        "type": "object"
+      },
+      "ReceiptWindow": {
+        "additionalProperties": false,
+        "properties": {
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "ReceiptWindow",
+        "type": "object"
+      },
+      "PackageOfferView": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "price_minor": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Price Minor",
+            "type": "integer"
+          },
+          "currency": {
+            "const": "LKR",
+            "title": "Currency",
+            "type": "string"
+          },
+          "data_bytes": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "title": "Data Bytes",
+            "type": "integer"
+          },
+          "validity_seconds": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "title": "Validity Seconds",
+            "type": "integer"
+          },
+          "recurring": {
+            "const": false,
+            "title": "Recurring",
+            "type": "boolean"
+          },
+          "can_purchase": {
+            "title": "Can Purchase",
+            "type": "boolean"
+          },
+          "simulation": {
+            "const": true,
+            "title": "Simulation",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "price_minor",
+          "currency",
+          "data_bytes",
+          "validity_seconds",
+          "recurring",
+          "can_purchase",
+          "simulation"
+        ],
+        "type": "object"
+      },
+      "TurnReconciliationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "note"
+        ],
+        "properties": {
+          "note": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 1000,
+            "description": "Agent rationale recorded in the immutable reconciliation audit event."
+          }
+        }
+      },
+      "TurnReconciliationOperation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUCCEEDED",
+              "FAILED",
+              "REVIEW_REQUIRED"
+            ]
+          }
+        }
+      },
+      "TurnReconciliationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversation_id",
+          "turn_id",
+          "state",
+          "case_ids",
+          "operations"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "const": "ABANDONED"
+          },
+          "case_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TurnReconciliationOperation"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "ResolveRealm": {
+        "name": "X-Resolve-Realm",
+        "in": "header",
+        "required": false,
+        "description": "Selects the browser session realm for shared customer/agent reads. Required when both cookies are present.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "customer",
+            "agent"
+          ]
+        }
       }
     }
   }

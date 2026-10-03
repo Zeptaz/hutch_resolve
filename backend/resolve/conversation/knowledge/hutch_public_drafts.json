@@ -1,0 +1,56 @@
+{
+ "status": "DRAFT_FOR_TEAM_REVIEW",
+ "purpose": "Proposed additions to database/knowledge_seed.sql (Harry). Paraphrased from public HUTCH pages fetched 2026-10-02; every fact must be re-checked against the cited page before it is marked reviewed. Used by the dev backend only.",
+ "fetched_at": "2026-10-02",
+ "cards": [
+  {
+   "article_key": "how-to-reload",
+   "title": "How to reload a prepaid number",
+   "url": "https://hutch.lk/faq-online-web-recharge/",
+   "content": "To reload (recharge) a HUTCH prepaid number online, open the HUTCH Reload/Pay Bill portal at reloadpay.hutch.lk (or the Reload option on hutch.lk), enter the HUTCH number, choose the amount and, if you want, a data pack, then choose a payment method and enter your card details. You can also reload in the Hutch Self-Care app. Online reloads accept local Visa, Mastercard or Amex debit and credit cards; international cards can use ding.com or etopuponline.com. A prepaid online reload can be from LKR 50 to LKR 50,000, and HUTCH adds no extra charge. After a successful reload you receive an SMS with the credited amount and an email receipt.",
+   "aliases": ["reload", "recharge", "top up", "topup", "top-up", "reload karanna", "reload ekak", "reload danna", "salli danna", "recharge pannanum", "reload pannanum", "how to reload", "how to recharge"]
+  },
+  {
+   "article_key": "self-care-app",
+   "title": "Hutch Self-Care app",
+   "url": "https://hutch.lk/hutch-self-care/",
+   "content": "The Hutch Self-Care app lets you reload, check your balance and usage (data, voice and SMS, up to the last 30 days), activate voice, SMS and data plans, see offers, manage up to 10 HUTCH numbers, and register a complaint. It is available on Google Play, the Apple App Store and Huawei AppGallery. HUTCH does not charge data for using the app.",
+   "aliases": ["app", "self care", "selfcare", "hutch app", "download", "application", "app eka", "self-care"]
+  },
+  {
+   "article_key": "check-balance-how",
+   "title": "How to check your balance and usage",
+   "url": "https://hutch.lk/hutch-self-care/",
+   "content": "You can check your balance and your data, voice and SMS usage for up to the last 30 days in the Hutch Self-Care app. HUTCH customer support also offers a Check Balance option on its website.",
+   "aliases": ["check balance", "balance check", "balance eka balanna", "balance balanna", "usage", "how much balance", "balance paakka"]
+  },
+  {
+   "article_key": "activate-package-how",
+   "title": "How to activate a package or data plan",
+   "url": "https://hutch.lk/hutch-self-care/",
+   "content": "You can activate HUTCH voice, SMS and data plans in the Hutch Self-Care app. When you reload online at reloadpay.hutch.lk you can also choose an optional data pack together with the reload amount. Available plans and their prices are shown in the app and on hutch.lk.",
+   "aliases": ["package", "data package", "data plan", "bundle", "activate", "package ekak", "plan", "data pack", "package activate"]
+  },
+  {
+   "article_key": "contact-support",
+   "title": "Contact HUTCH customer support",
+   "url": "https://hutch.lk/customer-support/",
+   "content": "You can contact HUTCH customer support on the 1788 hotline (24 hours, 7 days), by WhatsApp chat on 0788 777 111 (chat only), or by email at cs@hutchison.lk. The HUTCH website also has a service point locator.",
+   "aliases": ["contact", "hotline", "call", "customer care", "support", "whatsapp", "email", "service point", "agent", "katha karanna", "number eka"]
+  },
+  {
+   "article_key": "register-complaint-how",
+   "title": "How to register a complaint",
+   "url": "https://hutch.lk/hutch-self-care/",
+   "content": "In the Hutch Self-Care app you can register a complaint from Menu, then Support, then Register Complaint. You can also contact HUTCH customer support on the 1788 hotline or by WhatsApp chat on 0788 777 111.",
+   "aliases": ["complaint", "register complaint", "complain", "paminilla", "pukaar"]
+  },
+  {
+   "article_key": "reload-not-received",
+   "title": "If a reload did not reach your balance",
+   "url": "https://hutch.lk/faq-online-web-recharge/",
+   "content": "After an online reload the payment site shows whether it succeeded or failed, and a successful reload is confirmed by an SMS with the credited amount. A taken payment and a credited balance are different things, so do not pay again while a reload is pending; contact HUTCH customer support on 1788 or by WhatsApp on 0788 777 111 with your payment details.",
+   "aliases": ["reload not received", "recharge failed", "reload awe na", "reload watila na", "not credited", "payment failed"]
+  }
+ ]
+}

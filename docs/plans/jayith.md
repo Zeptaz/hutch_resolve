@@ -1,12 +1,12 @@
 # Jayith: customer frontend and internal dashboard
 
-Read [context.md](../../context.md) and [contracts](../contracts.md). Update this plan and context after meaningful progress with implementation/test evidence. No frontend currently exists; every task below is pending.
+Read [context.md](../../context.md) and [contracts](../contracts.md). Update this plan and context after meaningful progress with implementation/test evidence. Jayith's `HutchChat` and `VoiceFrontend` UI work was selectively integrated into the combined Resolve app on `ResolveDev` (`f2c9bab`). The later `ResolveDashboard` branch (`6fe6acb`) is also being selectively integrated on `ResolveDev`, preserving the newer Voice and backend work. Browser/live Voice verification remains open; keep corresponding task checkboxes pending.
 
 ## Scope and connections
 
 One React 19 + TypeScript + Vite app, customer `/` and protected `/agent` routes. Development runs at localhost:5173 and proxies `/api` to Resolve:8080. Use credentialed same-origin API calls and the relevant CSRF token; no browser service secrets. Generate types from [OpenAPI](../contracts/openapi.json) and use [examples](../contracts/examples.json) for mock development. Harry owns all API/business rules; Tevin owns conversational behavior.
 
-- [ ] J-01 Build application shell, separate customer/agent session restore/login, loading/error/expiry states and typed API client. Build against contract examples while backend is incomplete.
+- [x] J-01 Application shell, separate customer/agent session restore/login, loading/error/expiry states and typed API client are implemented. Contract-backed mock browser suite passes 15/15 on desktop and phone; live journeys remain J-02/J-04.
 - [ ] J-02 Customer: chat, category/detail fallback, transcript correction, language choice, evidence/calculation cards, explicit accept/decline, pending operation display, human-review request, case switching and JSON receipt download. Agent: queue/filter/search, case packet, review notes/disposition and conflict refresh.
 - [ ] J-03 Add external Voice controls: request grant from Resolve, direct WebSocket connection, mono PCM16 capture/resampling at 16 kHz, 24 kHz playback, interruption flush and call/text continuation.
 - [ ] J-04 Complete browser integration tests, keyboard/contrast checks, error/retry states and demo recording. Mark completion only after actual backend integration passes.
@@ -24,8 +24,8 @@ Agent can append a note, start review, close with disposition/reason, or reopen 
 - Use stable client_turn_id/idempotency key for retries of the same request; generate a new ID for an intentional new turn. On stale conversation version, reload; do not automatically replay a confirmation against changed state.
 - Poll pending operations every second until terminal state or page departure. UNKNOWN remains visible until recovery; REVIEW_REQUIRED is terminal for automatic recovery. Poll dashboard every five seconds only while visible; provide manual refresh.
 - Display exact target, consequences and expiry for confirmation. Confirmation must never be preselected/submitted automatically.
-- Browser grant travels in WebSocket subprotocol `hutch-grant.{token}` with `zeptaz-hutch-v1`, never a URL. A grant is consumed once; reconnect requests a fresh binding from Resolve.
-- Send `proposal_presented` with exact ID/hash only after the complete proposal playback. Clear pending acknowledgement on interruption/disconnect. Handle `proposal_ack`, `resolve_result`, transcript, ready, error and ended events; implement the proposed `interrupted` event by stopping/discarding queued audio and pending acknowledgement. Fetch conversation after call end for canonical state.
+- Browser grant travels in WebSocket subprotocol `hutch-grant.{token}` with `zeptaz-hutch-v2`, never a URL. A grant is consumed once; reconnect requests a fresh binding from Resolve.
+- Drain the scoped audio queue after `audio_end`, send `playback_complete` with the matching response ID, and require accepted `playback_ack` before sending `proposal_presented` with response ID and exact proposal ID/hash. Clear queued audio and pending acknowledgement on interruption/disconnect. Handle `resolve_result`, `audio_fallback`, transcript, ready, error and ended. Fetch the same conversation after call end for canonical state.
 - Microphone permission denial, provider outage and session expiry offer text continuation. Expired authorization requires login; never silently switch to another synthetic account.
 
 ## Acceptance and order
@@ -40,5 +40,24 @@ Dependencies: J-01 can start immediately; J-02 integrates H-04/H-05/T-02; J-03 i
 
 | Date | Task | Evidence | Remaining |
 | --- | --- | --- | --- |
-| 2026-10-02 | Baseline | No frontend code found in either target repository | J-01 through J-04 pending |
-| 2026-10-02 | J-01 (partial) | `frontend/` React 19 + TS + Vite + shadcn app: typed client from OpenAPI, mock mode over `examples.json`, customer guest-session chat shell at `/`, agent login/queue/case-packet shell at `/agent`. Static: `tsc -b` and `vite build` pass; oxlint clean apart from shadcn fast-refresh notices and two fetch-in-effect false positives. Commits `3b88bcd`, `a96c435`, `b0e46de` (HutchChat) and `41faa4c` (ResolveDashboard) | Browser verification not yet run (no headless browser in session). Customer upgrade from GUEST to CUSTOMER (demo line picker vs guest-only FAQ) needs a team decision. Contract issue for Harry: `TurnInput`/`Card` discriminators lack `mapping`, so generators expect schema names (`TextInput`) instead of `const` values (`text`); `scripts/gen-api.mjs` strips them until the contract adds explicit mappings |
+| 2026-10-02 | Baseline | No frontend code found in either target repository at the planning baseline | J-01 through J-04 pending |
+| 2026-10-02 | UI branch intake | Fetched `HutchChat` (`9e7b8b1`) and `VoiceFrontend` (`4349eed`); selective import into the Resolve frontend is in progress | Combined build, live API/chat bridge, v2 browser verification, dashboard review writes and release tests pending |
+| 2026-10-02 | Combined frontend static checkpoint | One React app now includes chat, scoped call panel and dashboard review writes; demo sign-in keeps the guest conversation pointer. Clean npm install, pinned OpenAPI generation, typecheck and production build pass. Lint exits 0 with warnings. No credentials or build artifacts are tracked. | Live Resolve/browser journey, microphone/Voice v2 playback and consent, conflict/retry browser tests and fluent Sinhala/Tamil review remain open; J checkboxes stay pending |
+| 2026-10-02 | Resolve backend integration | The mounted text route and signed Voice bridge now share the conversation service; five disposable PostgreSQL conversation/Voice/guest checks pass. Frontend phase `f2c9bab` is pushed. | Run actual browser chat/call and dashboard journeys against the services, including interruption/playback acknowledgement, review writes, expiry/retry and accessibility. |
+| 2026-10-03 | ResolveDashboard selective intake | Fetched `ResolveDashboard` tip `6fe6acb`; imported its queue, case evidence/actions/conversation/receipt/history tabs and review panel into the existing app while preserving chat, demo sign-in and Voice. Added Playwright mock/live suites. Typecheck/build pass; lint exits 0 with warnings. Mock browser suite passes 15/15, including conflict draft retention and keyboard navigation fixes found during integration. A unique disposable PostgreSQL migrated through 0007 and seeded six cases; live dashboard suite passed 5/5, including 409 recovery, review transitions and role/CSRF boundaries. Temporary project and volume were removed. | Real chat/Voice browser journey, accessibility and release recording remain open. |
+| 2026-10-03 | Customer package flow | Added a Resolve-backed package catalogue card, explicit offer selection and typed terms in the shared confirmation card; UI tracks the canonical operation and never claims success while pending. Contract generation and production build pass; mock E2E suite 19/19 includes package confirmation and pending-to-success. | Live chat browser path through Resolve, Voice browser path, accessibility review and release recording remain open. |
+
+
+## Audit remediation checkpoint — 2026-10-03
+
+[Audit findings and verification limits](../audits/2026-10-03-resolve.md). AUD-04 now stops microphone streams that arrive after the call closes and makes startup cleanup idempotent. Focused fake-media regressions pass. AUD-07 now tracks all operation IDs and refreshes their canonical status; AUD-03 chat reload can resume a persisted text turn with its original ID and body. The remaining turn-reconciliation limitation and PostgreSQL verification blockers are tracked in [`context.md`](../../context.md). Final e2e rerun, real microphone, full chat/call journeys, accessibility and live Resolve integration remain open until rerun/qualification.
+
+Update this plan and root context.md after each implemented and verified correction, recording commands/results and remaining work.
+
+### 2026-10-03 review durability follow-up
+
+Logout failures now preserve the recoverable agent session. Review updates persist the exact request body and idempotency key before sending, allowing a committed-but-lost response to replay after reload. Only unknown outcomes retain that key; definitive 409/422 responses retire it so a stale update remains blocked until the agent checks the latest case. Focused Playwright conflict and lost-response/reload scenarios both passed. The full mock E2E rerun reports **22/22 passed**; Windows Playwright teardown hung after all tests reported green and was interrupted. Frontend typecheck/build pass and lint exits 0 with six existing warnings.
+
+### Main branch merge verification — 2026-10-03
+
+The integrated frontend from `ResolveDev` is now on `main`, including the voice/call UI, dashboard, and browser scenarios. On the merged tree, typecheck and production build pass and the mock browser suite exits cleanly with **23/23 passed**. Live chat/call qualification with the real Resolve and Voice services remains open.

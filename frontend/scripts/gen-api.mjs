@@ -31,6 +31,7 @@ mkdirSync(tmpDir, { recursive: true })
 writeFileSync(tmp, JSON.stringify(spec))
 console.log(`Removed ${stripped} mapping-less discriminator(s).`)
 
-execFileSync('npx', ['--yes', 'openapi-typescript@7', tmp, '-o', path.join(root, 'src/api/schema.d.ts')], {
+const generator = path.join(root, 'node_modules', 'openapi-typescript', 'bin', 'cli.js')
+execFileSync(process.execPath, [generator, tmp, '-o', path.join(root, 'src/api/schema.d.ts')], {
   stdio: 'inherit',
 })
