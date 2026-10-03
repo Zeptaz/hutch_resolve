@@ -11,7 +11,7 @@ import pytest
 
 from conftest import ACCOUNT_A, Harness, customer, guest, text
 from fakes import FakeModel, extraction
-from resolve.conversation.answer import GroundedAnswerer, grounded
+from resolve.conversation.answer import GroundedAnswerer, grounded, ungrounded_reason
 from resolve.conversation.dto import Channel, KnowledgeCard, Language
 from resolve.conversation.errors import ResolveError
 from resolve.conversation.extraction import Script
@@ -110,6 +110,24 @@ def test_exact_supplied_url_is_allowed_but_an_altered_path_is_not() -> None:
     source = "Visit https://help.hutch.lk/support/contact for help."
     assert grounded("Visit https://help.hutch.lk/support/contact.", source)
     assert not grounded("Visit https://help.hutch.lk/support/refund.", source)
+
+
+def test_unsupported_customer_outcomes_are_rejected_even_when_the_source_mentions_the_topic() -> None:
+    source = "Contact support for review of your refund request."
+    assert ungrounded_reason("Your refund was approved.", source) == "UNSUPPORTED_OUTCOME"
+    assert ungrounded_reason("Your refund was processed.", source) == "UNSUPPORTED_OUTCOME"
+
+
+def test_outcome_claim_requires_its_amount_and_status_to_be_grounded() -> None:
+    source = "Contact support for review of your refund request. The reload minimum is LKR 50."
+    assert ungrounded_reason("Your refund of LKR 8,000 was approved.", source) == "NUMBERS"
+    # A matching amount does not make the unsupported approval claim safe.
+    assert ungrounded_reason("Your refund of LKR 50 was approved.", source) == "UNSUPPORTED_OUTCOME"
+
+
+def test_reviewed_outcome_language_in_the_source_remains_usable() -> None:
+    source = "After a successful reload, an SMS is sent with the credited amount."
+    assert grounded("After a successful reload, an SMS is sent with the credited amount.", source)
 
 
 def test_draft_cards_are_marked_unreviewed_and_cite_hutch_pages() -> None:

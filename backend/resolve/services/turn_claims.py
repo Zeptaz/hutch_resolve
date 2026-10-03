@@ -31,7 +31,7 @@ def claim_turn(engine: Engine, *, sandbox_id: UUID | None, conversation_id: UUID
         scoped = connection.execute(text("""
             SELECT id,version FROM resolve.conversations
             WHERE sandbox_id IS NOT DISTINCT FROM :sandbox AND id=:conversation FOR UPDATE
-        """), {"sandbox": sandbox_id, "conversation": conversation_id}).scalar_one_or_none()
+        """), {"sandbox": sandbox_id, "conversation": conversation_id}).mappings().one_or_none()
         if scoped is None:
             raise ResolveError(404, "NOT_FOUND", "Conversation is unavailable")
         prior = connection.execute(text("""

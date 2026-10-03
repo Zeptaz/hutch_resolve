@@ -124,6 +124,7 @@ class PostgresConversationRepository:
                         "target_version": offered["target_version"],
                         "target_label": offered["target_label"],
                         "consequences": (offered["consequences"] or {}).get("text", "Review before confirming."),
+                        "package_terms": (offered["consequences"] or {}).get("package_terms"),
                         "proposal_hash": offered["proposal_hash"], "expires_at": offered["expires_at"],
                         "simulation": True,
                     }

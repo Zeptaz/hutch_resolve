@@ -15,6 +15,7 @@ from backend.resolve.providers.sandbox import PostgresSandboxProvider
 from backend.resolve.services.facade import ResolveFacade, _voice_decision
 from backend.resolve.services.review import AgentReviewService
 from backend.resolve.services.voice_consent import VoiceConsentEvidence
+from backend.resolve.services.turn_claims import claim_turn, complete_turn
 from test_auth import ORIGIN, build_client
 
 
@@ -234,5 +235,52 @@ def test_postgres_voice_confirmation_requires_recorded_presentation_and_persists
             proposal_hash=proposal["proposal_hash"], decision="ACCEPT", client_turn_id=turn_id,
             voice_consent=consent)
         assert replay["id"] == accepted["id"]
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("DOMAIN_IT_DATABASE_URL"), reason="requires disposable migrated/seeded PostgreSQL")
+def test_postgres_turn_claim_reads_the_locked_conversation_row():
+    engine = create_engine(os.environ["DOMAIN_IT_DATABASE_URL"])
+    run_id = UUID(os.getenv("DOMAIN_IT_RUN_ID", "00000000-0000-0000-0000-000000000001"))
+    turn_id = uuid4()
+    try:
+        with engine.connect() as connection:
+            account_id = connection.execute(text("""
+                SELECT id FROM sandbox.accounts WHERE sandbox_id=:run AND line_alias='SIM-LK-0001'
+            """), {"run": run_id}).scalar_one()
+        session_id = uuid4()
+        AuthStore(engine).create_session(session_id=session_id, credential_hash=uuid4().bytes,
+            csrf_hash=uuid4().bytes, role="CUSTOMER", principal_id=f"audit-it-{session_id}",
+            sandbox_id=run_id, account_id=account_id, expires_at=datetime.now(UTC) + timedelta(hours=1))
+        context = AuthContext(session_id, f"audit-it-{session_id}", "CUSTOMER", run_id,
+                              account_id, uuid4(), "TEXT")
+        facade = ResolveFacade(engine, PostgresSandboxProvider(engine))
+        conversation = facade.create_conversation(context)
+        claim = claim_turn(engine, sandbox_id=run_id, conversation_id=conversation["id"],
+            turn_id=turn_id, input_hash="test-turn-claim", input_payload={"channel": "TEXT"},
+            expected_version=conversation["version"])
+        assert claim.token is not None
+        with engine.begin() as connection:
+            complete_turn(connection, conversation_id=conversation["id"], turn_id=turn_id,
+                token=claim.token, result={"ok": True}, now=datetime.now(UTC))
+        start = datetime.fromisoformat("2026-10-02T11:00:00+05:30")
+        end = datetime.fromisoformat("2026-10-02T12:00:00+05:30")
+        case = facade.create_case(context, conversation_id=conversation["id"], client_turn_id=uuid4(),
+            expected_conversation_version=conversation["version"], complaint_type="BALANCE_RECHARGE",
+            window_start=start, window_end=end, reported_facts={})
+        investigation = facade.investigate(context, case_id=case["id"], expected_version=case["version"],
+            command_key=f"audit-investigate-{uuid4()}", complaint_type="BALANCE_RECHARGE",
+            window_start=start, window_end=end, reported_facts={})
+        current = facade.get_case(context, case["id"])
+        proposal = facade.propose_escalation(context, case_id=case["id"], expected_version=current["version"],
+            investigation_id=investigation["id"], reason="Please review the recharge evidence.", request_key=str(uuid4()))
+        with engine.connect() as connection:
+            saved = connection.execute(text("SELECT dialogue_state FROM resolve.conversations WHERE id=:id"),
+                {"id": conversation["id"]}).scalar_one()
+        from backend.resolve.conversation.state import DialogueState
+        state = DialogueState.model_validate(saved)
+        assert state.pending_proposal.proposal_id == proposal["id"]
+        assert "Please review the recharge evidence." in proposal["consequences"]
     finally:
         engine.dispose()

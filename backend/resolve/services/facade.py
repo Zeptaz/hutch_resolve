@@ -683,12 +683,13 @@ class ResolveFacade:
                 raise ResolveError(422, "ACTION_NOT_ALLOWED", "This one-shot package cannot be activated for the current account state",
                                    details={"reason": "BALANCE_TOO_LOW" if target and target.get("balance_minor") is not None
                                             and target["balance_minor"] < target["price_minor"] else "OFFER_INELIGIBLE"})
-            consequences = {
+            consequences_by_action = {
                 "DEACTIVATE_VAS": f"Stop future renewals for {target['label']}; past charges remain under investigation.",
                 "SEND_SETTINGS_INSTRUCTIONS": f"Send setup instructions for {target['label']}; this will not change network service.",
                 "CREATE_REVIEW_TICKET": f"Create a human review request for {target['label']}; no account change is made now.",
-                "ACTIVATE_PACKAGE": _package_terms_text(target),
-            }[action_type]
+            }
+            consequences = (_package_terms_text(target) if action_type == "ACTIVATE_PACKAGE"
+                            else consequences_by_action[action_type])
             package_terms = ({"name": target["label"], "price_minor": target["price_minor"], "currency": "LKR",
                 "data_bytes": target["data_bytes"], "validity_seconds": target["validity_seconds"], "recurring": False}
                 if action_type == "ACTIVATE_PACKAGE" else None)
@@ -724,9 +725,11 @@ class ResolveFacade:
             raise ResolveError(409, "STALE_VERSION", "Case changed; reload before requesting review")
         with self._engine.connect() as connection:
             investigation = connection.execute(text("""
-                SELECT eligible_actions FROM resolve.investigations
-                WHERE sandbox_id=:sandbox AND case_id=:case AND id=:investigation
-            """), {"sandbox": context.sandbox_id, "case": case_id,
+                SELECT i.eligible_actions FROM resolve.investigations i
+                JOIN resolve.cases c ON c.id=i.case_id
+                WHERE c.sandbox_id=:sandbox AND c.account_id=:account
+                  AND c.id=:case AND i.id=:investigation
+            """), {"sandbox": context.sandbox_id, "account": context.account_id, "case": case_id,
                   "investigation": investigation_id}).mappings().one_or_none()
         if investigation is None:
             raise ResolveError(404, "RESOURCE_NOT_FOUND", "Investigation was not found")
@@ -739,9 +742,41 @@ class ResolveFacade:
             target_id = UUID(str(target))
         except ValueError as exc:
             raise ResolveError(422, "ACTION_NOT_ALLOWED", "Review target is invalid") from exc
-        return self.propose_action(context, case_id=case_id, expected_version=expected_version,
+        proposal = self.propose_action(context, case_id=case_id, expected_version=expected_version,
             investigation_id=investigation_id, action_type="CREATE_REVIEW_TICKET", target_id=target_id,
             request_key=request_key, escalation_reason=reason)
+        # Escalation is initiated from the case panel, outside ConversationService's normal
+        # turn route. Persist the same pending-proposal reference so the ordinary chat
+        # confirmation flow can safely present and confirm it, including after refresh.
+        from backend.resolve.conversation.state import DialogueState, PendingProposalRef
+        from backend.resolve.conversation.dto import ActionType
+
+        case = self._scoped_case(context, case_id)
+        with self._engine.begin() as connection:
+            conversation = connection.execute(text("""
+                SELECT id,version,dialogue_state FROM resolve.conversations
+                WHERE id=:id AND sandbox_id=:sandbox AND account_id=:account FOR UPDATE
+            """), {"id": case["conversation_id"], "sandbox": context.sandbox_id,
+                  "account": context.account_id}).mappings().one_or_none()
+            if conversation is None:
+                raise ResolveError(404, "RESOURCE_NOT_FOUND", "Conversation was not found")
+            state = DialogueState.model_validate(conversation["dialogue_state"] or {})
+            pending = state.pending_proposal
+            if pending is not None and pending.proposal_id != proposal["id"] and not pending.is_expired(datetime.now(UTC)):
+                raise ResolveError(409, "PROPOSAL_PENDING", "Resolve already has an action awaiting confirmation")
+            ref = PendingProposalRef(proposal_id=proposal["id"], proposal_hash=proposal["proposal_hash"],
+                case_id=case_id, action_type=ActionType.CREATE_REVIEW_TICKET, expires_at=proposal["expires_at"],
+                presented_turn_id=UUID(request_key), investigation_id=investigation_id,
+                target_id=proposal["target_id"], target_label=proposal["target_label"])
+            updated = state.model_copy(update={"active_case_id": case_id, "pending_question": None,
+                "pending_choices": [], "pending_proposal": ref})
+            connection.execute(text("""
+                UPDATE resolve.conversations SET dialogue_state=CAST(:state AS jsonb),version=version+1,updated_at=:now
+                WHERE id=:id AND sandbox_id=:sandbox AND account_id=:account
+            """), {"state": json.dumps(updated.model_dump(mode="json"), ensure_ascii=False),
+                  "now": datetime.now(UTC), "id": conversation["id"], "sandbox": context.sandbox_id,
+                  "account": context.account_id})
+        return proposal
 
     def list_package_offers(self, context: AuthContext) -> list[dict[str, Any]]:
         if context.role != "CUSTOMER" or not context.account_id or not context.sandbox_id:
@@ -830,8 +865,9 @@ class ResolveFacade:
                         "validity_seconds": target["validity_seconds"], "recurring": target["recurring"]}},
                     {"id": str(uuid5(NAMESPACE_URL, f"{case_id}:balance")), "source": "MAIN_BALANCE",
                     "source_record_id": str(context.account_id), "source_version": target["source_version"],
-                    "observed_at": scoped["simulation_clock"].isoformat(), "value": target["balance_minor"],
-                    "unit": "LKR_MINOR", "payload": {"wallet": "MAIN", "amount_minor": target["balance_minor"]}}]
+                    "observed_at": scoped["simulation_clock"].isoformat(), "fetched_at": now.isoformat(),
+                    "value": target["balance_minor"], "unit": "LKR_MINOR",
+                    "source_payload": {"wallet": "MAIN", "amount_minor": target["balance_minor"]}}]
                 terms = {"name": target["label"], "price_minor": target["price_minor"], "currency": "LKR",
                          "data_bytes": target["data_bytes"], "validity_seconds": target["validity_seconds"], "recurring": False}
                 proposal_id = uuid5(NAMESPACE_URL, f"package-proposal:{command_key}")
@@ -1126,7 +1162,8 @@ class ResolveFacade:
         return {"id": row["id"], "case_id": row["case_id"], "proposal_id": row["proposal_id"],
                 "action_type": row["action_type"], "status": status, "created_at": row["created_at"],
                 "updated_at": row["updated_at"], "provider_operation_id": row["provider_operation_ref"],
-                "outcome": row["outcome"] or {"code": None, "message": None, "actual_target_status": None, "provider_ticket_id": None},
+                "outcome": {key: (row["outcome"] or {}).get(key) for key in
+                            ("code", "message", "actual_target_status", "provider_ticket_id")},
                 "next_step": next_step, "simulation": True}
 
     def get_receipt(self, context: AuthContext, case_id: UUID, revision: int | None = None) -> dict[str, Any]:

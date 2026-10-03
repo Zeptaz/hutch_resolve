@@ -1,5 +1,34 @@
 import { expect, test } from '@playwright/test'
 
+test('expired grant retries rotate the key while unknown outcomes retain it', async ({ page }) => {
+  await page.goto('/')
+  const result = await page.evaluate(async () => {
+    const { grantKeyAfterFailure } = await import('/src/voice/call.ts')
+    const key = 'first-attempt-key'
+    return {
+      expired: grantKeyAfterFailure(key, Object.assign(new Error('expired'), { code: 'VOICE_GRANT_EXPIRED' })),
+      unknown: grantKeyAfterFailure(key, Object.assign(new Error('unknown'), { code: 'VOICE_GRANT_OUTCOME_UNKNOWN' })),
+      network: grantKeyAfterFailure(key, Object.assign(new Error('network'), { code: 'NETWORK_ERROR' })),
+    }
+  })
+  expect(result).toEqual({ expired: null, unknown: 'first-attempt-key', network: 'first-attempt-key' })
+})
+
+test('a stale call attempt cannot claim ownership of the current audio', async ({ page }) => {
+  await page.goto('/')
+  const result = await page.evaluate(async () => {
+    const { isCurrentCallAttempt } = await import('/src/voice/call.ts')
+    const olderAttempt = {}
+    const currentAttempt = {}
+    return {
+      same: isCurrentCallAttempt(currentAttempt, currentAttempt),
+      stale: isCurrentCallAttempt(currentAttempt, olderAttempt),
+      ended: isCurrentCallAttempt(null, olderAttempt),
+    }
+  })
+  expect(result).toEqual({ same: true, stale: false, ended: false })
+})
+
 test('a permission result arriving after close stops its microphone tracks', async ({ page }) => {
   await page.goto('/')
   const result = await page.evaluate(async () => {

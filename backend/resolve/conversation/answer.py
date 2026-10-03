@@ -37,6 +37,18 @@ _URL = re.compile(r"(?i)(?:(?:https?://|www\.)?)(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
 # "1. Open the app" — step numbers at the start of a line are layout, not facts.
 _LIST_MARKER = re.compile(r"(?m)^\s*[1-9][.)]\s+")
+# Status and completed-action words can turn a procedural article into a claim about
+# what happened to this customer's account. Numeric/contact checks alone cannot catch
+# "your refund was approved" when the source only says to contact support for review.
+# Keep this deliberately limited to outcome language; ordinary instructions such as
+# "activate a plan in the app" are not outcome claims.
+_OUTCOME_WORDS = frozenset({
+    "approved", "rejected", "confirmed", "completed", "processed", "activated",
+    "deactivated", "refunded", "credited", "deducted", "charged", "purchased",
+    "subscribed", "cancelled", "canceled", "resolved", "fixed", "restored",
+    "delivered", "sent", "failed", "succeeded", "successful",
+})
+_WORD = re.compile(r"[a-z]+", re.IGNORECASE)
 
 SYSTEM_INSTRUCTION = """\
 You answer one customer question for a SIMULATED HUTCH prepaid support assistant, using ONLY the provided articles
@@ -89,13 +101,17 @@ def _urls(text: str) -> set[str]:
 
 
 def ungrounded_reason(answer: str, sources: str) -> str | None:
-    """Which check an answer fails (NUMBERS, CONTACTS, LINK, MAGNITUDE, LENGTH), or None. Never its text."""
+    """Which check an answer fails, or None. Never return the answer text."""
     if len(answer) > 1500:
         return "LENGTH"
     answer = _LIST_MARKER.sub("", answer)
     answer_numbers, source_numbers = _numbers(answer), _numbers(sources)
     if answer_numbers - source_numbers:
         return "NUMBERS"
+    answer_outcomes = {word.lower() for word in _WORD.findall(answer)} & _OUTCOME_WORDS
+    source_outcomes = {word.lower() for word in _WORD.findall(sources)} & _OUTCOME_WORDS
+    if answer_outcomes - source_outcomes:
+        return "UNSUPPORTED_OUTCOME"
     if not _contacts(answer) <= _contacts(sources):
         return "CONTACTS"
     if not _urls(answer) <= _urls(sources):

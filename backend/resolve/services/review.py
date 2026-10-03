@@ -311,6 +311,7 @@ class AgentReviewService:
         return {"id": row["id"], "case_id": row["case_id"], "investigation_id": row["investigation_id"],
             "action_type": row["action_type"], "target_id": row["target_id"], "target_version": row["target_version"],
             "target_label": row["target_label"], "consequences": consequence.get("text", ""),
+            "package_terms": consequence.get("package_terms"),
             "proposal_hash": row["proposal_hash"], "expires_at": row["expires_at"], "simulation": True}
 
     @staticmethod
@@ -319,7 +320,8 @@ class AgentReviewService:
         return {"id": row["id"], "case_id": row["case_id"], "proposal_id": row["proposal_id"],
             "action_type": row["action_type"], "status": status, "created_at": row["created_at"],
             "updated_at": row["updated_at"], "provider_operation_id": row["provider_operation_ref"],
-            "outcome": row["outcome"] or {"code": None, "message": None, "actual_target_status": None, "provider_ticket_id": None},
+            "outcome": {key: (row["outcome"] or {}).get(key) for key in
+                        ("code", "message", "actual_target_status", "provider_ticket_id")},
             "next_step": "Wait for the simulated provider result." if status in {"PENDING", "RUNNING", "UNKNOWN"}
                 else "A human agent should review this operation." if status in {"FAILED", "REVIEW_REQUIRED"}
                 else "Review the receipt for the completed simulated action.", "simulation": True}

@@ -1,5 +1,14 @@
 # HUTCH Resolve: team source of truth
 
+### Audit remediation update — 2026-10-03
+
+- [x] Fixed turn-claim row mapping and package-only proposal evaluation; corrected strict package evidence, proposal, dashboard and operation projections.
+- [x] Escalation now scopes investigation through the case/account, preserves the customer's reason, and persists a pending proposal reference in the conversation. The existing customer confirmation card can present it and the established turn/confirmation logic applies. PostgreSQL regression is added but not run.
+- [x] Unsupported answer outcome claims are rejected. Frontend Voice retry-key and stale-start regressions pass.
+- [x] Zeptaz Voice adapter gates all model-generated speech against canonical Resolve `speech_text`, falls back to that text, and emits a sanitized error on tool failure. `hutch_zeptazvoice/adapter_buildation` commit `3bc6a27` is pushed and remote-confirmed.
+- Verification on ResolveDev: default backend suite **430 passed, 36 PostgreSQL-gated skipped**; frontend mock E2E **21/21**; typecheck/build pass; lint passes with six existing warnings; `git diff --check` passes. Voice suite **52 passed**.
+- [ ] PostgreSQL transaction, recovery, package strict projection, escalation state-persistence and CRM delivery checks remain open: no disposable DB URL/usable engine is available. Abandoned-turn reconciliation remains fail-closed and unresolved. See `docs/plans/harry.md` for further audit work.
+
 Updated: 2026-10-03. The mock sandbox, Resolve business backend, in-process conversation controller and combined frontend are implemented to the tested scope below. Browser Voice/model and final release qualification remain open. Historical baseline rows below record earlier findings; current status is in the task list and latest checkpoints. Checkboxes describe implementation and verification, not approval of a design.
 
 ## UI and conversation integration checkpoint
@@ -200,7 +209,7 @@ Current blockers/risks: The conversation controller, Resolve Voice bridge and co
 
 ## Current audit follow-up ? 2026-10-03
 
-Source: [Resolve integration audit](docs/audits/2026-10-03-resolve.md), baseline `2b52b722e1a9bb6f0149d767a2ecaf28831b0298` on ResolveDev. Audit only; no fixes implemented. The report distinguishes API/unit reproductions from static findings.
+Source: [Resolve integration audit](docs/audits/2026-10-03-resolve.md), baseline `2b52b722e1a9bb6f0149d767a2ecaf28831b0298` on ResolveDev. The report distinguishes API/unit reproductions from static findings; current implementation and verification status is recorded below.
 
 - [x] AUD-01 Tevin: deterministic case/action/financial replies bypass rewriting; signed decimal, outcome polarity and supported-link regressions added. Unit/conversation verification passes; real-model qualification remains open.
 - [x] AUD-02 Harry: investigation writes now use customer Origin/CSRF guard; API regression tests pass.

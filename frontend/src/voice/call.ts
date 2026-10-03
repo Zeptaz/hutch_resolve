@@ -6,6 +6,22 @@ import { openVoiceSocket, VOICE_PROTOCOL, type VoiceSocket } from './socket'
 /** Voice caps a call at 120 s (HUTCH_VOICE_MAX_SESSION_SECONDS). */
 export const CALL_LIMIT_MS = 120_000
 
+/** The server permanently records an expired grant key, so a later user retry must rotate it. */
+export function shouldRotateGrantKey(error: unknown): boolean {
+  return error instanceof Error && 'code' in error &&
+    (error as { code?: string }).code === 'VOICE_GRANT_EXPIRED'
+}
+
+/** Return the key a repeated request must use after this failure. */
+export function grantKeyAfterFailure(key: string, error: unknown): string | null {
+  return shouldRotateGrantKey(error) ? null : key
+}
+
+/** Async work from a prior attempt must not mutate or tear down the currently active call. */
+export function isCurrentCallAttempt(active: object | null, attempt: object): boolean {
+  return active === attempt
+}
+
 export type CallPhase = 'idle' | 'requesting' | 'connecting' | 'live' | 'ended'
 export type CallActivity = 'listening' | 'thinking' | 'speaking'
 
@@ -153,36 +169,38 @@ export class VoiceCall {
       try {
         await audio.startMic()
       } catch (e) {
+        if (!isCurrentCallAttempt(this.audio, audio)) return
         return this.fail({ kind: 'mic', mic: e instanceof MicError ? e.kind : 'denied' })
       }
     }
-    if (this.audio !== audio) return // ended while the permission prompt was open
+    if (!isCurrentCallAttempt(this.audio, audio)) return // ended while the permission prompt was open
 
     let grant
+    const requestKey = this.grantRequestKey ??= newId()
     try {
-      this.grantRequestKey ??= newId()
       grant = await request<VoiceSessionGrant>('customer', 'POST', `/conversations/${this.conversationId}/voice-sessions`, {
         body: {},
-        idempotencyKey: this.grantRequestKey,
+        idempotencyKey: requestKey,
       })
     } catch (error) {
-      // A replayed unknown provider outcome requires an explicit fresh grant attempt.
-      if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'VOICE_GRANT_OUTCOME_UNKNOWN') {
-        this.grantRequestKey = null
-      }
+      if (!isCurrentCallAttempt(this.audio, audio)) return
+      // Expired keys cannot create another grant. Unknown outcomes must replay the same key
+      // so the server can return the recorded result without duplicating provider work.
+      if (this.grantRequestKey === requestKey) this.grantRequestKey = grantKeyAfterFailure(requestKey, error)
       return this.fail({ kind: 'grant', error })
     }
-    this.grantRequestKey = null
-    if (this.audio !== audio) return
+    if (!isCurrentCallAttempt(this.audio, audio)) return
+    if (this.grantRequestKey === requestKey) this.grantRequestKey = null
 
     this.set({ phase: 'connecting' })
     let socket: VoiceSocket
     try {
       socket = await openVoiceSocket(grant)
     } catch {
+      if (!isCurrentCallAttempt(this.audio, audio)) return
       return this.fail({ kind: 'voice', code: 'voice_connection_failed' })
     }
-    if (this.audio !== audio) {
+    if (!isCurrentCallAttempt(this.audio, audio)) {
       socket.close(1000, 'call_cancelled')
       return
     }

@@ -219,26 +219,11 @@ class ResolveFacadeAdapter:
     async def prepare_escalation(
         self, ctx: AuthContext, case_id: UUID, request: EscalationRequest, command_key: str
     ) -> ProposalView:
-        # Harry has no prepare_escalation yet; his investigations list CREATE_REVIEW_TICKET as eligible,
-        # so the review proposal is requested through propose_action. The reason is not stored (gap).
-        case = await self.get_case(ctx, case_id)
-        investigation = case.investigation
-        if investigation is None or investigation.id != request.investigation_id:
-            raise ResolveError("STALE_VERSION", "Investigation changed; reload before requesting review")
-        review = next((a for a in investigation.eligible_actions if a.action_type is ActionType.CREATE_REVIEW_TICKET), None)
-        if review is None:
-            raise ResolveError("ACTION_NOT_ALLOWED", "Resolve did not make a review request eligible")
-        return await self.propose_action(
-            ctx,
-            case_id,
-            ProposalRequest(
-                expected_version=case.version,
-                investigation_id=investigation.id,
-                action_type=ActionType.CREATE_REVIEW_TICKET,
-                target_id=review.target_id,
-            ),
-            command_key,
-        )
+        return ProposalView.model_validate(await self._call(
+            self._facade.propose_escalation, self._context(ctx), case_id=case_id,
+            expected_version=request.expected_version, investigation_id=request.investigation_id,
+            reason=request.reason, request_key=command_key,
+        ))
 
     async def get_operation(self, ctx: AuthContext, operation_id: UUID) -> OperationView:
         return OperationView.model_validate(await self._call(self._facade.get_operation, self._context(ctx), operation_id))
