@@ -72,7 +72,7 @@ const INITIAL: CallState = {
 }
 
 type AudioPort = Pick<CallAudio,
-  'onFrame' | 'onDrained' | 'onPlayingChange' | 'startMic' | 'play' | 'beginReply' |
+  'onFrame' | 'onDrained' | 'onPlayingChange' | 'startMic' | 'play' | 'playGreeting' | 'beginReply' |
   'endReply' | 'flush' | 'close' | 'micLevel' | 'speakerLevel'>
 
 /** Mock mode exercises the protocol without requesting a microphone or AudioContext. */
@@ -85,6 +85,7 @@ class MockAudio implements AudioPort {
   private current: string | null = null
 
   async startMic() {}
+  async playGreeting(_wav: ArrayBuffer, _onEnded: () => void) {}
   beginReply(id: string) { this.current = id }
   play(_chunk: ArrayBuffer) {}
   endReply(id: string) {
@@ -118,6 +119,7 @@ export class VoiceCall {
   private grantRequestKey: string | null = null
   private utterance: SpeechSynthesisUtterance | null = null
   private speakingFallback = false
+  private greetingPlaying = false
   private speechTimer = 0
   private heardSpeech = false
   private quietFrames = 0
@@ -162,9 +164,9 @@ export class VoiceCall {
     }
     const audio = this.audio
     audio.onFrame = (pcm, level) => {
-      const micActive = !this.inputClosed && !this.speakingFallback && !this.state.muted && level >= 0.012
+      const micActive = !this.inputClosed && !this.speakingFallback && !this.greetingPlaying && !this.state.muted && level >= 0.012
       if (micActive !== this.state.micActive) this.set({ micActive })
-      if (this.state.phase !== 'live' || this.state.muted || this.speakingFallback || this.inputClosed ||
+      if (this.state.phase !== 'live' || this.state.muted || this.speakingFallback || this.greetingPlaying || this.inputClosed ||
           this.socket?.readyState !== WebSocket.OPEN) return
       if (micActive) {
         this.heardSpeech = true
@@ -280,7 +282,7 @@ export class VoiceCall {
         break
       case 'greeting':
         this.handlers.onGreeting?.(msg.text)
-        this.speakVerifiedText(msg.text, false)
+        void this.playGreeting()
         break
       case 'transcript':
         // Only the caller's finalized turn is shown; assistant text comes from Resolve's reply_text.
@@ -291,6 +293,7 @@ export class VoiceCall {
         break
       case 'resolve_result': {
         this.stopSpeech()
+        this.greetingPlaying = false
         this.audio?.flush()
         this.awaitingPlaybackAck = null
         window.clearTimeout(this.playbackRetryTimer)
@@ -346,6 +349,7 @@ export class VoiceCall {
         break
       case 'interrupted': {
         this.stopSpeech()
+        this.greetingPlaying = false
         this.audio?.flush()
         this.awaitingPlaybackAck = null
         window.clearTimeout(this.playbackRetryTimer)
@@ -379,13 +383,30 @@ export class VoiceCall {
     this.send({ type: 'playback_complete', response_id: id })
   }
 
-  /** Speak only fixed greeting or Resolve-verified fallback text. This path
-   * never acknowledges proposal presentation, so consent stays text-only. */
-  private speakVerifiedText(text: string, reportFailure = true) {
+  private async playGreeting() {
+    if (API_MODE !== 'live' || this.state.phase !== 'live') return
+    const audio = this.audio
+    if (!audio) return
+    this.greetingPlaying = true
+    try {
+      const response = await fetch(`${import.meta.env.BASE_URL}audio/hutch-greeting.wav`)
+      if (!response.ok) throw new Error('greeting_audio_unavailable')
+      const wav = await response.arrayBuffer()
+      if (this.audio !== audio || !this.greetingPlaying || this.state.phase !== 'live') return
+      await audio.playGreeting(wav, () => { this.greetingPlaying = false })
+    } catch {
+      // The text greeting remains visible; call audio can still work normally.
+      this.greetingPlaying = false
+    }
+  }
+
+  /** Speak Resolve-verified fallback text when Live audio cannot be used.
+   * This path never acknowledges proposal presentation; consent stays text-only. */
+  private speakVerifiedText(text: string) {
     if (API_MODE !== 'live' || !text.trim() || this.state.phase !== 'live') return
     this.stopSpeech()
     if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
-      if (reportFailure) this.set({ error: { kind: 'voice', code: 'speech_playback_unavailable' } })
+      this.set({ error: { kind: 'voice', code: 'speech_playback_unavailable' } })
       this.inputClosed = false
       return
     }
@@ -401,7 +422,7 @@ export class VoiceCall {
       this.speakingFallback = false
       this.inputClosed = false
       window.clearTimeout(this.speechTimer)
-      if (this.state.phase === 'live') this.set(failed && reportFailure
+      if (this.state.phase === 'live') this.set(failed
         ? { activity: 'listening', error: { kind: 'voice', code: 'speech_playback_unavailable' } }
         : { activity: 'listening' })
     }
@@ -411,9 +432,7 @@ export class VoiceCall {
       if (this.utterance !== utterance) return
       this.stopSpeech()
       this.inputClosed = false
-      this.set(reportFailure
-        ? { activity: 'listening', error: { kind: 'voice', code: 'speech_playback_unavailable' } }
-        : { activity: 'listening' })
+      this.set({ activity: 'listening', error: { kind: 'voice', code: 'speech_playback_unavailable' } })
     }, 30_000)
     try {
       window.speechSynthesis.speak(utterance)
@@ -426,6 +445,7 @@ export class VoiceCall {
     window.clearTimeout(this.speechTimer)
     this.utterance = null
     this.speakingFallback = false
+    this.greetingPlaying = false
     if (API_MODE === 'live') window.speechSynthesis?.cancel()
   }
 

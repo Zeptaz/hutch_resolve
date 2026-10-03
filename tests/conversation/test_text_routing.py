@@ -178,6 +178,50 @@ def test_account_enquiry_shows_scoped_account(hm: Harness) -> None:
     assert result.cards[0].type == "account" and result.cards[0].data.id == ACCOUNT_A
 
 
+def test_clear_balance_question_uses_scoped_account_after_model_timeout() -> None:
+    model = FakeModel()
+    model.delay = 5
+    h = Harness(model=model, budget=0.02)
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+
+    result = h.send(ctx, h.turn(conv, text("Can I know my account balance?")))
+
+    assert result.reply_text == "Your main balance is LKR 420.00 (as of 2 Oct, 12:00)."
+    assert result.cards[0].type == "account" and result.cards[0].data.id == ACCOUNT_A
+    assert h.facade.calls["create_case"] == 0
+
+    # A short finalized utterance from speech recognition has the same safe
+    # read-only meaning; it must not become an invented balance complaint.
+    short = h.send(ctx, h.turn(conv, text("my account balance")))
+    assert short.reply_text == result.reply_text
+    assert h.facade.calls["create_case"] == 0
+
+
+def test_balance_complaint_and_how_to_question_do_not_use_account_fallback() -> None:
+    h = Harness(model=FakeModel().on("my balance dropped", ModelError("quota")))
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+
+    complaint = h.send(ctx, h.turn(conv, text("my balance dropped")))
+    how_to = h.send(ctx, h.turn(conv, text("How can I check my balance?")))
+
+    assert complaint.pending_question.code == "CHOOSE_COMPLAINT_TYPE"
+    assert how_to.pending_question.code == "CHOOSE_COMPLAINT_TYPE"
+    assert h.facade.calls["get_account"] == 0
+
+
+def test_balance_question_fallback_requires_customer_scope() -> None:
+    h = Harness()
+    ctx = guest()
+    conv = h.open(ctx)
+
+    result = h.send(ctx, h.turn(conv, text("Can I know my account balance?")))
+
+    assert result.pending_question.code == "LOGIN_REQUIRED"
+    assert h.facade.calls["get_account"] == 0
+
+
 def test_correction_requests_new_revision_and_replaces_offer(hm: Harness) -> None:
     hm.model.on("my balance is wrong", BALANCE)
     hm.model.on("sorry, it was yesterday", extraction(intent="CORRECTION", time={"kind": "YESTERDAY"}))

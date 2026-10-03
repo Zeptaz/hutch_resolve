@@ -111,6 +111,30 @@ _CRITICAL_REPLY = re.compile(
 )
 # Knowledge topics where a signed-in customer's current balance is useful context.
 _BALANCE_TOPICS = {"how-to-reload", "check-balance-how", "reload-not-received", "prepaid-recharge"}
+# A narrow, deterministic recovery for clear account reads when intent extraction
+# times out. Do not match complaints ("balance dropped"), how-to questions, or
+# requests mixed with another issue.
+_DIRECT_BALANCE_QUESTIONS = {
+    "my account balance",
+    "my balance",
+    "can i know my account balance",
+    "can i know my balance",
+    "can you tell me my account balance",
+    "can you tell me my balance",
+    "what is my account balance",
+    "what is my balance",
+    "what's my account balance",
+    "what's my balance",
+    "what is my current balance",
+    "what's my current balance",
+    "tell me my account balance",
+    "tell me my balance",
+    "check my account balance",
+    "check my balance",
+    "show me my account balance",
+    "show me my balance",
+    "how much balance do i have",
+}
 _CODE = re.compile(r"[A-Z0-9_]+")
 
 # Pending question codes shared with the frontend.
@@ -142,6 +166,12 @@ _CONTINUES_CANDIDATE = {Intent.NEW_COMPLAINT, Intent.CORRECTION, Intent.FOLLOW_U
 SimulationClock = Callable[[AuthContext], Awaitable[datetime]]
 
 log = logging.getLogger(__name__)
+
+
+def _is_direct_balance_question(text: str) -> bool:
+    normalized = " ".join(text.casefold().strip().split())
+    normalized = re.sub(r"^(?:hi|hello|hey)[,!. ]+", "", normalized)
+    return normalized.rstrip(" ?!.") in _DIRECT_BALANCE_QUESTIONS
 
 
 async def _real_time(ctx: AuthContext) -> datetime:
@@ -236,6 +266,8 @@ class ConversationService:
         now = await self._simulation_now(ctx)
         extraction = await self._extract(ctx, turn, inp.text, state, now)
         if extraction is None:
+            if state.candidate is None and state.pending_proposal is None and _is_direct_balance_question(inp.text):
+                return await self._account(ctx, state) if _is_customer(ctx) else _login_required(state)
             return self._structured_fallback(ctx, state)
         if extraction.detected_language is not Language.EN or len(inp.text.split()) >= 3:
             # Reply in the language the customer writes; a bare "ok" does not switch back to English.

@@ -110,6 +110,24 @@ export class CallAudio {
     if (this.current?.id !== id) this.current = { id, pending: 0, ended: false }
   }
 
+  /** Play the fixed, verified greeting through the same output graph as Live replies. */
+  async playGreeting(wav: ArrayBuffer, onEnded: () => void) {
+    if (this.closed) return
+    const buffer = await this.ctx.decodeAudioData(wav.slice(0))
+    if (this.closed) return
+    const node = this.ctx.createBufferSource()
+    node.buffer = buffer
+    node.connect(this.outputGain)
+    node.onended = () => {
+      this.sources.delete(node)
+      if (this.sources.size === 0) this.onPlayingChange(false)
+      onEnded()
+    }
+    if (this.sources.size === 0) this.onPlayingChange(true)
+    this.sources.add(node)
+    node.start()
+  }
+
   /** Queue one binary frame of 24 kHz PCM16 for the reply that is playing. */
   play(chunk: ArrayBuffer) {
     const reply = this.current
