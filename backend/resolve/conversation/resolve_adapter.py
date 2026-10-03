@@ -226,10 +226,22 @@ class ResolveFacadeAdapter:
     async def prepare_escalation(
         self, ctx: AuthContext, case_id: UUID, request: EscalationRequest, command_key: str
     ) -> ProposalView:
+        # Asked through propose_action with the customer's reason: Resolve still checks that the
+        # review is eligible for the latest investigation and stores the reason. propose_escalation
+        # serves the case-panel route; it needs a UUID Idempotency-Key and writes the dialogue state
+        # itself, which this conversation owns during a turn (CE-007).
+        case = await self.get_case(ctx, case_id)
+        investigation = case.investigation
+        if investigation is None or investigation.id != request.investigation_id:
+            raise ResolveError("STALE_VERSION", "Investigation changed; reload before requesting review")
+        review = next((a for a in investigation.eligible_actions if a.action_type is ActionType.CREATE_REVIEW_TICKET), None)
+        if review is None:
+            raise ResolveError("ACTION_NOT_ALLOWED", "Resolve did not make a review request eligible")
         return ProposalView.model_validate(await self._call(
-            self._facade.propose_escalation, self._context(ctx), case_id=case_id,
-            expected_version=request.expected_version, investigation_id=request.investigation_id,
-            reason=request.reason, request_key=command_key,
+            self._facade.propose_action, self._context(ctx), case_id=case_id,
+            expected_version=request.expected_version, investigation_id=investigation.id,
+            action_type=ActionType.CREATE_REVIEW_TICKET.value, target_id=review.target_id,
+            request_key=command_key, escalation_reason=request.reason,
         ))
 
     async def get_operation(self, ctx: AuthContext, operation_id: UUID) -> OperationView:

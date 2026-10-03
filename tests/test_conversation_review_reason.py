@@ -1,7 +1,8 @@
 """How the conversation adapter asks Resolve for a review proposal.
 
-A customer's request reaches propose_escalation with their reason. A review Resolve offered on its
-own goes through propose_action, and Resolve's facade stores its own default reason for it.
+Both paths use propose_action. A customer's request passes their reason with the review target
+Resolve listed; a review Resolve offered on its own passes none, and the facade stores its default.
+propose_escalation serves the case-panel route and is not used by the chat (CE-007).
 """
 
 import asyncio
@@ -95,4 +96,26 @@ def test_customer_requested_review_keeps_the_customers_reason():
     request = EscalationRequest(expected_version=4, investigation_id=investigation_id,
                                 reason="I never signed up for this service.")
     asyncio.run(adapter.prepare_escalation(_ctx(), uuid4(), request, "key-3"))
-    assert facade.calls == [("propose_escalation", "I never signed up for this service.")]
+    assert facade.calls == [("propose_action", "CREATE_REVIEW_TICKET", "I never signed up for this service.")]
+
+
+def test_customer_review_request_needs_a_review_resolve_listed():
+    from backend.resolve.conversation.errors import ResolveError
+
+    facade = _Facade()
+    adapter = _adapter(facade)
+    investigation_id = uuid4()
+    case = SimpleNamespace(version=4, investigation=SimpleNamespace(id=investigation_id, eligible_actions=[]))
+
+    async def get_case(ctx, case_id):
+        return case
+
+    adapter.get_case = get_case
+    request = EscalationRequest(expected_version=4, investigation_id=investigation_id, reason="Please check.")
+    try:
+        asyncio.run(adapter.prepare_escalation(_ctx(), uuid4(), request, "key-4"))
+    except ResolveError as exc:
+        assert exc.code == "ACTION_NOT_ALLOWED"
+    else:
+        raise AssertionError("a review Resolve did not list must not be proposed")
+    assert facade.calls == []
