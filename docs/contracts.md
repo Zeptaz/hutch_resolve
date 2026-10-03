@@ -157,7 +157,7 @@ Internal events persist in PostgreSQL, not a broker. Envelope: event_id, event_t
 
 ## Voice compatibility
 
-The [Voice wire contract](https://github.com/Zeptaz/hutch_zeptazvoice/blob/adapter_buildation/docs/hutch-resolve-contract.md) defines the deployed adapter branch. OpenAPI mirrors strict VoiceTurnRequest/Response/EventRequest. Do not append HTTP fields without coordinating strict-model compatibility.
+The [Voice wire contract](https://github.com/Zeptaz/hutch_zeptazvoice/blob/voice_test2/docs/hutch-resolve-contract.md) defines the current voice repair branch. OpenAPI mirrors strict VoiceTurnRequest/Response/EventRequest. Do not append HTTP fields without coordinating strict-model compatibility.
 
 Resolve session creation body: binding_id, conversation_id, voice_session_id, account_id, origin, expires_at(Unix seconds). Resolve stores the scoped binding before calling Voice and revokes it if grant provisioning fails. Binding max180s covers the 60-second browser grant window plus a full 120-second call; the browser grant itself is single use and origin/session bound. Voice returns browser_grant, websocket_path, websocket_url and expires_at. Browser protocols `zeptaz-hutch-v2` and `hutch-grant.{token}`. Binary mono PCM16 in16kHz/out24kHz; existing16KiB frame/120s call/3.84MB audio limits.
 
