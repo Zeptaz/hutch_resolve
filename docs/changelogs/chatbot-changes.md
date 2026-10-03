@@ -31,7 +31,7 @@ Branch: `tevin/chatbot-fixes` (from `main` @ `4b581b2`).
 
 ### CB-001 — Replies stay English even when the customer writes Singlish/Sinhala
 
-- Date / status: 2026-10-03 — DONE on branch, verified (not committed yet)
+- Date / status: 2026-10-03 — DONE on branch, verified, committed `73677a4`
 - Risk: MEDIUM — partly reverses the AUD-01 "never rewrite case replies" rule for **text chat only**.
   Harry should review before merge (see "What Harry should check").
 - Reported symptom: customer writes Singlish ("Mata VAS charges gana poddak check karanna puluwan da?",
@@ -99,7 +99,7 @@ English card + buttons, English source in storage, and Voice/outcomes excluded.
 
 - Files: `backend/resolve/conversation/{service.py,rewrite.py,templates.py,ports.py,locales/si-Latn.json}`,
   `tests/conversation/{test_rewrite.py,test_locales.py}`.
-- Commit: not committed yet.
+- Commit: `73677a4` (branch `tevin/chatbot-fixes`, local; not pushed).
 - Core dependency: CE-001 (clean localization of engine text), CE-002 (internal "Reason:" note still shown,
   now also rewritten into Singlish), CE-003 (optional "show original" toggle).
 
@@ -111,7 +111,7 @@ English card + buttons, English source in storage, and Voice/outcomes excluded.
 
 ### CB-003 — "Mata VAS charges monadwada kiyanna puluwanda?" got "I don't have reviewed information"
 
-- Date / status: 2026-10-03 — DONE on branch, verified (not committed yet)
+- Date / status: 2026-10-03 — DONE on branch, verified, committed `73677a4`
 - Risk: MEDIUM — changes extraction schema/prompt, routing and knowledge lookup; no change to consent,
   proposals or what is sent to Resolve beyond an existing VAS_DISPUTE investigation.
 - Root causes (three, all in the chatbot module):
@@ -155,5 +155,5 @@ English card + buttons, English source in storage, and Voice/outcomes excluded.
   - DB check of the knowledge query for `si` (read-only).
 - Not verified: Tamil live samples; fluent review of the new draft strings; Voice (unchanged path except that
   a spoken yes to the charge check now starts the look-up instead of being treated as offer consent — safer).
-- Commit: not committed yet.
+- Commit: `73677a4` (branch `tevin/chatbot-fixes`, local; not pushed).
 - Core dependency: CE-004 (price per subscription).
