@@ -472,7 +472,7 @@ export function ChatShell({ session, onDemoLogin }: {
                 aria-label={t('chat.message')}
                 rows={1}
                 className="max-h-40 min-h-11 resize-none rounded-xl"
-                disabled={!textAllowed || turnOutcomeUncertain}
+                disabled={!conversation || !textAllowed || turnOutcomeUncertain}
               />
               <Button type="submit" size="icon-lg" aria-label={t('chat.send')} disabled={!conversation || sending || turnOutcomeUncertain || !draft.trim()}>
                 <SendHorizontal aria-hidden />
