@@ -168,7 +168,7 @@ export function CaseQueue() {
           <div>
             <h1 className="text-lg font-bold tracking-tight">Review queue</h1>
             <p className="text-xs text-muted-foreground" aria-live="polite">
-              {loadedAt ? `Updated ${formatTime(loadedAt)} · refreshes every 5 s` : 'Loading…'}
+              {loadedAt ? `Updated ${formatTime(loadedAt)} · refreshes every 5 s` : error != null ? 'Not loaded yet' : 'Loading…'}
             </p>
           </div>
           <Button variant="ghost" size="icon-sm" onClick={() => void refresh()} disabled={busy === 'refresh'} aria-label="Refresh queue" title="Refresh queue">

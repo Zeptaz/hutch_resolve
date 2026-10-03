@@ -24,7 +24,7 @@ export function NoCaseSelected() {
       <div className="flex max-w-xs flex-col items-center gap-2 text-center">
         <p className="font-semibold">Pick a case from the queue</p>
         <p className="text-sm text-muted-foreground">
-          Cases with a coloured edge need attention first. Use <kbd className="font-mono">j</kbd> and <kbd className="font-mono">k</kbd> to move through them.
+          Tinted cases need attention first. Use <kbd className="font-mono">j</kbd> and <kbd className="font-mono">k</kbd> to move through them.
         </p>
       </div>
     </div>
