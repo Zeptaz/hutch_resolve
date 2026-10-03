@@ -134,8 +134,10 @@ code was kept wherever main had already fixed the same defect. Nothing was pushe
     HubSpot ticket `338730627792` created; dashboard shows "HubSpot ticket ID" + working "Open in HubSpot"
     link; start review → Synced; API read-back: stage IN_REVIEW, tagged review note present, case/queue/
     evidence properties correct.
-  - Not verified here: closing a review to the HubSpot Closed stage on this branch (verified earlier on
-    `tevin/hubspot-crm`), multi-worker lease overrun (known limit), HubSpot outage on the live account.
+  - Live, second run (2026-10-04): Singlish D complaint answered in Singlish → review accepted → HubSpot ticket
+    `338552685274` → agent note synced → review closed as NEEDS_OPERATOR_FOLLOWUP → synced; both sync jobs
+    SYNCED on attempt 1; API read-back: stage CLOSED, review version 6, both tagged notes present.
+  - Not verified here: multi-worker lease overrun (known limit), HubSpot outage on the live account.
 - Commit: `54a4b58`.
 
 ### CE-006 — Review sync in progress shown as PENDING instead of a 500

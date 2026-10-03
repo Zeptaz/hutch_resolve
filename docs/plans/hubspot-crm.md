@@ -220,4 +220,4 @@ Base: `origin/tevin/chatbot-fixes` `4b305ff` (main `4b581b2` + CB-001..003), the
 
 `scripts/dev_db.sh` needed two fixes for main: make every `database/*.sh` executable in the temporary copy (main added `99-ready.sh`) and wait for its `.hutch_initialized` marker. `run_db_tests.sh` now also runs the turn-reconciliation test.
 
-Verification on this branch: see the CE-005 entry and `context.md` (unit, PostgreSQL, browser mock CRM, live HubSpot ticket `338730627792`). Test tickets on the team HubSpot account from this run: `338730627792` (kept; archive with `python scripts/hubspot_setup.py archive 338730627792` when done).
+Verification on this branch: see the CE-005 entry and `context.md` (unit, PostgreSQL, browser mock CRM, live HubSpot ticket `338730627792`). Second live run (2026-10-04): ticket `338552685274` — Singlish complaint, agent note and close (NEEDS_OPERATOR_FOLLOWUP) synced; HubSpot read-back stage CLOSED with both tagged notes. Test tickets on the team HubSpot account: `338730627792`, `338552685274` (kept; archive with `python scripts/hubspot_setup.py archive <id>` when done).
