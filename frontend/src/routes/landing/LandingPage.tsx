@@ -94,21 +94,11 @@ function useWarmPages() {
 
 /* ---------- shared bits ---------- */
 
-function LogoMark({ className }: { className?: string }) {
-  return (
-    <span aria-hidden className={cn('grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground lg:size-9', className)}>
-      <MessageSquareText className="size-[18px] lg:size-5" strokeWidth={2.4} />
-    </span>
-  )
-}
-
+/** Text-only wordmark, like the rest of the app. */
 function Wordmark({ className }: { className?: string }) {
   return (
-    <span className={cn('flex items-center gap-2.5 text-xl font-semibold tracking-[-0.03em] lg:text-[26px]', className)}>
-      <LogoMark />
-      <span>
-        HUTCH <span className="text-primary">Resolve</span>
-      </span>
+    <span className={cn('text-xl font-semibold tracking-[-0.03em] whitespace-nowrap lg:text-[26px]', className)}>
+      HUTCH <span className="text-primary">Resolve</span>
     </span>
   )
 }

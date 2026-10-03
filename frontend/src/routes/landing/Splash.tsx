@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { LayoutDashboard, MessageCircle, MessageSquareText, Mic } from 'lucide-react'
+import { LayoutDashboard, MessageCircle, Mic } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const SEEN_KEY = 'hutch-resolve.intro-seen'
@@ -55,14 +55,7 @@ export function Splash() {
     >
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(40rem_28rem_at_50%_45%,color-mix(in_oklch,var(--primary)_14%,transparent),transparent)]" />
       <div className="relative flex flex-col items-center gap-6">
-        <div className="relative grid size-20 place-items-center">
-          <span className="animate-splash-ring absolute inset-0 rounded-full border-2 border-primary/50" />
-          <span className="animate-splash-ring absolute inset-0 rounded-full border-2 border-primary/30 [animation-delay:500ms]" />
-          <span className="animate-pop grid size-16 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
-            <MessageSquareText className="size-8" strokeWidth={2.2} aria-hidden />
-          </span>
-        </div>
-        <p className="animate-rise-in text-3xl font-medium tracking-[-0.03em] text-[#111114] [--i:4]">
+        <p className="animate-rise-in text-4xl font-medium tracking-[-0.03em] text-[#111114]">
           HUTCH <span className="text-primary">Resolve</span>
         </p>
         <div className="flex items-center gap-3 text-muted-foreground">
