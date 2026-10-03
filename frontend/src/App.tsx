@@ -1,24 +1,43 @@
-import { lazy, Suspense } from 'react'
-import { createBrowserRouter, RouterProvider } from 'react-router'
+import { Suspense } from 'react'
+import { createBrowserRouter, Outlet, RouterProvider, ScrollRestoration } from 'react-router'
 import { EmptyState, LoadingState } from '@/components/states'
+import { loadAgentPage, loadCustomerPage, loadLandingPage } from '@/routes/pages'
 
-// Customer and agent areas are split so neither loads the other's code or session.
-const CustomerPage = lazy(() => import('@/routes/customer/CustomerPage'))
-const AgentPage = lazy(() => import('@/routes/agent/AgentPage'))
-const LandingPage = lazy(() => import('@/routes/landing/LandingPage'))
+// Route-level lazy loading: the router fetches the next page before switching, so a link never flashes a blank page.
+const page = (load: () => Promise<{ default: React.ComponentType }>) => async () => ({ Component: (await load()).default })
+
+function Root() {
+  return (
+    <>
+      <ScrollRestoration />
+      <Outlet />
+    </>
+  )
+}
+
+/** Shown only while the first page's code loads. The landing page starts on the sand of its intro. */
+function FirstLoad() {
+  return window.location.pathname === '/' ? <div className="min-h-dvh bg-[#f5f2ec]" /> : <LoadingState />
+}
 
 const router = createBrowserRouter([
-  { path: '/', element: <LandingPage /> },
-  { path: '/chat', element: <CustomerPage /> },
   {
-    path: '/agent',
-    element: <AgentPage />,
+    element: <Root />,
+    HydrateFallback: FirstLoad,
     children: [
-      { index: true, lazy: async () => ({ Component: (await import('@/routes/agent/CaseDetail')).NoCaseSelected }) },
-      { path: 'cases/:caseId', lazy: async () => ({ Component: (await import('@/routes/agent/CaseDetail')).CaseDetailRoute }) },
+      { path: '/', lazy: page(loadLandingPage) },
+      { path: '/chat', lazy: page(loadCustomerPage) },
+      {
+        path: '/agent',
+        lazy: page(loadAgentPage),
+        children: [
+          { index: true, lazy: async () => ({ Component: (await import('@/routes/agent/CaseDetail')).NoCaseSelected }) },
+          { path: 'cases/:caseId', lazy: async () => ({ Component: (await import('@/routes/agent/CaseDetail')).CaseDetailRoute }) },
+        ],
+      },
+      { path: '*', element: <EmptyState title="Page not found" description="Check the address and try again." /> },
     ],
   },
-  { path: '*', element: <EmptyState title="Page not found" description="Check the address and try again." /> },
 ])
 
 export default function App() {

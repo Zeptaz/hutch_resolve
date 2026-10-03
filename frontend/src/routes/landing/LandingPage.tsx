@@ -8,7 +8,6 @@ import {
   ChevronRight,
   CircleCheck,
   FileText,
-  Languages,
   MessageSquareText,
   Mic,
   PhoneCall,
@@ -22,6 +21,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Bubble, ChatPreview, DashboardPreview, DesktopFrame, HeroScreen, PhoneFrame, VoicePreview } from './devices'
+import { loadAgentPage, loadCustomerPage } from '@/routes/pages'
 import { Splash } from './Splash'
 
 /*
@@ -42,6 +42,8 @@ const NAV = [
 ]
 
 export default function LandingPage() {
+  useSmoothAnchors()
+  useWarmPages()
   return (
     <div className="min-h-dvh overflow-x-clip bg-white text-[#111114] [&_h1]:tracking-[-0.035em] [&_h2]:tracking-[-0.03em]">
       <Splash />
@@ -59,6 +61,34 @@ export default function LandingPage() {
       <SiteFooter />
     </div>
   )
+}
+
+/* ---------- navigation feel ---------- */
+
+/** Section links glide instead of jumping, only while this page is shown. */
+function useSmoothAnchors() {
+  useEffect(() => {
+    const html = document.documentElement
+    html.classList.add('smooth-anchors')
+    return () => html.classList.remove('smooth-anchors')
+  }, [])
+}
+
+/** Fetch the chat and dashboard code once the landing page is idle, so their links open without a wait. */
+function useWarmPages() {
+  useEffect(() => {
+    const warm = () => {
+      void loadCustomerPage()
+      void loadAgentPage()
+    }
+    // Safari has no requestIdleCallback; a short delay does the same job there.
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(warm, { timeout: 3000 })
+      return () => window.cancelIdleCallback(id)
+    }
+    const id = globalThis.setTimeout(warm, 1500)
+    return () => globalThis.clearTimeout(id)
+  }, [])
 }
 
 /* ---------- shared bits ---------- */
@@ -94,6 +124,7 @@ function PillLink({ to, children, tone = 'dark', className }: { to: string; chil
   return (
     <Link
       to={to}
+      viewTransition
       className={cn(
         'inline-flex h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition-all hover:-translate-y-0.5 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
         tone === 'dark' && 'bg-[#111114] text-white hover:bg-black hover:shadow-lg',
@@ -199,25 +230,28 @@ function Hero() {
           </div>
         </div>
 
-        <div className="relative mx-auto flex h-[30rem] w-full max-w-[34rem] items-end justify-center sm:h-[36rem]">
+        <div className="relative mx-auto flex w-full max-w-[34rem] items-center justify-center pt-6 pb-10 lg:pb-14">
           {/* The orange sun behind the phone, fading out at the bottom. */}
           <div
             aria-hidden
-            className="absolute top-6 left-1/2 aspect-square w-[min(30rem,92vw)] -translate-x-[52%] rounded-full bg-[radial-gradient(circle_at_35%_35%,#ff6a2b,#ec4100_45%,#f4a07a_70%,transparent_78%)] opacity-95 [mask-image:linear-gradient(to_bottom,black_55%,transparent_92%)]"
+            className="absolute top-1/2 left-1/2 aspect-square w-[min(30rem,92vw)] -translate-x-[52%] -translate-y-[58%] rounded-full bg-[radial-gradient(circle_at_35%_35%,#ff6a2b,#ec4100_45%,#f4a07a_70%,transparent_78%)] opacity-95 [mask-image:linear-gradient(to_bottom,black_55%,transparent_92%)]"
           />
-          <div className="animate-float relative z-10 mb-[-4.5rem] rotate-[4deg]">
-            <PhoneFrame label="A customer chat with Resolve on a phone" width="w-[15.5rem] sm:w-[17rem]">
-              <HeroScreen />
-            </PhoneFrame>
+          {/* The cards float beside the phone, never over its screen; a phone screen has no room for them. */}
+          <div className="relative z-10">
+            <div className="animate-float rotate-[4deg]">
+              <PhoneFrame label="A customer chat with Resolve on a phone" width="w-[15.5rem] sm:w-[17rem]">
+                <HeroScreen />
+              </PhoneFrame>
+            </div>
+            <FloatChip className="top-[40%] right-[calc(100%+0.75rem)] [animation-delay:-2s]">
+              <span className="grid size-7 place-items-center rounded-full bg-success/12 text-success"><CircleCheck className="size-4" /></span>
+              <span><span className="block text-[11px] text-neutral-500">Daily charge</span>Stopped</span>
+            </FloatChip>
+            <FloatChip className="top-[8%] left-[calc(100%+0.75rem)] [animation-delay:-4s]">
+              <span className="grid size-7 place-items-center rounded-full bg-primary/12 text-primary"><Mic className="size-4" /></span>
+              <span><span className="block text-[11px] text-neutral-500">Voice</span>Listening…</span>
+            </FloatChip>
           </div>
-          <FloatChip className="top-[34%] left-0 sm:left-2 [animation-delay:-2s]">
-            <span className="grid size-7 place-items-center rounded-full bg-success/12 text-success"><CircleCheck className="size-4" /></span>
-            <span><span className="block text-[11px] text-neutral-500">Daily charge</span>Stopped</span>
-          </FloatChip>
-          <FloatChip className="top-[10%] right-0 sm:right-4 [animation-delay:-4s]">
-            <span className="grid size-7 place-items-center rounded-full bg-primary/12 text-primary"><Mic className="size-4" /></span>
-            <span><span className="block text-[11px] text-neutral-500">Voice</span>Listening…</span>
-          </FloatChip>
         </div>
       </div>
     </section>
@@ -226,7 +260,7 @@ function Hero() {
 
 function FloatChip({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
-    <div aria-hidden className={cn('animate-float absolute z-20 flex items-center gap-2.5 rounded-2xl bg-white/95 py-2 pr-4 pl-2 text-sm font-semibold shadow-[0_12px_30px_-10px_rgb(0_0_0/0.25)] backdrop-blur', className)}>
+    <div aria-hidden className={cn('animate-float absolute z-20 hidden items-center gap-2.5 whitespace-nowrap sm:flex lg:hidden xl:flex rounded-2xl bg-white/95 py-2 pr-4 pl-2 text-sm font-semibold shadow-[0_12px_30px_-10px_rgb(0_0_0/0.25)] backdrop-blur', className)}>
       {children}
     </div>
   )
@@ -239,9 +273,6 @@ const TOPICS = [
   { icon: Wifi, label: 'Data packs' },
   { icon: Signal, label: 'Connection' },
   { icon: ReceiptText, label: 'Value-added services' },
-  { icon: Languages, label: 'English' },
-  { label: 'සිංහල' },
-  { label: 'தமிழ்' },
   { icon: PhoneCall, label: 'Voice calls' },
   { icon: UserRoundCheck, label: 'Human review' },
 ]
@@ -251,7 +282,7 @@ function TopicStrip() {
     <ul className="flex shrink-0 items-center gap-12 pr-12">
       {TOPICS.map((t) => (
         <li key={t.label} className="flex items-center gap-2 text-xl font-semibold whitespace-nowrap text-neutral-400 sm:text-2xl">
-          {t.icon && <t.icon className="size-5 sm:size-6" aria-hidden />}
+          <t.icon className="size-5 sm:size-6" aria-hidden />
           {t.label}
         </li>
       ))}
@@ -498,7 +529,7 @@ function FeatureRow({
         <Tag>{tag}</Tag>
         <h2 id={`${id}-title`} className="mt-4 text-3xl leading-tight font-medium sm:text-4xl">{title}</h2>
         <p className="mt-4 text-[15px] leading-relaxed text-neutral-600">{text}</p>
-        <Link to={cta.to} className="group mt-6 inline-flex items-center gap-1 text-sm font-semibold text-primary">
+        <Link to={cta.to} viewTransition className="group mt-6 inline-flex items-center gap-1 text-sm font-semibold text-primary">
           {cta.label}
           <ChevronRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden />
         </Link>
@@ -783,7 +814,7 @@ function SiteFooter() {
                 {col.links.map((l) => (
                   <li key={l.label}>
                     {'to' in l ? (
-                      <Link to={l.to} className="transition-colors hover:text-primary">{l.label}</Link>
+                      <Link to={l.to} viewTransition className="transition-colors hover:text-primary">{l.label}</Link>
                     ) : 'href' in l ? (
                       <a href={l.href} className="transition-colors hover:text-primary">{l.label}</a>
                     ) : (

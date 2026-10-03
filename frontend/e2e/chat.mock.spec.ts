@@ -11,6 +11,8 @@ test('journey A: evidence, explicit accept, success and a receipt', async ({ pag
   await page.waitForLoadState('networkidle')
   await mockControl(page, 'continueAsDemoLine')
   await page.reload()
+  // The welcome message appears once the conversation is open; a message sent before that is not taken.
+  await expect(page.getByText("What's going on?")).toBeVisible()
 
   const box = page.getByRole('textbox').last()
   await box.fill('I recharged LKR 1000 but my balance is LKR 420')
