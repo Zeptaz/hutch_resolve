@@ -26,12 +26,10 @@ export type CallPhase = 'idle' | 'requesting' | 'connecting' | 'live' | 'ended'
 export type CallActivity = 'listening' | 'thinking' | 'speaking'
 
 /**
- * reading: being spoken, not yet acknowledged.
- * awaiting: Voice acknowledged the presentation, so a spoken yes/no on the next turn can count.
- * text-only: could not be presented by voice (speech check failed or ack refused); answer by text.
- * interrupted: the caller talked over it before it finished.
+ * Offers use the displayed buttons because streamed model speech cannot verify
+ * that every proposal term was heard correctly.
  */
-export type ProposalStatus = 'reading' | 'awaiting' | 'text-only' | 'interrupted'
+export type ProposalStatus = 'text-only' | 'interrupted'
 
 export type CallError =
   | { kind: 'mic'; mic: MicErrorKind }
@@ -45,8 +43,6 @@ export type CallHandlers = {
   onGreeting?: (text: string) => void
   /** Resolve's reply; the page refreshes cards from the conversation. */
   onResolveResult?: (result: VoiceResolveResult) => void
-  /** Sensitive speech failed verification; show this verified text instead. */
-  onFallback?: (responseId: string, text: string) => void
 }
 
 export type CallState = {
@@ -101,8 +97,8 @@ class MockAudio implements AudioPort {
  * One customer voice call: mic -> Voice WebSocket -> speaker, following protocol zeptaz-hutch-v2.
  *
  * Rules (docs/hutch-resolve-contract.md):
- * - Send playback_complete only after a reply's audio has fully drained, then proposal_presented
- *   only after an accepted playback_ack. Nothing is acknowledged for interrupted or fallback replies.
+ * - Send playback_complete only after a reply's audio has fully drained.
+ * - Proposal confirmation remains a displayed button action.
  * - On `interrupted`, discard queued audio and any pending acknowledgement.
  * - Resolve decides; the browser only reports what was actually played.
  */
@@ -111,16 +107,13 @@ export class VoiceCall {
   private listeners = new Set<() => void>()
   private audio: AudioPort | null = null
   private socket: VoiceSocket | null = null
-  private reply: { id: string; proposal: VoiceProposal | null; fallback: boolean } | null = null
+  private reply: { id: string } | null = null
   private awaitingPlaybackAck: string | null = null
   private playbackAttempts = 0
   private playbackRetryTimer = 0
   private limitTimer = 0
   private grantRequestKey: string | null = null
-  private utterance: SpeechSynthesisUtterance | null = null
-  private speakingFallback = false
   private greetingPlaying = false
-  private speechTimer = 0
   private heardSpeech = false
   private quietFrames = 0
   private inputClosed = false
@@ -164,9 +157,9 @@ export class VoiceCall {
     }
     const audio = this.audio
     audio.onFrame = (pcm, level) => {
-      const micActive = !this.inputClosed && !this.speakingFallback && !this.greetingPlaying && !this.state.muted && level >= 0.012
+      const micActive = !this.inputClosed && !this.greetingPlaying && !this.state.muted && level >= 0.012
       if (micActive !== this.state.micActive) this.set({ micActive })
-      if (this.state.phase !== 'live' || this.state.muted || this.speakingFallback || this.greetingPlaying || this.inputClosed ||
+      if (this.state.phase !== 'live' || this.state.muted || this.greetingPlaying || this.inputClosed ||
           this.socket?.readyState !== WebSocket.OPEN) return
       if (micActive) {
         this.heardSpeech = true
@@ -175,7 +168,7 @@ export class VoiceCall {
         this.quietFrames++
       }
       if (!this.inputClosed) this.socket.send(pcm)
-      if (this.heardSpeech && this.quietFrames >= 9) {
+      if (this.heardSpeech && this.quietFrames >= 7) {
         this.send({ type: 'input_audio_end' })
         this.heardSpeech = false
         this.quietFrames = 0
@@ -292,16 +285,15 @@ export class VoiceCall {
         }
         break
       case 'resolve_result': {
-        this.stopSpeech()
         this.greetingPlaying = false
         this.audio?.flush()
         this.awaitingPlaybackAck = null
         window.clearTimeout(this.playbackRetryTimer)
         this.playbackAttempts = 0
-        this.reply = { id: msg.response_id, proposal: msg.proposal, fallback: false }
+        this.reply = { id: msg.response_id }
         this.set({
           activity: 'thinking',
-          proposal: msg.proposal ? { data: msg.proposal, responseId: msg.response_id, status: msg.sensitive_audio ? 'reading' : 'text-only' } : null,
+          proposal: msg.proposal ? { data: msg.proposal, responseId: msg.response_id, status: 'text-only' } : null,
         })
         this.handlers.onResolveResult?.(msg)
         break
@@ -309,23 +301,15 @@ export class VoiceCall {
       case 'audio_start':
         if (this.reply?.id === msg.response_id) {
           this.audio?.beginReply(msg.response_id)
-          if (this.state.error?.kind === 'voice' && this.state.error.code === 'speech_playback_unavailable') this.set({ error: null })
+          if (this.state.error?.kind === 'voice' && this.state.error.code === 'speech_unavailable') this.set({ error: null })
         }
         break
       case 'audio_end':
         this.audio?.endReply(msg.response_id)
         break
-      case 'audio_fallback':
-        if (this.reply?.id === msg.response_id) {
-          this.reply.fallback = true
-          this.handlers.onFallback?.(msg.response_id, msg.text)
-          this.updateProposal(msg.response_id, 'text-only')
-          this.speakVerifiedText(msg.text)
-        }
-        break
       case 'playback_ack':
         if (msg.response_id !== this.awaitingPlaybackAck) break
-        if (!msg.accepted && this.reply?.id === msg.response_id && !this.reply.fallback &&
+        if (!msg.accepted && this.reply?.id === msg.response_id &&
             this.state.phase === 'live' && this.playbackAttempts < 2) {
           // The Voice server can observe the acknowledgement before it has finished marking
           // audio_end complete. One bounded retry is safe: playback has already drained.
@@ -338,24 +322,19 @@ export class VoiceCall {
         }
         this.awaitingPlaybackAck = null
         window.clearTimeout(this.playbackRetryTimer)
-        if (this.reply?.id === msg.response_id && this.reply.proposal && msg.accepted) {
-          this.send({ type: 'proposal_presented', response_id: msg.response_id, proposal_id: this.reply.proposal.id, proposal_hash: this.reply.proposal.proposal_hash })
-        } else if (!msg.accepted) {
-          this.updateProposal(msg.response_id, 'text-only')
-        }
+        if (!msg.accepted) this.updateProposal(msg.response_id, 'text-only')
         break
       case 'proposal_ack':
-        this.updateProposal(msg.response_id, msg.accepted ? 'awaiting' : 'text-only')
+        this.updateProposal(msg.response_id, 'text-only')
         break
       case 'interrupted': {
-        this.stopSpeech()
         this.greetingPlaying = false
         this.audio?.flush()
         this.awaitingPlaybackAck = null
         window.clearTimeout(this.playbackRetryTimer)
         this.playbackAttempts = 0
         const p = this.state.proposal
-        if (p && (msg.response_id === null || msg.response_id === p.responseId) && (p.status === 'reading' || p.status === 'awaiting')) {
+        if (p && (msg.response_id === null || msg.response_id === p.responseId)) {
           this.set({ proposal: { ...p, status: 'interrupted' } })
         }
         this.reply = null
@@ -365,7 +344,7 @@ export class VoiceCall {
       }
       case 'error':
         if (msg.code === 'voice_session_ending' || msg.code.startsWith('invalid_')) break // informational
-        if (msg.code === 'resolve_tool_failed') this.inputClosed = false
+        if (msg.code === 'resolve_tool_failed' || msg.code === 'speech_unavailable') this.inputClosed = false
         this.set({ error: { kind: 'voice', code: msg.code } })
         break
       case 'ended':
@@ -376,7 +355,7 @@ export class VoiceCall {
 
   /** The reply's audio has fully played: report it, and nothing else. */
   private drained(id: string) {
-    if (this.reply?.id !== id || this.reply.fallback || this.state.phase !== 'live') return
+    if (this.reply?.id !== id || this.state.phase !== 'live') return
     this.inputClosed = false
     this.awaitingPlaybackAck = id
     this.playbackAttempts = 1
@@ -400,55 +379,6 @@ export class VoiceCall {
     }
   }
 
-  /** Speak Resolve-verified fallback text when Live audio cannot be used.
-   * This path never acknowledges proposal presentation; consent stays text-only. */
-  private speakVerifiedText(text: string) {
-    if (API_MODE !== 'live' || !text.trim() || this.state.phase !== 'live') return
-    this.stopSpeech()
-    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
-      this.set({ error: { kind: 'voice', code: 'speech_playback_unavailable' } })
-      this.inputClosed = false
-      return
-    }
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = /[\u0D80-\u0DFF]/.test(text) ? 'si-LK' : /[\u0B80-\u0BFF]/.test(text) ? 'ta-LK' : 'en-US'
-    utterance.rate = 1
-    this.utterance = utterance
-    this.speakingFallback = true
-    this.set({ activity: 'speaking' })
-    const finish = (failed: boolean) => {
-      if (this.utterance !== utterance) return
-      this.utterance = null
-      this.speakingFallback = false
-      this.inputClosed = false
-      window.clearTimeout(this.speechTimer)
-      if (this.state.phase === 'live') this.set(failed
-        ? { activity: 'listening', error: { kind: 'voice', code: 'speech_playback_unavailable' } }
-        : { activity: 'listening' })
-    }
-    utterance.onend = () => finish(false)
-    utterance.onerror = () => finish(true)
-    this.speechTimer = window.setTimeout(() => {
-      if (this.utterance !== utterance) return
-      this.stopSpeech()
-      this.inputClosed = false
-      this.set({ activity: 'listening', error: { kind: 'voice', code: 'speech_playback_unavailable' } })
-    }, 30_000)
-    try {
-      window.speechSynthesis.speak(utterance)
-    } catch {
-      finish(true)
-    }
-  }
-
-  private stopSpeech() {
-    window.clearTimeout(this.speechTimer)
-    this.utterance = null
-    this.speakingFallback = false
-    this.greetingPlaying = false
-    if (API_MODE === 'live') window.speechSynthesis?.cancel()
-  }
-
   private updateProposal(responseId: string, status: ProposalStatus) {
     const p = this.state.proposal
     if (p && p.responseId === responseId) this.set({ proposal: { ...p, status } })
@@ -470,14 +400,13 @@ export class VoiceCall {
       phase: 'ended',
       endReason: reason,
       error: reason ? this.state.error : (error ?? this.state.error),
-      // A spoken offer can't be answered once the call is over; it stays answerable by text.
       proposal: p && p.status !== 'text-only' ? { ...p, status: 'text-only' } : p,
     })
   }
 
   private teardown() {
     window.clearTimeout(this.limitTimer)
-    this.stopSpeech()
+    this.greetingPlaying = false
     const socket = this.socket
     this.socket = null
     if (socket) socket.onclose = null

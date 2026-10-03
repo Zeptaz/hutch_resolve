@@ -79,7 +79,6 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         // Resolve's scoped conversation is the source of truth, including older pending work.
         void syncOperations()
       },
-      onFallback: (_responseId, text) => setCaption((previous) => ({ ...previous, reply: text })),
     })
     return () => call.dispose()
   }, [call, syncOperations])
@@ -166,9 +165,6 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
     }
   }
 
-  const proposalStatus = state.proposal && offer && state.proposal.data.id === offer.data.id
-    ? state.proposal.status : 'text-only'
-  const byTap = state.phase !== 'live' || proposalStatus === 'text-only' || proposalStatus === 'interrupted'
   const expired = offer ? Date.parse(offer.data.expires_at) <= Date.now() : false
   const active = state.phase === 'live'
   const visibleOperations = operations.filter((item) => watchIds.includes(item.id))
@@ -220,8 +216,8 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         {state.error && <p role="alert" className="text-sm text-destructive">
           {state.error.kind === 'grant' ? describeError(state.error.error) : state.error.kind === 'mic' ?
             'Microphone unavailable. Check browser permission or continue by text.' :
-            state.error.code === 'speech_playback_unavailable' ?
-              'Speech playback is unavailable. Read the reply on screen or continue by text.' :
+            state.error.code === 'speech_unavailable' ?
+              'Spoken reply is unavailable. Read the reply on screen or continue by text.' :
             'Voice is unavailable. Continue by text.'}
         </p>}
         {active && <div className="flex gap-2">
@@ -241,11 +237,9 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         </dl>
         <p className="mt-3 text-xs text-muted-foreground">Valid until {formatTime(offer.data.expires_at)}</p>
         <p className="mt-2 text-sm" aria-live="polite">
-          {expired ? 'This offer expired. Ask for a new one.' : proposalStatus === 'reading' ?
-            'The offer is being read aloud.' : proposalStatus === 'awaiting' ?
-            'The offer was read. Say yes or no.' : 'Answer here by text if you want to proceed.'}
+          {expired ? 'This offer expired. Ask for a new one.' : 'Review the terms here and use the buttons to answer.'}
         </p>
-        {byTap && !expired && <div className="mt-3 flex gap-2">
+        {!expired && <div className="mt-3 flex gap-2">
           <Button disabled={offer.sending || offer.retry?.decision === 'DECLINE'} onClick={() => void answerByTap('ACCEPT')}>Yes, go ahead</Button>
           <Button variant="outline" disabled={offer.sending || offer.retry?.decision === 'ACCEPT'} onClick={() => void answerByTap('DECLINE')}>No, leave it</Button>
         </div>}

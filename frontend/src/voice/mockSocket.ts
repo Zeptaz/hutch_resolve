@@ -72,7 +72,6 @@ class MockVoiceSocket implements VoiceSocket {
       const id = newId()
       this.reply = { id, proposal, complete: false, played: false }
       this.emit({ type: 'resolve_result', response_id: id, case_id: result.case_id, reply_text: result.reply_text,
-        speech_text: result.reply_text, sensitive_audio: !!proposal || result.operation_ids.length > 0,
         pending_question: null, proposal, operation_status: result.operation_ids.length ? 'PENDING' : null,
         end_session: false })
       this.emit({ type: 'audio_start', response_id: id })

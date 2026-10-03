@@ -81,3 +81,7 @@ Implementation commit **7c5ebd9** is remotely confirmed on `hutch_resolve/voice_
 ### Shared reply repair checkpoint — 2026-10-04
 
 The repeated generic chat/call prompt came from six-second extraction timeouts in Resolve, not from a dropped frontend transcript. Resolve now recovers clear balance reads and complete English complaint starters after model failure, and the ignored local demo setting uses a successfully probed 3.5 Flash Lite model. Two live text API turns returned the correct account and investigated case responses. No frontend files changed in this phase; the remaining physical microphone/speaker and native-language checks stay open. Backend implementation commit **d5d1214** is on `voice_test`.
+
+### Faster voice playback — 2026-10-04
+
+The customer call UI now sends `input_audio_end` after seven 100 ms quiet frames. It displays Resolve's canonical reply while streaming Live PCM immediately, removes the browser speech-synthesis fallback and no longer sends proposal-presentation acknowledgements. Proposal choices remain visible buttons only. Typecheck/build and mock browser suite **24/24** pass. Physical microphone/speaker and live model latency/meaning checks remain open; J-03/J-04 are not yet complete.
