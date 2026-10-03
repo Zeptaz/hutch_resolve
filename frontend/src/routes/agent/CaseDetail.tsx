@@ -162,7 +162,7 @@ function CaseHeader({
           )}
         </State>
         <State label="Ticket">
-          {handoff ? <StatusBadge key={handoff.delivery_state} className="animate-pop" tone={deliveryTone[handoff.delivery_state]}>{humanize(handoff.delivery_state)}</StatusBadge> : <StatusBadge tone="neutral">None</StatusBadge>}
+          {handoff ? <StatusBadge key={handoff.delivery_state} className="animate-pop" tone={deliveryTone[handoff.delivery_state]}>{humanize(handoff.delivery_state)}</StatusBadge> : <StatusBadge tone="neutral">No ticket</StatusBadge>}
         </State>
       </dl>
     </header>

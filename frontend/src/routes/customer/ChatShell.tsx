@@ -317,7 +317,11 @@ export function ChatShell({ session, onDemoLogin }: {
                 }}>
                   <Input aria-label={t('chat.demoIdentity')} placeholder={t('chat.demoIdentity')} autoComplete="username" required value={loginIdentity} onChange={(event) => setLoginIdentity(event.target.value)} />
                   <Input aria-label={t('chat.demoCredential')} placeholder={t('chat.demoCredential')} autoComplete="current-password" type="password" required value={loginCredential} onChange={(event) => setLoginCredential(event.target.value)} />
-                  {loginError != null && <p role="alert" className="text-sm text-destructive">{describeError(loginError, t)}</p>}
+                  {loginError != null && (
+                    <p role="alert" className="text-sm text-destructive">
+                      {isApiError(loginError) && loginError.status === 401 ? t('chat.signInRejected') : describeError(loginError, t)}
+                    </p>
+                  )}
                   <Button type="submit" disabled={loginBusy || !conversation}>{loginBusy ? t('chat.signingIn') : t('chat.signIn')}</Button>
                 </form>
               </DialogContent>

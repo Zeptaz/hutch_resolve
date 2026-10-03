@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ShieldCheck } from 'lucide-react'
 import { API_MODE } from '@/api/client'
 import { agentApi } from '@/api/endpoints'
-import { describeError } from '@/api/errors'
+import { describeError, isApiError } from '@/api/errors'
 import { BrandMark } from '@/components/BrandMark'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -99,7 +99,10 @@ export function AgentLogin({ expired }: { expired: boolean }) {
             </div>
             {error != null && (
               <p role="alert" className="text-sm text-destructive">
-                {describeError(error)}
+                {/* A refused sign-in is a 401 too; it is not an expired session. */}
+                {isApiError(error) && error.status === 401
+                  ? 'That identity or credential is not right. Check them and try again.'
+                  : describeError(error)}
               </p>
             )}
             <Button type="submit" size="lg" disabled={submitting || !identity.trim() || !credential}>

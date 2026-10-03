@@ -26,3 +26,10 @@ def test_agent_case_detail_contract_accepts_complete_synthetic_detail():
     parsed = AgentCaseDetail.model_validate(detail)
     assert parsed.case.id == case_id
     assert parsed.account.line_alias == "SIM-0001"
+
+
+def test_every_review_status_has_readable_note_text():
+    from backend.resolve.services.review import REVIEW_STATUS_TEXT, REVIEW_STATUSES
+
+    assert set(REVIEW_STATUS_TEXT) == REVIEW_STATUSES
+    assert all("_" not in text for text in REVIEW_STATUS_TEXT.values())

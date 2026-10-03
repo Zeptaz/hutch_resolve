@@ -24,6 +24,10 @@ REVIEW_STATUSES = {"NEW", "IN_REVIEW", "CLOSED"}
 DISPOSITIONS = {"REVIEW_COMPLETE", "NEEDS_OPERATOR_FOLLOWUP", "CUSTOMER_WITHDREW"}
 
 
+
+# How a status change reads in the notes list and on the review ticket.
+REVIEW_STATUS_TEXT = {"NEW": "new", "IN_REVIEW": "in review", "CLOSED": "closed"}
+
 class AgentReviewService:
     def __init__(self, engine: Engine, account_provider: AccountProvider, cursor_secret: bytes) -> None:
         self._engine = engine
@@ -83,7 +87,7 @@ class AgentReviewService:
                 clauses.append(f"{column}=:{name}")
                 params[name] = value
         if search:
-            clauses.append("(c.id::text=:search OR a.line_alias=:search)")
+            clauses.append("(c.id::text=lower(:search) OR upper(a.line_alias)=upper(:search))")
             params["search"] = search.strip()
         if cursor:
             cursor_time, cursor_id = self._decode_cursor(cursor)
@@ -118,7 +122,7 @@ class AgentReviewService:
             """), {"case_id": case_id, "sandbox_id": sandbox_id}).mappings().one_or_none()
             if case is None:
                 raise ResolveError(404, "RESOURCE_NOT_FOUND", "Case was not found")
-            message_rows = connection.execute(text("SELECT id,client_turn_id,speaker,body,result,created_at FROM resolve.messages WHERE conversation_id=:conversation ORDER BY created_at,id"),
+            message_rows = connection.execute(text("SELECT id,client_turn_id,speaker,body,result,created_at FROM resolve.messages WHERE conversation_id=:conversation ORDER BY created_at,CASE WHEN speaker='USER' THEN 0 ELSE 1 END,id"),
                 {"conversation": case["conversation_id"]}).mappings().all()
             summaries = connection.execute(text("SELECT id,complaint_type,status FROM resolve.cases WHERE conversation_id=:conversation ORDER BY created_at,id"),
                 {"conversation": case["conversation_id"]}).mappings().all()
@@ -184,7 +188,7 @@ class AgentReviewService:
                 "next_step": "A human agent should review this case."}
         return {"case": case_view, "account": account, "conversation": conversation,
             "investigations": investigations, "proposals": proposals,
-            "confirmations": [dict(row) for row in confirmation_rows], "operations": operations,
+            "confirmations": [{**dict(row), "simulation": True} for row in confirmation_rows], "operations": operations,
             "receipts": receipts, "handoff": handoff,
             "review_notes": [{"id": row["id"], "actor_id": row["actor_id"], "note": row["note"],
                 "created_at": row["created_at"], "visibility": row["visibility"]} for row in reviews],
@@ -234,7 +238,7 @@ class AgentReviewService:
                 raise ResolveError(422, "VALIDATION_ERROR", "Closing review requires disposition and explanatory note")
             if old_status == "CLOSED" and new_status == "IN_REVIEW" and not reopen_reason:
                 raise ResolveError(422, "VALIDATION_ERROR", "Reopening review requires a reason")
-            stored_note = note or reopen_reason or f"Review status changed to {new_status}."
+            stored_note = note or reopen_reason or f"Review status changed to {REVIEW_STATUS_TEXT[new_status]}."
             event_id = uuid4()
             new_version = expected_version + 1
             connection.execute(text("UPDATE resolve.cases SET review_status=:status,version=:version,review_version=review_version+1,updated_at=:now WHERE id=:case_id"),
