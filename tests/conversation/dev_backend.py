@@ -300,7 +300,13 @@ if MODE == "hybrid":
     if not (db_url and sandbox_url):
         sys.exit("hybrid needs RESOLVE_DEV_DB=main or RESOLVE_DEV_DATABASE_URL and RESOLVE_DEV_SANDBOX_URL (a migrated database)")
     app_engine, sandbox_engine = create_engine(db_url), create_engine(sandbox_url)
-    RUN_ID = active_run(sandbox_engine)
+    try:
+        RUN_ID = active_run(sandbox_engine)
+    except Exception as err:  # noqa: BLE001  (clear startup message instead of a driver traceback)
+        where = sandbox_engine.url.render_as_string(hide_password=True)
+        sys.exit(f"hybrid: cannot reach the database at {where} ({type(err).__name__}). For dev-backend-hybrid start the "
+                 "throwaway one with `sh tests/conversation/hybrid_db.sh start`; for the main database use dev-backend-main "
+                 "and `docker compose up -d`.")
     if RUN_ID != conftest.SANDBOX:
         # Harry's seed_run.py derives every fixture ID of a new run as uuid5(run, original ID).
         ACCOUNTS.update({line: uuid5(RUN_ID, str(account)) for line, account in ACCOUNTS.items() if line != "DEMO"})
