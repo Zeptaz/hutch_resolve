@@ -89,3 +89,5 @@ The customer call UI now sends `input_audio_end` after seven 100 ms quiet frames
 ### Voice v3 caller interruption checkpoint — 2026-10-04
 
 The current call UI offers `zeptaz-hutch-v3`, sends an increasing activity segment ID after two speech frames and ends it after seven quiet frames, keeps sending microphone PCM during replies, and flushes queued playback on new caller speech. `input_audio_end` now marks a mute/pause. A mock browser test exercises interruption while PCM keeps flowing; the complete mock browser suite **25/25**, typecheck and lint pass. Real browser microphone/speaker interruption and native-language checks remain open, so J-03/J-04 are not marked complete.
+
+The external Voice/Resolve signed service path later passed two synthetic spoken turns on one v3 WebSocket with real Gemini and two accepted playback acknowledgements. This probe did not use the browser audio capture/playback UI. Keep J-03/J-04 open until a human browser microphone/speaker interruption and native-language review pass.

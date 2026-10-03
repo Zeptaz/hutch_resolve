@@ -265,6 +265,8 @@ The existing signed Voice bridge PostgreSQL integration test passed **1/1** afte
 
 The external Voice runtime has one speech-only retry after zero-PCM completion or a 10-second first-audio watchdog, still inside the 45-second total limit. It reuses the saved Resolve result. Focused Voice tests **35/35** and full suite **67/67** pass; a signed live call remains to be repeated after this change.
 
+The signed local service path has since passed a two-turn synthetic speech probe: Resolve provisioned a real grant, Voice v3 forwarded both turns to Resolve through HMAC, Gemini Live produced both audio replies and Voice accepted both playback acknowledgements. Persistence showed two completed claims and two matching user/assistant message pairs; the scoped probe session was revoked. A 30-turn fake-provider soak and complete Voice suite **68/68** pass. H-08 remains open for physical microphone/speaker, repeated real interruption, Sinhala/Tamil semantic review and latency qualification. No shared Resolve backend code changed.
+
 ### External Voice latency qualification — 2026-10-04
 
 The no-tool Voice path waited for the full ungrounded Gemini turn before requesting speech. The external runtime now interrupts that turn as soon as Resolve returns, discards queued original audio through Gemini's boundary and streams only the grounded reply. The late-tool route reuses the saved result and stays pending through the boundary. Real synthetic Gemini 3.1 probes with a two-second Resolve stub measured first PCM 0.73 seconds after Resolve text without a tool and 0.72 seconds with a late tool; Voice suite **58/58 passed**. No shared Resolve backend/frontend code changed. Full signed browser call, physical audio and native-language review remain outstanding.
