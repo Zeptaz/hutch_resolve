@@ -244,3 +244,5 @@ Implementation commits remotely confirmed: Voice `voice_test2` **47e8c92**; Reso
 ### Scoped account balance fallback — 2026-10-04
 
 The user's two saved Voice balance questions were handled as generic complaints because the configured intent model timed out at about six seconds on both. After explicitly warning the user that this touches the shared Resolve conversation engine, `voice_test` adds a narrow deterministic recovery for direct account-balance reads through the existing scoped account facade. No action, permission, provider, dashboard or database path changed. The full default backend suite passed **446 tests** with 40 opt-in PostgreSQL skips; a live synthetic browser call returned the current scoped account balance and verified natural speech. See root `context.md` and Tevin/Jayith plans for remaining human qualification.
+
+Implementation commit **7c5ebd9** is remotely confirmed on `hutch_resolve/voice_test`.

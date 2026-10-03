@@ -75,3 +75,5 @@ The real Resolve-backed package query initially failed strict presentation DTO v
 ### Direct balance enquiry recovery — 2026-10-04
 
 Two real Voice turns with “Can I know my account balance?” were transcribed correctly, but `EXTRACTION/TIMEOUT` at about six seconds sent them to the generic category prompt. The shared conversation service on `voice_test` now recognizes only clear account-balance read requests when extraction fails and invokes its existing customer-scoped `_account` path. It does not classify balance complaints or how-to questions as account reads, and guest access still requires sign-in. Regression tests cover timeout, complaint/how-to exclusion and guest denial; the full Resolve default suite passed **446/446** with 40 opt-in PostgreSQL skips. A live synthetic browser call returned the current scoped balance and verified PCM speech. Tevin's broader model and native-language intent qualification remains open.
+
+Implementation commit **7c5ebd9** is remotely confirmed on `hutch_resolve/voice_test`.
