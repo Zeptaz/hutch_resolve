@@ -256,3 +256,7 @@ Focused routing **31 passed**; full default backend suite **449 passed, 40 Postg
 ### Voice latency boundary — 2026-10-04
 
 No shared Resolve backend code changed. Resolve still owns canonical `reply_text`, operation state and consent. The external Voice branch now supplies these through a per-turn Gemini Live session memory snapshot and streams generated PCM immediately. The HTTP `speech_text` field remains for compatibility but is not used to gate browser audio. Spoken proposal consent is disabled; only explicit customer buttons may accept or decline. Voice unit suite **54/54** and paired frontend typecheck/build/mock browser **24/24** pass. Live provider latency and human semantic review remain open.
+
+### External Voice latency qualification — 2026-10-04
+
+The no-tool Voice path waited for the full ungrounded Gemini turn before requesting speech. The external runtime now interrupts that turn as soon as Resolve returns, discards queued original audio through Gemini's boundary and streams only the grounded reply. The late-tool route reuses the saved result and stays pending through the boundary. Real synthetic Gemini 3.1 probes with a two-second Resolve stub measured first PCM 0.73 seconds after Resolve text without a tool and 0.72 seconds with a late tool; Voice suite **58/58 passed**. No shared Resolve backend/frontend code changed. Full signed browser call, physical audio and native-language review remain outstanding.
