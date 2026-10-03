@@ -99,7 +99,7 @@ English card + buttons, English source in storage, and Voice/outcomes excluded.
 
 - Files: `backend/resolve/conversation/{service.py,rewrite.py,templates.py,ports.py,locales/si-Latn.json}`,
   `tests/conversation/{test_rewrite.py,test_locales.py}`.
-- Commit: `73677a4` (branch `tevin/chatbot-fixes`, local; not pushed).
+- Commit: `73677a4` (branch `tevin/chatbot-fixes`, pushed and remote-confirmed).
 - Core dependency: CE-001 (clean localization of engine text), CE-002 (internal "Reason:" note still shown,
   now also rewritten into Singlish), CE-003 (optional "show original" toggle).
 
@@ -155,5 +155,5 @@ English card + buttons, English source in storage, and Voice/outcomes excluded.
   - DB check of the knowledge query for `si` (read-only).
 - Not verified: Tamil live samples; fluent review of the new draft strings; Voice (unchanged path except that
   a spoken yes to the charge check now starts the look-up instead of being treated as offer consent — safer).
-- Commit: `73677a4` (branch `tevin/chatbot-fixes`, local; not pushed).
+- Commit: `73677a4` (branch `tevin/chatbot-fixes`, pushed and remote-confirmed).
 - Core dependency: CE-004 (price per subscription).
