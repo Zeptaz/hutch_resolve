@@ -51,5 +51,7 @@ export function describeError(e: unknown, t?: Translate): string {
   if (!isApiError(e)) return tr('error.generic')
   const key = STATUS_KEY[e.status]
   if (key) return tr(key)
+  // No Resolve error body on a 5xx means a proxy answered for it: Resolve itself is down.
+  if (!t && e.code === 'UNEXPECTED_RESPONSE' && e.status >= 500) return tr('error.unreachable')
   return (!t && e.message) || tr('error.generic')
 }

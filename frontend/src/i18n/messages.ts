@@ -23,6 +23,7 @@ export const en = {
   'error.429': 'Too many requests. Please wait a moment and try again.',
   'error.503': 'A service is temporarily unavailable. Please try again shortly.',
   'error.network': 'Could not reach the server. Check your connection and try again.',
+  'error.unreachable': "Resolve isn't reachable right now. Try again in a moment.",
 
   'chat.starting': 'Starting chat…',
   'chat.startFailed': 'Could not start the chat',
