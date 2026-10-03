@@ -88,8 +88,11 @@ def test_typed_clear_yes_in_text_chat_still_needs_the_button(hm: Harness) -> Non
     ctx = customer(ACCOUNT_A)
     conv = hm.open(ctx)
     hm.send(ctx, hm.turn(conv, details()))
+    first = hm.state(conv).pending_proposal
     result = hm.send(ctx, hm.turn(conv, text("ow")))
-    assert "on the offer above. I don't act on a typed yes" in result.reply_text
+    assert 'tap "Yes, go ahead" on the card below' in result.reply_text and "I don't act on a typed yes" in result.reply_text
+    card = next(c.data for c in result.cards if c.type == "confirmation")  # the button is right under the reply
+    assert card.action_type is first.action_type and hm.state(conv).pending_proposal.proposal_id == card.id != first.proposal_id
     assert hm.facade.calls["confirm_action"] == 0
 
 

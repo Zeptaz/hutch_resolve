@@ -81,6 +81,8 @@ _EN: dict[str, str] = {
     "empathy": "I'm sorry this has been frustrating. I'll do my best to sort it out, and you can ask for a person at any time.",
     "own_line_only": "I can only look at the line you're signed in with, not other numbers.",
     "also_mentioned": "You also mentioned a {complaint} problem. Tell me when you're ready and I'll check that next.",
+    "confirm_prompt_card": "Here's the offer to {action} for {target}. To confirm, tap \"Yes, go ahead\" on the card below, or \"No, thanks\". I don't act on a typed yes, so nothing changes by mistake.",
+    "offer_gone": "That offer is no longer available, so nothing was changed. Tell me what you'd like and I'll check again.",
     "closing": "Glad I could help. If there's anything else, just tell me here.",
     "model_unavailable": "I can't read typed messages right now. Please pick an option below and I'll take it from there.",
     "faq_none_contact": "I can't help with that in this chat, but HUTCH support can.",

@@ -156,3 +156,57 @@ def test_question_without_an_article_gets_hutch_contacts() -> None:
     result = h.send(ctx, h.turn(conv, text("update my address")))
     assert result.reply_text.startswith("I can't help with that in this chat, but HUTCH support can.\n\n")
     assert "1788" in result.reply_text and [c.title for c in result.citations] == ["Contact HUTCH customer support"]
+
+
+def test_typed_request_after_the_offer_expired_shows_a_fresh_card_here() -> None:
+    h = Harness(model=FakeModel())
+    h.model.on("why am I charged for video alerts", extraction(complaint_type="VAS_DISPUTE", action_choice="DEACTIVATE_VAS"))
+    h.model.on("Can u stop them", extraction(intent="ACTION_DECISION", decision="UNCLEAR"))
+    ctx = customer(__import__("conftest").ACCOUNT_F)
+    conv = h.open(ctx)
+    old = h.send(ctx, h.turn(conv, text("why am I charged for video alerts")))
+    h.clock.advance(minutes=20)  # the first card expired long ago and is far up the chat
+    result = h.send(ctx, h.turn(conv, text("Can u stop them")))
+    card = next(c.data for c in result.cards if c.type == "confirmation")
+    assert card.action_type.value == "DEACTIVATE_VAS" and card.expires_at > h.clock()
+    assert card.id != next(c.data for c in old.cards if c.type == "confirmation").id
+    assert result.reply_text.startswith("Here's the offer to stop future renewals for Synthetic video alerts.")
+    assert h.facade.calls["confirm_action"] == 0
+
+
+def test_offer_that_resolve_no_longer_allows_is_dropped_honestly() -> None:
+    from resolve.conversation.errors import ResolveError
+
+    h = Harness(model=FakeModel())
+    h.model.on("why am I charged for video alerts", extraction(complaint_type="VAS_DISPUTE"))
+    h.model.on("yes", extraction(intent="ACTION_DECISION", decision="ACCEPT"))
+    ctx = customer(__import__("conftest").ACCOUNT_F)
+    conv = h.open(ctx)
+    h.send(ctx, h.turn(conv, text("why am I charged for video alerts")))
+    h.facade.fail_next["propose_action"] = ResolveError("ACTION_NOT_ALLOWED")
+    result = h.send(ctx, h.turn(conv, text("yes")))
+    assert result.reply_text.startswith("That offer is no longer available, so nothing was changed.")
+    assert result.cards == [] and h.state(conv).pending_proposal is None
+
+
+def test_stop_request_does_not_ask_which_service() -> None:
+    h = Harness(model=FakeModel())
+    h.model.on("Can u stop them", extraction(complaint_type="VAS_DISPUTE", action_choice="DEACTIVATE_VAS", ambiguities=["TARGET"]))
+    ctx = customer(__import__("conftest").ACCOUNT_F)
+    conv = h.open(ctx)
+    result = h.send(ctx, h.turn(conv, text("Can u stop them")))
+    assert result.pending_question.code == "CONFIRM_ACTION"
+    assert [c.data.action_type.value for c in result.cards if c.type == "confirmation"] == ["DEACTIVATE_VAS"]
+
+
+def test_yes_to_the_current_offer_never_switches_to_another_option() -> None:
+    h = Harness(model=FakeModel())
+    h.model.on("Can u stop them", extraction(complaint_type="VAS_DISPUTE", action_choice="DEACTIVATE_VAS"))
+    # A weaker model may also tag a listed option on a plain yes.
+    h.model.on("Yes go ahead", extraction(intent="ACTION_DECISION", decision="ACCEPT", action_choice="CREATE_REVIEW_TICKET"))
+    ctx = customer(__import__("conftest").ACCOUNT_F)
+    conv = h.open(ctx)
+    h.send(ctx, h.turn(conv, text("Can u stop them")))
+    result = h.send(ctx, h.turn(conv, text("Yes go ahead")))
+    assert [c.data.action_type.value for c in result.cards if c.type == "confirmation"] == ["DEACTIVATE_VAS"]
+    assert h.facade.calls["confirm_action"] == 0

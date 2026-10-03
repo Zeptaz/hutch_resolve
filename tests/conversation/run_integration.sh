@@ -5,7 +5,7 @@
 set -eu
 PY="${PYTHON:-python}"
 NAME=hutch-tevin-integration
-PORT=55433
+PORT="${PORT:-55433}"  # override when the hybrid dev database already uses 55433
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
 

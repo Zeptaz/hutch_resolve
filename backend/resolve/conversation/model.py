@@ -57,7 +57,6 @@ class GeminiModelClient:
         self._monotonic = monotonic or time.monotonic
         self._main_blocked_until = 0.0
         self.provider = "gemini"
-        self.model_name = model
         # Newer Gemini models think by default; keep it low so extraction fits the 6 s budget.
         self._thinking = types.ThinkingConfig(thinking_level=thinking_level) if thinking_level else None
         self._client = genai.Client(
@@ -66,6 +65,12 @@ class GeminiModelClient:
                 timeout=max(request_timeout_ms, self.MIN_DEADLINE_MS), retry_options=types.HttpRetryOptions(attempts=1)
             ),
         )
+
+    @property
+    def model_name(self) -> str:
+        """The model calls go to right now (the fallback while the main quota cools down), for telemetry."""
+        blocked = self._fallback is not None and self._monotonic() < self._main_blocked_until
+        return self._fallback if blocked else self._model
 
     @classmethod
     def from_env(cls) -> "GeminiModelClient | None":

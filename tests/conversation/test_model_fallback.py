@@ -59,3 +59,11 @@ def test_other_errors_do_not_switch_models() -> None:
     with pytest.raises(ModelError):
         ask(c)
     assert calls == ["main-model"]
+
+
+def test_failures_during_the_cooldown_are_reported_under_the_fallback_name() -> None:
+    now = [0.0]
+    c, _ = client({"main-model": [QuotaError(429)], "backup-model": ["ok"]}, now)
+    assert c.model_name == "main-model"
+    ask(c)
+    assert c.model_name == "backup-model"

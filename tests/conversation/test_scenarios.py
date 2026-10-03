@@ -91,9 +91,13 @@ def test_f_model_cannot_choose_an_action_resolve_did_not_offer(hm: Harness) -> N
     ctx = customer(ACCOUNT_F)
     conv = hm.open(ctx)
     hm.send(ctx, hm.turn(conv, details("VAS_DISPUTE")))
+    first = hm.state(conv).pending_proposal.action_type
     result = hm.send(ctx, hm.turn(conv, text("send me settings")))
-    assert offered(result) == []
-    assert hm.facade.calls["propose_action"] == 1  # only the first listed option was ever proposed
+    # Never the model's pick: at most the offer already on the table is shown again with its button.
+    assert "SEND_SETTINGS_INSTRUCTIONS" not in [a.value for a in offered(result)]
+    assert offered(result) == [first]
+    proposed = [p.action_type for p in hm.facade.proposals.values()]
+    assert "SEND_SETTINGS_INSTRUCTIONS" not in [a.value for a in proposed]
 
 
 def decide(h: Harness, ctx, conv, result, value: str):

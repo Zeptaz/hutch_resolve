@@ -232,7 +232,7 @@ class ConversationService:
         now = await self._simulation_now(ctx)
         extraction = await self._extract(ctx, turn, inp.text, state, now)
         if extraction is None:
-            return self._structured_fallback(ctx, state)
+            return await self._structured_fallback(ctx, turn, state)
         if extraction.detected_language is not Language.EN or len(inp.text.split()) >= 3:
             # Reply in the language the customer writes; a bare "ok" does not switch back to English.
             state = state.evolve(language=extraction.detected_language, script=extraction.script)
@@ -244,7 +244,10 @@ class ConversationService:
     ) -> Step:
 
         intent = extraction.intent
-        choice = _match_choice(state, extraction)
+        # A clear yes/no answers the offer on the table, even if a listed option was also tagged; picking an
+        # option without a yes/no ("I want the old charge checked") still switches to it.
+        clear_answer = intent is Intent.ACTION_DECISION and extraction.decision in {SpokenDecision.ACCEPT, SpokenDecision.DECLINE}
+        choice = None if clear_answer else _match_choice(state, extraction)
         if choice is not None:
             return await self._choose_action(ctx, turn, choice, state)
         if intent is Intent.ACTION_DECISION:
@@ -252,8 +255,8 @@ class ConversationService:
                 return TurnDraft(reply_text=t.text("no_pending_action", state.language), case_id=state.active_case_id), state
             if turn.channel is Channel.VOICE and _is_customer(ctx):
                 return await self._spoken_decision(ctx, turn, inp, extraction, state)
-            # Typed "yes" is never consent: text chat uses the explicit action_decision control.
-            return _confirm_prompt(state, turn.channel)
+            # Typed "yes" is never consent: show the offer again right here so the button is next to the reply.
+            return await self._offer_again(ctx, turn, state)
         if intent is Intent.FAQ:
             return await self._faq(ctx, turn, inp.text, extraction, state)
         if intent is Intent.GREETING:
@@ -400,9 +403,9 @@ class ConversationService:
         decision = Decision.ACCEPT if ex.decision is SpokenDecision.ACCEPT else Decision.DECLINE
         return await self._confirm(ctx, turn, state, decision, evidence)
 
-    def _structured_fallback(self, ctx: AuthContext, state: DialogueState) -> Step:
+    async def _structured_fallback(self, ctx: AuthContext, turn: NormalizedTurn, state: DialogueState) -> Step:
         if state.pending_proposal is not None:
-            return _confirm_prompt(state, ctx.channel)
+            return await self._offer_again(ctx, turn, state)
         if not _is_customer(ctx):
             return _login_required(state)
         if state.candidate is not None and state.candidate.complaint_type is not None:
@@ -426,6 +429,10 @@ class ConversationService:
         ambiguities = list(dict.fromkeys([*base.ambiguities, *ex.ambiguities]))
         if ex.time_reference.kind is not TimeKind.NONE and window is None:
             ambiguities.append(Ambiguity.TIME_WINDOW)  # stated but invalid (future, >30 days, reversed)
+        if (ex.action_choice or base.preferred_action) is ActionType.DEACTIVATE_VAS:
+            # "Stop them": Resolve lists each service it can stop and they are offered one card at a time,
+            # so asking "which service?" only adds a turn.
+            ambiguities = [a for a in ambiguities if a is not Ambiguity.TARGET]
         if window is not None:
             ambiguities = [a for a in ambiguities if a is not Ambiguity.TIME_WINDOW]
 
@@ -742,6 +749,37 @@ class ConversationService:
                 input_tokens=reply.input_tokens if reply else None, output_tokens=reply.output_tokens if reply else None,
                 error_type=step.error_type,
             ))
+
+    async def _offer_again(self, ctx: AuthContext, turn: NormalizedTurn, state: DialogueState) -> Step:
+        """A typed answer to an offer: ask Resolve for a fresh offer of the same action and show its card here.
+
+        The earlier card may be far up the chat or expired (offers last 5 minutes). Nothing is confirmed;
+        only the card's button confirms. If Resolve no longer allows it, say so and drop the offer."""
+        lang, pending = state.language, state.pending_proposal
+        if turn.channel is not Channel.TEXT or not _is_customer(ctx):
+            return _confirm_prompt(state, turn.channel)
+        try:
+            if pending.action_type is ActionType.ACTIVATE_PACKAGE and self._packages is not None and pending.target_id:
+                proposal = await self._packages.propose_activation(
+                    ctx, turn.conversation_id, pending.target_id,
+                    command_key(turn.conversation_id, turn.turn_id, "activate", pending.target_id),
+                )
+            else:
+                choice = _pending_as_choice(pending)
+                if choice is None:
+                    return _confirm_prompt(state, turn.channel)
+                proposal = await self._request_proposal(ctx, turn, choice)
+        except ResolveError as err:
+            if err.code not in {"ACTION_NOT_ALLOWED", "STALE_VERSION", "PROPOSAL_INVALIDATED", "PROPOSAL_EXPIRED", "RESOURCE_NOT_FOUND"}:
+                raise
+            cleared = state.evolve(pending_proposal=None, pending_question=None)
+            return TurnDraft(reply_text=t.text("offer_gone", lang), case_id=state.active_case_id), cleared
+        reply = t.text("confirm_prompt_card", lang, action=t.action_label(proposal.action_type, lang),
+                       target=_in_sentence(proposal.target_label))
+        question = PendingQuestion(code=Q_CONFIRM_ACTION, text=reply, allowed_input_types=["action_decision", "text"])
+        draft = TurnDraft(reply_text=reply, case_id=proposal.case_id, cards=[ConfirmationCard(data=proposal)],
+                          pending_question=question)
+        return draft, state.evolve(pending_proposal=_proposal_ref(proposal, turn), pending_question=question)
 
     async def _support_card(self, ctx: AuthContext, lang: Language) -> KnowledgeCard | None:
         found = await self._knowledge.search(ctx, "contact support customer care hotline", lang, limit=3)
