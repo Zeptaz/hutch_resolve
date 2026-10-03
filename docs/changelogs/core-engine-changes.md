@@ -221,3 +221,48 @@ code was kept wherever main had already fixed the same defect. Nothing was pushe
     SUFFICIENT upgrade, `propose_escalation` investigation filter, `turn_claims` mapping, confirmation
     `simulation` flag, `escalation_reason` column, and a default reason for Resolve-offered reviews.
 - Verification: n/a. Commit: none.
+
+### CE-012 — Link each HubSpot review ticket to a synthetic customer contact
+
+- Date / status: 2026-10-04 — DONE on branch, verified with a fake HubSpot and PostgreSQL; **live contact
+  linking blocked** until the HubSpot Service Key has contact scopes (see "To finish")
+- Owner: Harry (adapter area, contract approval); built by Tevin
+- Risk: **MEDIUM** — changes which fields leave Resolve (contract updated first) and adds HubSpot calls to the
+  handoff. No schema, permission or business-rule change; mock CRM unaffected; contact problems never fail a
+  ticket.
+- Files: `docs/contracts.md` (CRM section, configuration table), `backend/resolve/providers/crm.py`
+  (`CrmCustomer`), `backend/resolve/providers/hubspot.py` (contact find/create, ticket link,
+  `verify_contacts`), `backend/resolve/services/operations.py` (reads the customer from `sandbox.customers`),
+  `backend/resolve/app/main.py` (separate startup warning), `scripts/hubspot_setup.py` (contact properties,
+  contact readiness in `check`), `README.md`, tests below.
+- What / why: in a CRM a ticket belongs to a customer. Before creating a ticket Resolve finds or creates the
+  customer's HubSpot contact and links the ticket to it (HubSpot-defined type 16), so an agent sees who the
+  problem is about and every ticket for that customer.
+  - Fields sent: first/last name split from the synthetic `display_name`, `resolve_line_alias` (unique lookup
+    key), `resolve_customer_id`, `resolve_region`, `resolve_preferred_language`, `resolve_data_source=
+    SYNTHETIC_DEMO`. Never phone, e-mail, balance or transcripts.
+  - Keyed on the line alias, not the customer UUID: every fixture reset issues new customer UUIDs, so a UUID
+    key would duplicate "Ruwan" after each reset. A real deployment would link to the operator CRM's existing
+    customer by its own ID and send no personal fields.
+  - Failure rules: HubSpot refusing contacts (missing scopes or properties) → ticket created unlinked plus a
+    warning with the error code; provider-unavailable in the contact step → handoff retried (no ticket exists
+    yet); link failure after the ticket exists → warning only, handoff stays delivered.
+- Verification:
+  - Unit (fake HubSpot): `tests/test_hubspot_crm.py` 33 passed (9 new: allowed fields only, one contact per
+    customer across tickets, retry re-uses contact and ticket, duplicate-create resolves to the existing
+    contact, missing scopes still deliver the ticket, contact outage creates no ticket, link failure keeps the
+    handoff delivered, no customer → no contact calls, readiness check codes). Full default suite 514 passed,
+    49 skipped.
+  - PostgreSQL (disposable, `run_db_tests.sh`): all 14 files pass, 0 skips; new writer test checks the runner
+    sends exactly the seeded customer's synthetic fields and links the ticket. The revoked-key test now models
+    a key refused on every call (it previously failed only the first call, which is now the contact lookup).
+  - Live HubSpot: the current Service Key returns **403 for contacts** (tickets fine). Startup logs
+    `CONTACT_CRM_AUTH_REJECTED`; a live probe still created ticket `338549094118` unlinked (archived right
+    after). Live contact creation and linking are **not yet verified**.
+- To finish (whoever has HubSpot admin access): add `crm.objects.contacts.read`, `crm.objects.contacts.write`,
+  `crm.schemas.contacts.read`, `crm.schemas.contacts.write` to the Service Key (or create a new key with them
+  and replace `HUBSPOT_ACCESS_TOKEN`); run `python scripts/hubspot_setup.py check` (expects "Customer
+  contacts: ready" after the next step) and `python scripts/hubspot_setup.py properties`; restart the backend
+  (no contact warning at startup); run one chat handoff and confirm the ticket shows the contact in HubSpot.
+  Earlier tickets are not back-filled.
+- Commit: see the commit that adds this entry on `tevin/crm-integration`.

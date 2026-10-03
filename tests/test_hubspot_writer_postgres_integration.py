@@ -110,10 +110,12 @@ def test_committed_response_lost_recovers_the_same_single_ticket(setup):
 
 def test_rejected_credentials_are_recorded_as_failed_and_not_retried(setup):
     engine, writer, fake, account_id, _ = setup
-    fake.fail_next.append(401)
+    # A revoked key refuses every call: the contact step is skipped, then the ticket itself is refused.
+    fake.fail_next.extend([401, 401])
     operation_id = uuid4()
     status, result = _execute(writer, account_id, operation_id)
     assert status == "FAILED" and result["code"] == "CRM_AUTH_REJECTED" and result["provider_ticket_id"] is None
+    assert fake.fail_next == [] and fake.tickets == {}
     calls = len(fake.requests)
     assert _execute(writer, account_id, operation_id)[0] == "FAILED"
     assert len(fake.requests) == calls
@@ -149,3 +151,21 @@ def test_review_sync_outage_raises_and_leaves_no_record(setup):
                            case_id=uuid5(NAMESPACE_URL, f"case:{operation_id}"), case_version=2,
                            review_status="IN_REVIEW", disposition=None, note="Checking.")
     assert _recorded(engine, f"resolve-review:{event_id}") is None and fake.notes == {}
+
+
+def test_ticket_links_the_seeded_synthetic_customer_as_a_contact(setup):
+    engine, writer, fake, account_id, _ = setup
+    with engine.connect() as connection:
+        seeded = connection.execute(text("""
+            SELECT a.line_alias,a.region_code,c.id,c.display_name,c.preferred_language
+            FROM sandbox.accounts a JOIN sandbox.customers c ON (c.sandbox_id,c.id)=(a.sandbox_id,a.customer_id)
+            WHERE a.sandbox_id=:run AND a.id=:account"""), {"run": RUN_ID, "account": account_id}).mappings().one()
+    status, result = _execute(writer, account_id, uuid4())
+    assert status == "SUCCEEDED"
+    (contact_id, contact), = fake.contacts.items()
+    first, _, last = seeded["display_name"].partition(" ")
+    assert contact == {"firstname": first, "lastname": last, "resolve_line_alias": seeded["line_alias"],
+                       "resolve_customer_id": str(seeded["id"]), "resolve_region": seeded["region_code"],
+                       "resolve_preferred_language": seeded["preferred_language"],
+                       "resolve_data_source": "SYNTHETIC_DEMO"}
+    assert fake.ticket_contacts == {result["provider_ticket_id"]: {contact_id}}

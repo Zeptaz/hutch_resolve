@@ -128,6 +128,11 @@ def create_app(
                 if problems:
                     logger.warning("HubSpot CRM check failed (%s); review tickets will not reach HubSpot until "
                                    "this is fixed. Run: python scripts/hubspot_setup.py check", ", ".join(problems))
+                contact_problems = await asyncio.to_thread(crm.verify_contacts)
+                if contact_problems:
+                    logger.warning("HubSpot customer contacts unavailable (%s); review tickets are created without a "
+                                   "linked contact. Run: python scripts/hubspot_setup.py check",
+                                   ", ".join(contact_problems))
             logger.info("CRM provider for review tickets: %s", "hubspot" if crm else "mock")
             runner = OperationRunner(active_database.engine, sandbox_engine, crm)
             application.state.operation_runner = runner

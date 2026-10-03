@@ -221,3 +221,18 @@ Base: `origin/tevin/chatbot-fixes` `4b305ff` (main `4b581b2` + CB-001..003), the
 `scripts/dev_db.sh` needed two fixes for main: make every `database/*.sh` executable in the temporary copy (main added `99-ready.sh`) and wait for its `.hutch_initialized` marker. `run_db_tests.sh` now also runs the turn-reconciliation test.
 
 Verification on this branch: see the CE-005 entry and `context.md` (unit, PostgreSQL, browser mock CRM, live HubSpot ticket `338730627792`). Second live run (2026-10-04): ticket `338552685274` — Singlish complaint, agent note and close (NEEDS_OPERATOR_FOLLOWUP) synced; HubSpot read-back stage CLOSED with both tagged notes. Test tickets on the team HubSpot account: `338730627792`, `338552685274` (kept; archive with `python scripts/hubspot_setup.py archive <id>` when done).
+
+## Customer contacts on tickets (CE-012) — 2026-10-04
+
+Goal: make HubSpot read like a real CRM: every review ticket belongs to a customer contact, and opening a contact shows all their tickets. Demo customers only (invented names from the fixture), never real people.
+
+- [x] Contract: contact fields and failure rules in `docs/contracts.md` (pending Harry).
+- [x] Adapter: find-or-create the contact by unique `resolve_line_alias`, link with HubSpot-defined type 16; refused contacts → ticket unlinked plus a warning; contact-step outage → handoff retried; link failure after the ticket → warning only.
+- [x] Runner reads the customer from `sandbox.customers`/`sandbox.accounts` and passes only `CrmCustomer` fields.
+- [x] Setup: `properties` creates the five contact properties; `check` reports contact readiness; startup logs a separate contact warning.
+- [x] Tests: unit 33 (9 new), PostgreSQL writer 7 (1 new), full DB suite 14/14 files.
+- [x] Live: missing contact scopes handled (ticket `338549094118` delivered unlinked, archived).
+- [ ] Live: add contact scopes to the Service Key, run `check` and `properties`, restart, run one handoff and confirm the contact appears on the ticket in HubSpot.
+- [ ] Optional: back-fill contacts for tickets created before CE-012 (not built).
+
+Why the line alias is the key: every fixture reset creates new customer UUIDs; keying on the UUID would create a second "Ruwan" after each reset. In a real operator deployment the ticket would link to the CRM's existing customer by the operator's own customer ID, and Resolve would send no personal fields at all.

@@ -6,6 +6,7 @@ performs single-shot calls and reports transient versus terminal failures.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -27,12 +28,24 @@ class CrmRejected(Exception):
         self.message = message
 
 
+@dataclass(frozen=True, slots=True)
+class CrmCustomer:
+    """The synthetic customer a review ticket is about. Only these fields may leave Resolve."""
+
+    customer_id: str
+    display_name: str
+    line_alias: str
+    region_code: str
+    preferred_language: str
+
+
 class RemoteTicketCrm(Protocol):
     provider_name: str
 
     def create_review_ticket(self, *, operation_id: UUID, case_id: UUID, investigation_id: UUID,
                              complaint_type: str, queue: str, line_alias: str | None,
-                             escalation_reason: str | None, evidence_state: str | None) -> str: ...
+                             escalation_reason: str | None, evidence_state: str | None,
+                             customer: CrmCustomer | None = None) -> str: ...
 
     def sync_review(self, *, ticket_id: str, event_id: UUID, case_id: UUID, case_version: int,
                     review_status: str, disposition: str | None, note: str) -> tuple[str, dict[str, Any]]: ...

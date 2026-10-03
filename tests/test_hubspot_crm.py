@@ -7,14 +7,14 @@ import httpx
 import pytest
 
 from backend.resolve.app.config import Settings
-from backend.resolve.providers.crm import CrmRejected, CrmUnavailable
+from backend.resolve.providers.crm import CrmCustomer, CrmRejected, CrmUnavailable
 from backend.resolve.providers.hubspot import HubSpotConfig, HubSpotCrm, HubSpotTicketClient
 
 TOKEN = "test-only-not-a-real-hubspot-key"
 
 
 class FakeHubSpot:
-    """Just enough of the CRM v3/v4 API for tickets, notes and their associations."""
+    """Just enough of the CRM v3/v4 API for tickets, notes, contacts and their associations."""
 
     def __init__(self) -> None:
         self.tickets: dict[str, dict[str, str]] = {}
@@ -23,6 +23,9 @@ class FakeHubSpot:
         self.requests: list[httpx.Request] = []
         self.fail_next: list[object] = []
         self.missing_properties: set[str] = set()
+        self.contacts: dict[str, dict[str, str]] = {}
+        self.ticket_contacts: dict[str, set[str]] = {}
+        self.contacts_forbidden = False
         self._next_id = 9000
 
     def _id(self) -> str:
@@ -38,6 +41,33 @@ class FakeHubSpot:
             return httpx.Response(int(failure), json={"message": "simulated"})
         path, method = request.url.path, request.method
         body = json.loads(request.content) if request.content else {}
+        if self.contacts_forbidden and "contacts" in path:
+            return httpx.Response(403, json={"category": "MISSING_SCOPES"})
+        if method == "POST" and path == "/crm/v3/objects/contacts/batch/read":
+            wanted = {item["id"] for item in body["inputs"]}
+            found = [{"id": cid, "properties": {"resolve_line_alias": props["resolve_line_alias"]}}
+                     for cid, props in self.contacts.items() if props.get("resolve_line_alias") in wanted]
+            return httpx.Response(200 if found else 207, json={"status": "COMPLETE", "results": found})
+        if method == "POST" and path == "/crm/v3/objects/contacts":
+            props = body["properties"]
+            if any(c.get("resolve_line_alias") == props["resolve_line_alias"] for c in self.contacts.values()):
+                return httpx.Response(400, json={"category": "VALIDATION_ERROR"})
+            contact_id = self._id()
+            self.contacts[contact_id] = dict(props)
+            return httpx.Response(201, json={"id": contact_id, "properties": props})
+        if method == "PUT" and path.startswith("/crm/v4/objects/tickets/") and "/associations/contacts/" in path:
+            parts = path.split("/")
+            ticket_id, contact_id = parts[5], parts[8]
+            if ticket_id not in self.tickets or contact_id not in self.contacts:
+                return httpx.Response(404, json={"category": "OBJECT_NOT_FOUND"})
+            assert body == [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 16}]
+            self.ticket_contacts.setdefault(ticket_id, set()).add(contact_id)
+            return httpx.Response(200, json={"fromObjectId": ticket_id, "toObjectId": contact_id})
+        if method == "GET" and path.startswith("/crm/v3/properties/contacts/"):
+            name = path.rsplit("/", 1)[-1]
+            if name in self.missing_properties:
+                return httpx.Response(404, json={"category": "OBJECT_NOT_FOUND"})
+            return httpx.Response(200, json={"name": name, "hasUniqueValue": name == "resolve_line_alias"})
         if method == "POST" and path == "/crm/v3/objects/tickets/batch/read":
             wanted = {item["id"] for item in body["inputs"]}
             found = [{"id": tid, "properties": {"resolve_operation_id": props["resolve_operation_id"]}}
@@ -89,7 +119,7 @@ class FakeHubSpot:
 
     def writes(self) -> list[str]:
         return [f"{r.method} {r.url.path}" for r in self.requests
-                if r.method in {"POST", "PATCH"} and not r.url.path.endswith("/batch/read")]
+                if r.method in {"POST", "PATCH", "PUT"} and not r.url.path.endswith("/batch/read")]
 
 
 def _config(**overrides) -> HubSpotConfig:
@@ -331,3 +361,98 @@ def test_startup_check_names_each_problem():
     assert crm.verify() == ["STAGE_CLOSED_NOT_IN_PIPELINE", "PROPERTY_NOT_FOUND"]
     fake.fail_next.append(401)
     assert crm.verify() == ["CRM_AUTH_REJECTED"]
+
+
+RUWAN = CrmCustomer(customer_id="10000000-0000-0000-0000-000000000004", display_name="Ruwan Jayasinghe",
+                    line_alias="SIM-LK-0004", region_code="NORTH", preferred_language="en")
+
+
+def _create_for(crm: HubSpotCrm, customer: CrmCustomer | None = RUWAN, operation_id=None) -> str:
+    return crm.create_review_ticket(
+        operation_id=operation_id or uuid4(), case_id=uuid4(), investigation_id=uuid4(),
+        complaint_type="BALANCE_RECHARGE", queue="BILLING_REVIEW", line_alias="SIM-LK-0004",
+        escalation_reason="Customer asked for a person.", evidence_state="PARTIAL", customer=customer)
+
+
+def test_ticket_is_linked_to_a_synthetic_customer_contact_with_only_allowed_fields(hubspot):
+    fake, crm = hubspot
+    ticket_id = _create_for(crm)
+    (contact_id, contact), = fake.contacts.items()
+    assert contact == {"firstname": "Ruwan", "lastname": "Jayasinghe", "resolve_line_alias": "SIM-LK-0004",
+                       "resolve_customer_id": RUWAN.customer_id, "resolve_region": "NORTH",
+                       "resolve_preferred_language": "en", "resolve_data_source": "SYNTHETIC_DEMO"}
+    assert fake.ticket_contacts == {ticket_id: {contact_id}}
+    assert not {"phone", "email", "mobilephone"} & set(contact)
+
+
+def test_the_same_customer_keeps_one_contact_across_tickets(hubspot):
+    fake, crm = hubspot
+    first, second = _create_for(crm), _create_for(crm)
+    assert len(fake.contacts) == 1 and first != second
+    (contact_id,) = fake.contacts
+    assert fake.ticket_contacts == {first: {contact_id}, second: {contact_id}}
+
+
+def test_retried_handoff_reuses_the_contact_and_ticket_and_relinks_harmlessly(hubspot):
+    fake, crm = hubspot
+    operation_id = uuid4()
+    assert _create_for(crm, operation_id=operation_id) == _create_for(crm, operation_id=operation_id)
+    assert len(fake.contacts) == 1 and len(fake.tickets) == 1
+    assert fake.writes().count("POST /crm/v3/objects/contacts") == 1
+
+
+def test_contact_created_by_a_lost_response_is_found_not_duplicated(hubspot):
+    fake, crm = hubspot
+    fake.contacts["7"] = {"resolve_line_alias": "SIM-LK-0004"}
+    fake.fail_next = [207]  # first lookup reports nothing (stale read); the create then hits the unique key
+    _create_for(crm)
+    assert list(fake.contacts) == ["7"]
+
+
+def test_missing_contact_scopes_still_deliver_the_ticket_unlinked(hubspot, caplog):
+    fake, crm = hubspot
+    fake.contacts_forbidden = True
+    with caplog.at_level("WARNING", logger="hutch_resolve.crm"):
+        ticket_id = _create_for(crm)
+    assert ticket_id in fake.tickets and fake.ticket_contacts == {}
+    assert "CRM_AUTH_REJECTED" in caplog.text and TOKEN not in caplog.text
+
+
+def test_contact_step_unavailable_retries_the_handoff_before_any_ticket_exists(hubspot):
+    fake, crm = hubspot
+    fake.fail_next = [503]
+    with pytest.raises(CrmUnavailable):
+        _create_for(crm)
+    assert fake.tickets == {}
+
+
+def test_a_failed_link_after_the_ticket_exists_does_not_fail_the_handoff(hubspot, caplog):
+    fake, crm = hubspot
+    original = fake.__call__
+
+    def link_fails(request):
+        if request.method == "PUT":
+            return httpx.Response(503, json={})
+        return original(request)
+
+    client = HubSpotTicketClient(_config(), transport=httpx.MockTransport(link_fails))
+    with caplog.at_level("WARNING", logger="hutch_resolve.crm"):
+        ticket_id = _create_for(HubSpotCrm(_config(), client))
+    client.close()
+    assert ticket_id in fake.tickets and fake.ticket_contacts == {}
+    assert "CRM_UNAVAILABLE" in caplog.text
+
+
+def test_no_customer_means_no_contact_calls(hubspot):
+    fake, crm = hubspot
+    _create_for(crm, customer=None)
+    assert fake.contacts == {} and not [r for r in fake.requests if "contacts" in r.url.path]
+
+
+def test_contact_readiness_check_names_each_problem(hubspot):
+    fake, crm = hubspot
+    assert crm.verify_contacts() == []
+    fake.missing_properties = {"resolve_region"}
+    assert crm.verify_contacts() == ["CONTACT_PROPERTY_NOT_FOUND"]
+    fake.contacts_forbidden = True
+    assert crm.verify_contacts() == ["CONTACT_CRM_AUTH_REJECTED"]

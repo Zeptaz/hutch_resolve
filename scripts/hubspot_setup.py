@@ -4,7 +4,7 @@ Reads HUBSPOT_ACCESS_TOKEN from the repository .env and never prints it.
 
     python scripts/hubspot_setup.py check                 # account, ticket pipelines and stage IDs
     python scripts/hubspot_setup.py check --write-env     # also write pipeline/stage/portal IDs to .env
-    python scripts/hubspot_setup.py properties            # create the resolve_* ticket properties if missing
+    python scripts/hubspot_setup.py properties            # create the resolve_* ticket and contact properties if missing
     python scripts/hubspot_setup.py spike [--pause|--keep] # live create/duplicate/note/stage/archive test
     python scripts/hubspot_setup.py archive <ticket-id>    # archive a ticket kept by --keep
 
@@ -38,6 +38,15 @@ PROPERTIES = [
     {"name": "resolve_evidence_state", "label": "Resolve evidence state", "type": "string", "fieldType": "text"},
     {"name": "resolve_review_version", "label": "Resolve review version", "type": "number", "fieldType": "number",
      "description": "Last Resolve case version synced; older review updates are refused."},
+]
+CONTACT_PROPERTIES = [
+    {"name": "resolve_line_alias", "label": "Resolve line", "type": "string", "fieldType": "text",
+     "hasUniqueValue": True, "description": "Synthetic line alias; Resolve finds the customer's contact by it."},
+    {"name": "resolve_customer_id", "label": "Resolve customer ID", "type": "string", "fieldType": "text"},
+    {"name": "resolve_region", "label": "Resolve region", "type": "string", "fieldType": "text"},
+    {"name": "resolve_preferred_language", "label": "Resolve preferred language", "type": "string", "fieldType": "text"},
+    {"name": "resolve_data_source", "label": "Resolve data source", "type": "string", "fieldType": "text",
+     "description": "SYNTHETIC_DEMO: invented demo customer, not a real person."},
 ]
 ENV_KEYS = ("HUBSPOT_PORTAL_ID", "HUBSPOT_APP_BASE", "HUBSPOT_PIPELINE_ID", "HUBSPOT_STAGE_NEW", "HUBSPOT_STAGE_IN_REVIEW",
             "HUBSPOT_STAGE_CLOSED")
@@ -102,6 +111,15 @@ def check(write_env: bool) -> None:
             match = next((by_label[label] for label in labels if label in by_label), None)
             if match:
                 found[key] = match
+    with _http() as http:
+        contacts = http.get("/crm/v3/properties/contacts/resolve_line_alias")
+    print("\nCustomer contacts: " + {
+        200: "ready (contact access and properties present)",
+        404: "access OK, properties missing - run: python scripts/hubspot_setup.py properties",
+        401: "the key was refused",
+        403: "the key has no contact scopes - add crm.objects.contacts.read/write and "
+             "crm.schemas.contacts.read/write to the Service Key",
+    }.get(contacts.status_code, f"unexpected HTTP {contacts.status_code}"))
     print("\nSuggested .env values:")
     for key in ENV_KEYS:
         print(f"  {key}={found.get(key, '<choose by hand>')}")
@@ -111,15 +129,18 @@ def check(write_env: bool) -> None:
 
 def properties() -> None:
     with _http() as http:
-        for prop in PROPERTIES:
-            existing = http.get(f"/crm/v3/properties/tickets/{prop['name']}")
-            if existing.status_code == 200:
-                unique = existing.json().get("hasUniqueValue")
-                print(f"exists   {prop['name']}" + (" (unique)" if unique else ""))
-                continue
-            body = {"groupName": "ticketinformation", "description": "", **prop}
-            created = _show(http.post("/crm/v3/properties/tickets", json=body), f"Create {prop['name']}")
-            print(f"created  {created['name']}" + (" (unique)" if created.get("hasUniqueValue") else ""))
+        for object_type, group, props in (("tickets", "ticketinformation", PROPERTIES),
+                                          ("contacts", "contactinformation", CONTACT_PROPERTIES)):
+            for prop in props:
+                existing = http.get(f"/crm/v3/properties/{object_type}/{prop['name']}")
+                if existing.status_code == 200:
+                    unique = existing.json().get("hasUniqueValue")
+                    print(f"exists   {object_type}.{prop['name']}" + (" (unique)" if unique else ""))
+                    continue
+                body = {"groupName": group, "description": "", **prop}
+                created = _show(http.post(f"/crm/v3/properties/{object_type}", json=body),
+                                f"Create {object_type}.{prop['name']}")
+                print(f"created  {object_type}.{created['name']}" + (" (unique)" if created.get("hasUniqueValue") else ""))
 
 
 def spike(pause: bool, keep: bool) -> None:

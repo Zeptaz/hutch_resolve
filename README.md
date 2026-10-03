@@ -48,8 +48,9 @@ The database volume is Docker-managed, outside the OneDrive-synced repository. `
 
 Review tickets can go to a real HubSpot account instead of the mock CRM. Only synthetic case references and summaries are sent; sync is one-way (Resolve to HubSpot).
 
-1. In HubSpot, create a Service Key (Settings, Integrations, Service Keys) with ticket read/write and ticket schema read/write. Put it in `.env` as `HUBSPOT_ACCESS_TOKEN`; never commit or share it.
-2. `python scripts/hubspot_setup.py check --write-env` writes the Hub ID, web domain, pipeline and stage IDs to `.env`; `properties` creates the `resolve_*` ticket fields; `spike --pause` runs a live create/duplicate/note/stage test and archives its tickets.
+1. In HubSpot, create a Service Key (Settings, Integrations, Service Keys) with ticket read/write and ticket schema read/write. For customer contacts on each ticket also add `crm.objects.contacts.read`/`write` and `crm.schemas.contacts.read`/`write`; without them tickets are still created, just not linked to a contact. Put the key in `.env` as `HUBSPOT_ACCESS_TOKEN`; never commit or share it.
+2. `python scripts/hubspot_setup.py check --write-env` writes the Hub ID, web domain, pipeline and stage IDs to `.env` and reports whether contacts are ready; `properties` creates the `resolve_*` ticket and contact fields; `spike --pause` runs a live create/duplicate/note/stage test and archives its tickets.
+   Each review ticket is linked to a HubSpot contact for the synthetic customer (name, line, region, language, marked `SYNTHETIC_DEMO`; never phone or e-mail), found by its line so one demo customer keeps one contact across resets.
 3. Set `CRM_PROVIDER=hubspot` and restart. The backend checks the key, stages and properties at startup and logs a warning if anything is missing.
 4. Optional agent link: set `VITE_CRM_NAME=HubSpot` and `VITE_CRM_TICKET_URL=https://<web domain>/contacts/<hub id>/record/0-5/{id}` in `frontend/.env.local`.
 

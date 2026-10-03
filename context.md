@@ -1,5 +1,9 @@
 # HUTCH Resolve: team source of truth
 
+### HubSpot customer contacts (CE-012) — 2026-10-04, branch `tevin/crm-integration`
+
+- [ ] Each HubSpot review ticket is linked to a contact for the synthetic customer (name, line, region, language, `SYNTHETIC_DEMO`; never phone/e-mail), found or created by its unique line alias. Contract updated first. Contact problems never fail a ticket. Implemented and verified with a fake HubSpot (unit 33/33; full suite **514 passed, 49 skipped**) and PostgreSQL (all 14 opt-in files pass, 0 skips). **Live linking is blocked**: the HubSpot Service Key has no contact scopes (403); live probe confirmed the ticket is still delivered unlinked with a startup warning. To finish: add contact scopes, run `scripts/hubspot_setup.py check` and `properties`, restart, run one handoff (steps in CE-012 and `docs/plans/hubspot-crm.md`). Needs Harry's approval of the contract change (MEDIUM).
+
 ### HubSpot CRM integration onto main (CE-005..011, CB-004..005) — 2026-10-03, branch `tevin/crm-integration`
 
 - Branch = `origin/tevin/chatbot-fixes` `4b305ff` + merge of `origin/main` `d7dc9da` (`3281d02`, Jayith's dashboard fixes incl. the case-detail 500 on confirmed cases) + the HubSpot work from `tevin/hubspot-crm` `61d8506`, **ported change by change** rather than merged from its old fork point `46d41ed`. Commits: `54a4b58` CRM adapter/runner/config/scripts/docs, `ddf619d` chatbot fixes, `2d0c8ce` frontend fixes, `b4c0dc3` Jayith's `eff54ce` (sync RUNNING→PENDING), `2d34967` chatbot escalation fix. Not pushed. Nothing on `main` changed.

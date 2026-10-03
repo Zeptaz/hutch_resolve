@@ -1,13 +1,15 @@
 """HubSpot CRM adapter for Resolve's human-review tickets (prototype, synthetic data only).
 
-Sends case references and a synthetic summary; never transcripts, names, phone numbers or
-credentials. Every call is single-shot with short timeouts: the OperationRunner owns retries.
-Request bodies, responses and the access token are never logged or put in exception text.
+Sends case references, a synthetic summary and the synthetic customer's contact record (name,
+line, region, language); never transcripts, phone numbers, e-mail addresses or credentials. Every
+call is single-shot with short timeouts: the OperationRunner owns retries. Request bodies,
+responses and the access token are never logged or put in exception text.
 """
 
 from __future__ import annotations
 
 import html
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -17,11 +19,18 @@ from uuid import UUID
 
 import httpx
 
-from .crm import CrmRejected, CrmUnavailable
+from .crm import CrmCustomer, CrmRejected, CrmUnavailable
+
+logger = logging.getLogger("hutch_resolve.crm")
 
 REVIEW_MARKER_PREFIX = "resolve-review:"
 TICKET_PROPERTIES = ("resolve_operation_id", "resolve_case_id", "resolve_queue",
                      "resolve_evidence_state", "resolve_review_version")
+# resolve_line_alias is the unique lookup key: fixture resets issue new customer UUIDs, the line stays.
+CONTACT_PROPERTIES = ("resolve_line_alias", "resolve_customer_id", "resolve_region",
+                      "resolve_preferred_language", "resolve_data_source")
+SYNTHETIC_SOURCE = "SYNTHETIC_DEMO"
+TICKET_CONTACT_ASSOCIATION_ID = 16  # HubSpot-defined ticket-to-contact type
 _REASON_LIMIT = 500
 _NOTE_LIMIT = 2000
 _MAX_NOTE_PAGES = 20
@@ -89,7 +98,7 @@ class HubSpotTicketClient:
     def close(self) -> None:
         self._http.close()
 
-    def _request(self, method: str, path: str, *, body: dict[str, Any] | None = None,
+    def _request(self, method: str, path: str, *, body: dict[str, Any] | list[Any] | None = None,
                  params: dict[str, str] | None = None, duplicate_ok: bool = False,
                  not_found_code: str | None = None) -> httpx.Response:
         try:
@@ -153,6 +162,47 @@ class HubSpotTicketClient:
         if not ticket_id:
             raise CrmUnavailable("CRM_BAD_RESPONSE")
         return str(ticket_id)
+
+    def find_contact_by_line(self, line_alias: str) -> str | None:
+        response = self._request("POST", "/crm/v3/objects/contacts/batch/read", body={
+            "idProperty": "resolve_line_alias", "inputs": [{"id": line_alias}],
+            "properties": ["resolve_line_alias"]})
+        for item in self._json(response).get("results") or []:
+            if (item.get("properties") or {}).get("resolve_line_alias") in (None, line_alias) and item.get("id"):
+                return str(item["id"])
+        return None
+
+    def ensure_contact(self, properties: dict[str, str]) -> str:
+        """Find the contact by its unique line alias, or create it; never makes a second one."""
+        line_alias = properties["resolve_line_alias"]
+        existing = self.find_contact_by_line(line_alias)
+        if existing is not None:
+            return existing
+        response = self._request("POST", "/crm/v3/objects/contacts", body={"properties": properties},
+                                 duplicate_ok=True)
+        if response.status_code in {400, 409}:
+            # A concurrent or earlier attempt may have created it; the unique property decides.
+            existing = self.find_contact_by_line(line_alias)
+            if existing is not None:
+                return existing
+            if response.status_code == 409:
+                raise CrmUnavailable("CRM_CONFLICT_UNRESOLVED")
+            raise CrmRejected("PROVIDER_REJECTED", "HubSpot rejected the request (HTTP 400).")
+        contact_id = self._json(response).get("id")
+        if not contact_id:
+            raise CrmUnavailable("CRM_BAD_RESPONSE")
+        return str(contact_id)
+
+    def link_ticket_to_contact(self, ticket_id: str, contact_id: str) -> None:
+        """Idempotent: HubSpot keeps one association of this type however often it is written."""
+        self._request("PUT", f"/crm/v4/objects/tickets/{ticket_id}/associations/contacts/{contact_id}",
+                      body=[{"associationCategory": "HUBSPOT_DEFINED",
+                             "associationTypeId": TICKET_CONTACT_ASSOCIATION_ID}],
+                      not_found_code="TICKET_NOT_FOUND")
+
+    def get_contact_property(self, name: str) -> dict[str, Any]:
+        return self._json(self._request("GET", f"/crm/v3/properties/contacts/{name}",
+                                        not_found_code="PROPERTY_NOT_FOUND"))
 
     def get_ticket(self, ticket_id: str, properties: tuple[str, ...]) -> dict[str, Any]:
         response = self._request("GET", f"/crm/v3/objects/tickets/{ticket_id}",
@@ -237,13 +287,46 @@ class HubSpotCrm:
             problems.append(exc.code)
         return problems
 
+    def verify_contacts(self) -> list[str]:
+        """Startup check for customer contacts: contact access and the resolve_* contact properties
+        (unique resolve_line_alias). Problems here never stop tickets; they are created unlinked."""
+        problems: list[str] = []
+        try:
+            for name in CONTACT_PROPERTIES:
+                prop = self._client.get_contact_property(name)
+                if name == "resolve_line_alias" and not prop.get("hasUniqueValue"):
+                    problems.append("CONTACT_LINE_NOT_UNIQUE")
+        except (CrmUnavailable, CrmRejected) as exc:
+            problems.append(f"CONTACT_{exc.code}")
+        return problems
+
+    def _contact_for(self, customer: CrmCustomer) -> str | None:
+        """The customer's contact ID, or None when HubSpot refuses contacts (the ticket goes ahead).
+        Provider-unavailable propagates: nothing is created yet, so the whole handoff is retried."""
+        first, _, last = " ".join(customer.display_name.split()).partition(" ")
+        properties = {
+            "firstname": first[:100], "lastname": last[:100],
+            "resolve_line_alias": customer.line_alias,
+            "resolve_customer_id": customer.customer_id,
+            "resolve_region": customer.region_code,
+            "resolve_preferred_language": customer.preferred_language,
+            "resolve_data_source": SYNTHETIC_SOURCE,
+        }
+        try:
+            return self._client.ensure_contact(properties)
+        except CrmRejected as exc:
+            logger.warning("HubSpot customer contact skipped (%s); the review ticket is created without it", exc.code)
+            return None
+
     def _stage_for(self, review_status: str) -> str:
         return {"NEW": self._config.stage_new, "IN_REVIEW": self._config.stage_in_review,
                 "CLOSED": self._config.stage_closed}.get(review_status, self._config.stage_in_review)
 
     def create_review_ticket(self, *, operation_id: UUID, case_id: UUID, investigation_id: UUID,
                              complaint_type: str, queue: str, line_alias: str | None,
-                             escalation_reason: str | None, evidence_state: str | None) -> str:
+                             escalation_reason: str | None, evidence_state: str | None,
+                             customer: CrmCustomer | None = None) -> str:
+        contact_id = self._contact_for(customer) if customer is not None else None
         reason = " ".join((escalation_reason or "").split())[:_REASON_LIMIT] or "Not given"
         lines = [
             "SYNTHETIC DEMO DATA - HUTCH Resolve prototype. No real customer information.",
@@ -268,7 +351,14 @@ class HubSpotCrm:
             "resolve_queue": queue,
             "resolve_evidence_state": evidence_state or "UNKNOWN",
         }
-        return self._client.create_ticket(properties)
+        ticket_id = self._client.create_ticket(properties)
+        if contact_id is not None:
+            try:
+                self._client.link_ticket_to_contact(ticket_id, contact_id)
+            except (CrmUnavailable, CrmRejected) as exc:
+                # The ticket exists; a missing link must not turn a delivered handoff into a failure.
+                logger.warning("HubSpot ticket-to-contact link skipped (%s)", exc.code)
+        return ticket_id
 
     def sync_review(self, *, ticket_id: str, event_id: UUID, case_id: UUID, case_version: int,
                     review_status: str, disposition: str | None, note: str) -> tuple[str, dict[str, Any]]:

@@ -11,7 +11,7 @@ from uuid import UUID, uuid5, NAMESPACE_URL
 
 from sqlalchemy import Engine, text
 
-from backend.resolve.providers.crm import CrmRejected, CrmUnavailable, RemoteTicketCrm
+from backend.resolve.providers.crm import CrmCustomer, CrmRejected, CrmUnavailable, RemoteTicketCrm
 
 from .case_status import refresh_case_status
 
@@ -285,14 +285,23 @@ class MockSandboxWriter:
             raise RuntimeError("No remote CRM is configured")
         queue = "BILLING_REVIEW" if complaint_type in {"BALANCE_RECHARGE", "VAS_DISPUTE"} else "TECHNICAL_SUPPORT"
         with self._engine.connect() as connection:
-            line_alias = connection.execute(text("""
-                SELECT line_alias FROM sandbox.accounts WHERE sandbox_id=:sandbox AND id=:account
-            """), {"sandbox": sandbox_id, "account": account_id}).scalar_one_or_none()
+            account = connection.execute(text("""
+                SELECT a.line_alias,a.region_code,c.id AS customer_id,c.display_name,c.preferred_language
+                FROM sandbox.accounts a
+                JOIN sandbox.customers c ON (c.sandbox_id,c.id)=(a.sandbox_id,a.customer_id)
+                WHERE a.sandbox_id=:sandbox AND a.id=:account
+            """), {"sandbox": sandbox_id, "account": account_id}).mappings().one_or_none()
+        # Only these synthetic fields describe the customer outside Resolve (contract: CE-012).
+        customer = None if account is None else CrmCustomer(
+            customer_id=str(account["customer_id"]), display_name=account["display_name"],
+            line_alias=account["line_alias"], region_code=account["region_code"],
+            preferred_language=account["preferred_language"])
         try:
             ticket_id = self._crm.create_review_ticket(
                 operation_id=operation_id, case_id=case_id, investigation_id=investigation_id,
-                complaint_type=complaint_type, queue=queue, line_alias=line_alias,
-                escalation_reason=escalation_reason, evidence_state=evidence_state)
+                complaint_type=complaint_type, queue=queue,
+                line_alias=account["line_alias"] if account is not None else None,
+                escalation_reason=escalation_reason, evidence_state=evidence_state, customer=customer)
         except CrmUnavailable as exc:
             raise ProviderUnavailable(exc.code) from None
         except CrmRejected as exc:

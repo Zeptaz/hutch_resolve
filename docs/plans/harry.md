@@ -236,3 +236,5 @@ Started fresh isolated PostgreSQL, Resolve, live Vite and external Voice on the 
 ### CRM integration branch for review — 2026-10-03
 
 `tevin/crm-integration` (not pushed) ports the HubSpot review-ticket adapter onto main + chatbot fixes. Needs Harry's review before merge: CE-005 (BIG: worker makes external CRM calls; default stays mock), CE-007 (`propose_escalation` assumes a UUID request key and writes dialogue state; chat requests 500 on main), CE-011 (un-ported scenario A policy/fixture changes). Records and verification are in [core-engine-changes.md](../changelogs/core-engine-changes.md) and [hubspot-crm.md](hubspot-crm.md).
+
+CE-012 (2026-10-04, MEDIUM): HubSpot tickets now link to a synthetic customer contact; the CRM contract section lists the contact fields. Needs your approval; live linking waits for contact scopes on the HubSpot key.
