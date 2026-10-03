@@ -5,9 +5,11 @@ import { EmptyState, LoadingState } from '@/components/states'
 // Customer and agent areas are split so neither loads the other's code or session.
 const CustomerPage = lazy(() => import('@/routes/customer/CustomerPage'))
 const AgentPage = lazy(() => import('@/routes/agent/AgentPage'))
+const LandingPage = lazy(() => import('@/routes/landing/LandingPage'))
 
 const router = createBrowserRouter([
-  { path: '/', element: <CustomerPage /> },
+  { path: '/', element: <LandingPage /> },
+  { path: '/chat', element: <CustomerPage /> },
   {
     path: '/agent',
     element: <AgentPage />,

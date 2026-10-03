@@ -241,7 +241,30 @@
   to { clip-path: inset(0 0 0 0); }
 }
 
+/* Landing intro and device previews. */
+@layer utilities {
+  .animate-splash-ring { animation: splash-ring 1.4s ease-out infinite; }
+  .animate-splash-bar { animation: splash-bar 1.5s cubic-bezier(0.6, 0, 0.2, 1) both; }
+  .animate-float { animation: float 6s ease-in-out infinite; }
+}
+
+@keyframes splash-ring {
+  from { opacity: 1; transform: scale(0.8); }
+  to { opacity: 0; transform: scale(1.6); }
+}
+@keyframes splash-bar {
+  from { width: 0; }
+  to { width: 100%; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .animate-splash-ring,
+  .animate-splash-bar,
+  .animate-float,
   .animate-bubble-in,
   .animate-typing-dot,
   .animate-thinking-ring,

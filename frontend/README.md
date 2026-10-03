@@ -2,7 +2,8 @@
 
 One React 19 + TypeScript + Vite app with two areas:
 
-- `/`: customer chat and call panel (starts a guest session and offers demo customer sign-in)
+- `/`: loading screen and landing page that describes each system and links to it
+- `/chat`: customer chat and call panel (starts a guest session and offers demo customer sign-in); `/chat?call=1` opens the call, asking a guest to sign in first
 - `/agent`: internal review dashboard (agent sign-in required)
 
 Owner: Jayith. See [the plan](../docs/plans/jayith.md) and [shared contracts](../docs/contracts.md).
@@ -35,7 +36,7 @@ Copy `.env.example` to `.env.development.local` to run against Resolve. Set `VIT
 | `npm run test:e2e` | Mock dashboard and customer browser checks; starts an isolated Vite server |
 | `npm run test:e2e:live` | Opt-in review workflow checks against a disposable Resolve stack; see [e2e/README.md](e2e/README.md) |
 
-The agent dashboard shows server-filtered cases, investigation evidence, action/ticket/receipt history and internal review notes. Review updates send the current case version and a stable retry key. A stale update keeps the unsent draft until the agent reviews the refreshed case. The customer chat/call experience continues on `/` using the same session and conversation.
+The agent dashboard shows server-filtered cases, investigation evidence, action/ticket/receipt history and internal review notes. Review updates send the current case version and a stable retry key. A stale update keeps the unsent draft until the agent reviews the refreshed case. The customer chat/call experience continues on `/chat` using the same session and conversation.
 
 ## Layout
 
@@ -44,7 +45,7 @@ src/
   api/          typed client, endpoints, error envelope, mock transport, generated schema
   session/      customer/agent session restore, expiry and CSRF handling
   components/   shared UI (status badges, states, simulation banner) and shadcn/ui
-  routes/       customer/ and agent/ screens
+  routes/       landing/, customer/ and agent/ screens
   lib/          display-only formatting (Asia/Colombo time, LKR, GB)
 ```
 

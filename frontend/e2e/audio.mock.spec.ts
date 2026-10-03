@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test('expired grant retries rotate the key while unknown outcomes retain it', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/chat')
   const result = await page.evaluate(async () => {
     const { grantKeyAfterFailure } = await import('/src/voice/call.ts')
     const key = 'first-attempt-key'
@@ -15,7 +15,7 @@ test('expired grant retries rotate the key while unknown outcomes retain it', as
 })
 
 test('a stale call attempt cannot claim ownership of the current audio', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/chat')
   const result = await page.evaluate(async () => {
     const { isCurrentCallAttempt } = await import('/src/voice/call.ts')
     const olderAttempt = {}
@@ -30,7 +30,7 @@ test('a stale call attempt cannot claim ownership of the current audio', async (
 })
 
 test('a permission result arriving after close stops its microphone tracks', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/chat')
   const result = await page.evaluate(async () => {
     let resolvePermission!: (stream: MediaStream) => void
     let stopped = 0
@@ -71,7 +71,7 @@ test('a permission result arriving after close stops its microphone tracks', asy
 })
 
 test('microphone tracks are released when audio worklet initialization fails', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/chat')
   const result = await page.evaluate(async () => {
     let stopped = 0
     class Node {

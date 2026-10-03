@@ -146,7 +146,7 @@ test('a customer session does not open the dashboard', async ({ browser }) => {
   test.skip(!CUSTOMER.demo_identity, 'Set E2E_CUSTOMER_ID / E2E_CUSTOMER_CREDENTIAL to check the customer role')
   const context = await browser.newContext({ baseURL: BASE })
   const page = await context.newPage()
-  await page.goto('/')
+  await page.goto('/chat')
   const res = await page.request.post('/api/v1/demo/sessions', { data: CUSTOMER, headers: { Origin: new URL(BASE).origin } })
   expect(res.status()).toBe(200)
   await page.goto('/agent')

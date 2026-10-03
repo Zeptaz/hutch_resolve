@@ -3,7 +3,7 @@ import { mockControl } from './helpers'
 
 test('uncertain customer turn stays locked and retry reuses it without duplicate messages', async ({ page }) => {
   const text = 'I recharged LKR 1000 but my balance is LKR 420'
-  await page.goto('/')
+  await page.goto('/chat')
   await expect(page.getByRole('textbox').last()).toBeEnabled()
   await mockControl(page, 'continueAsDemoLine')
   await page.reload()

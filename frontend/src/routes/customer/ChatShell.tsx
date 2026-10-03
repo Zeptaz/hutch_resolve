@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowDown, Bot, FolderOpen, Package, Phone, SendHorizontal } from 'lucide-react'
+import { useSearchParams } from 'react-router'
 import { newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
@@ -248,6 +249,14 @@ export function ChatShell({ session, onDemoLogin }: {
     answer({ type: 'package_selection', offer_id: offerId }, `${t('package.select')}: ${offerName}`)
   const turnOutcomeUncertain = failed !== null && hasUncertainOutcome(failed.error)
 
+  // The landing page links to /chat?call=1: the call opens once the chat is ready, and a guest is asked to sign in first.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const callRequested = searchParams.get('call') === '1'
+  const [callSignInDismissed, setCallSignInDismissed] = useState(false)
+  const callFromLink = callRequested && !!conversation && !turnOutcomeUncertain
+  const showVoice = voiceOpen || (callFromLink && session.role === 'CUSTOMER')
+  const showLogin = loginOpen || (callFromLink && session.role === 'GUEST' && !callSignInDismissed)
+
   const renderProposal = (p: ProposalView) => (
     <ConfirmationCard key={p.id} proposal={p} state={proposalState(p)} disabled={turnOutcomeUncertain} onDecide={(d) => void decide(p, d)} />
   )
@@ -275,9 +284,10 @@ export function ChatShell({ session, onDemoLogin }: {
     !!pending &&
     !!conversation?.messages.some((m) => m.result?.cards.some((c) => c.type === 'confirmation' && c.data.id === pending.id))
 
-  if (voiceOpen && conversation && session.role === 'CUSTOMER') {
+  if (showVoice && conversation && session.role === 'CUSTOMER') {
     const returnToChat = () => {
       setVoiceOpen(false)
+      if (callRequested) setSearchParams({}, { replace: true })
       setCaseRefresh((n) => n + 1)
       void reload(conversation.id)
     }
@@ -295,11 +305,14 @@ export function ChatShell({ session, onDemoLogin }: {
             </Button>
           )}
           {session.role === 'GUEST' && (
-            <Dialog open={loginOpen} onOpenChange={setLoginOpen}>
+            <Dialog open={showLogin} onOpenChange={(open) => {
+              setLoginOpen(open)
+              if (!open) setCallSignInDismissed(true)
+            }}>
               <DialogTrigger asChild><Button variant="outline" size="sm">{t('chat.demoSignIn')}</Button></DialogTrigger>
               <DialogContent>
                 <DialogTitle>{t('chat.demoSignInTitle')}</DialogTitle>
-                <DialogDescription>{t('chat.demoSignInDescription')}</DialogDescription>
+                <DialogDescription>{callRequested ? t('chat.signInForCall') : t('chat.demoSignInDescription')}</DialogDescription>
                 <form className="flex flex-col gap-3" onSubmit={async (event) => {
                   event.preventDefault()
                   if (!conversation || loginBusy) return

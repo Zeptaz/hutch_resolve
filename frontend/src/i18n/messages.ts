@@ -44,6 +44,7 @@ export const en = {
   'chat.signIn': 'Sign in',
   'chat.signingIn': 'Signing in…',
   'chat.signInRejected': 'That identity or credential is not right. Check them and try again.',
+  'chat.signInForCall': 'Sign in to a demo line to start a voice call. Your call continues this chat.',
   'chat.cases': 'Cases',
   'chat.casesDescription': 'Cases, receipts and human review for this chat.',
   'chat.message': 'Message',
@@ -438,6 +439,7 @@ export const si: Messages = {
   'review.submit': 'සමාලෝචන ඉල්ලීම සූදානම් කරන්න',
   // Machine-drafted 2026-10-03; needs a fluent review.
   'chat.signInRejected': 'එම අනන්‍යතාව හෝ මුරපදය නිවැරදි නැත. ඒවා පරීක්ෂා කර නැවත උත්සාහ කරන්න.',
+  'chat.signInForCall': 'හඬ ඇමතුමක් ආරම්භ කිරීමට demo line එකකට පිවිසෙන්න. ඔබගේ ඇමතුම මෙම chat එකම දිගටම කරගෙන යයි.',
 }
 
 /** UNREVIEWED DRAFT — needs fluent Tamil review. */
@@ -643,4 +645,5 @@ export const ta: Messages = {
   'review.submit': 'மதிப்பாய்வுக் கோரிக்கையைத் தயாரிக்கவும்',
   // Machine-drafted 2026-10-03; needs a fluent review.
   'chat.signInRejected': 'அந்த அடையாளம் அல்லது கடவுச்சொல் சரியில்லை. சரிபார்த்து மீண்டும் முயலவும்.',
+  'chat.signInForCall': 'குரல் அழைப்பைத் தொடங்க ஒரு demo line-இல் உள்நுழையவும். உங்கள் அழைப்பு இந்த உரையாடலைத் தொடரும்.',
 }

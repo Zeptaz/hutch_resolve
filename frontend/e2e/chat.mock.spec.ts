@@ -4,7 +4,7 @@ import { mockControl } from './helpers'
 // Customer journey A against the mock: complaint -> evidence -> explicit accept -> one success -> receipt.
 
 test('journey A: evidence, explicit accept, success and a receipt', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/chat')
   await expect(page.getByText('Mock data from contract examples.')).toBeVisible()
   // Let the page finish creating its guest session first, or it can overwrite the switch below.
   await expect(page.getByRole('textbox').last()).toBeEnabled()
@@ -27,7 +27,7 @@ test('journey A: evidence, explicit accept, success and a receipt', async ({ pag
 })
 
 test('a signed-in customer can open the call panel before any proposal', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/chat')
   await expect(page.getByRole('textbox').last()).toBeEnabled()
   await page.waitForLoadState('networkidle')
   await mockControl(page, 'continueAsDemoLine')

@@ -16,7 +16,7 @@ for (const realm of ['customer', 'agent'] as const) {
       })
     })
 
-    await page.goto(realm === 'agent' ? '/agent' : '/')
+    await page.goto(realm === 'agent' ? '/agent' : '/chat')
     await expect.poll(() => seenRealm).toBe(realm)
   })
 }

@@ -4,7 +4,7 @@ Read [context.md](../../context.md) and [contracts](../contracts.md). Update thi
 
 ## Scope and connections
 
-One React 19 + TypeScript + Vite app, customer `/` and protected `/agent` routes. Development runs at localhost:5173 and proxies `/api` to Resolve:8080. Use credentialed same-origin API calls and the relevant CSRF token; no browser service secrets. Generate types from [OpenAPI](../contracts/openapi.json) and use [examples](../contracts/examples.json) for mock development. Harry owns all API/business rules; Tevin owns conversational behavior.
+One React 19 + TypeScript + Vite app, a landing page at `/`, the customer chat at `/chat` (`/chat?call=1` opens a voice call) and protected `/agent` routes. Development runs at localhost:5173 and proxies `/api` to Resolve:8080. Use credentialed same-origin API calls and the relevant CSRF token; no browser service secrets. Generate types from [OpenAPI](../contracts/openapi.json) and use [examples](../contracts/examples.json) for mock development. Harry owns all API/business rules; Tevin owns conversational behavior.
 
 - [x] J-01 Application shell, separate customer/agent session restore/login, loading/error/expiry states and typed API client are implemented. Contract-backed mock browser suite passes 15/15 on desktop and phone; live journeys remain J-02/J-04.
 - [ ] J-02 Customer: chat, category/detail fallback, transcript correction, language choice, evidence/calculation cards, explicit accept/decline, pending operation display, human-review request, case switching and JSON receipt download. Agent: queue/filter/search, case packet, review notes/disposition and conflict refresh.

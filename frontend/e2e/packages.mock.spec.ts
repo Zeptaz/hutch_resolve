@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { mockControl } from './helpers'
 
 test('package selection requires explicit confirmation and reports canonical pending then success', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/chat')
   await expect(page.getByText('Mock data from contract examples.')).toBeVisible()
   await expect(page.getByRole('textbox').last()).toBeEnabled()
   await page.waitForLoadState('networkidle')
