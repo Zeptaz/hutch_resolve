@@ -24,6 +24,11 @@ REVIEW_STATUSES = {"NEW", "IN_REVIEW", "CLOSED"}
 DISPOSITIONS = {"REVIEW_COMPLETE", "NEEDS_OPERATOR_FOLLOWUP", "CUSTOMER_WITHDREW"}
 
 
+
+def public_sync_state(status: str | None) -> str | None:
+    """A sync job's status as the API shows it. A job being worked on is still pending to the agent."""
+    return "PENDING" if status == "RUNNING" else status
+
 class AgentReviewService:
     def __init__(self, engine: Engine, account_provider: AccountProvider, cursor_secret: bytes) -> None:
         self._engine = engine
@@ -141,8 +146,8 @@ class AgentReviewService:
                 {"case": case_id}).scalars().all()
             delivery = connection.execute(text("SELECT * FROM resolve.escalation_deliveries WHERE case_id=:case ORDER BY updated_at DESC,id DESC LIMIT 1"),
                 {"case": case_id}).mappings().one_or_none()
-            sync_state = connection.execute(text("SELECT status FROM resolve.review_sync_jobs WHERE case_id=:case ORDER BY created_at DESC,id DESC LIMIT 1"),
-                {"case": case_id}).scalar_one_or_none()
+            sync_state = public_sync_state(connection.execute(text("SELECT status FROM resolve.review_sync_jobs WHERE case_id=:case ORDER BY created_at DESC,id DESC LIMIT 1"),
+                {"case": case_id}).scalar_one_or_none())
             reviews = connection.execute(text("""
                 SELECT re.id,s.principal_id AS actor_id,re.note,re.created_at,re.visibility,re.review_status,re.disposition,re.case_version
                 FROM resolve.review_events re JOIN resolve.sessions s ON (s.sandbox_id,s.id)=(re.sandbox_id,re.actor_session_id)
@@ -283,7 +288,7 @@ class AgentReviewService:
             WHERE j.case_id=:case AND j.review_event_id=:event
         """), {"case": case_id, "event": note["id"]}).scalar_one_or_none()
         if state is not None:
-            response["review_sync_state"] = state
+            response["review_sync_state"] = public_sync_state(state)
 
     @staticmethod
     def _review_replay(connection: Any, context: AuthContext, route_key: str,

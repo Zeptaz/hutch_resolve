@@ -26,3 +26,12 @@ def test_agent_case_detail_contract_accepts_complete_synthetic_detail():
     parsed = AgentCaseDetail.model_validate(detail)
     assert parsed.case.id == case_id
     assert parsed.account.line_alias == "SIM-0001"
+
+
+def test_a_sync_job_in_progress_is_shown_as_pending():
+    # The job table has RUNNING while a CRM call is in flight; the API contract does not.
+    from backend.resolve.services.review import public_sync_state
+
+    assert public_sync_state("RUNNING") == "PENDING"
+    assert public_sync_state("SYNCED") == "SYNCED"
+    assert public_sync_state(None) is None
