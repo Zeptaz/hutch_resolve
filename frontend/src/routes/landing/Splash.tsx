@@ -49,7 +49,7 @@ export function Splash() {
       role="status"
       aria-label="Loading HUTCH Resolve"
       className={cn(
-        'fixed inset-0 z-50 grid place-items-center bg-[#f5f2ec] transition-opacity duration-[450ms] ease-out',
+        'fixed inset-0 z-50 grid place-items-center bg-[#f6f4f2] transition-opacity duration-[450ms] ease-out',
         phase === 'leaving' && 'pointer-events-none opacity-0',
       )}
     >

@@ -47,7 +47,7 @@ export function PhoneFrame({
 
 export function DesktopFrame({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
-    <figure role="img" aria-label={label} className={cn('mx-auto w-full max-w-3xl', className)}>
+    <figure role="img" aria-label={label} className={cn('mx-auto w-full max-w-3xl lg:max-w-none', className)}>
       <div className="rounded-t-2xl bg-neutral-900 p-2 pb-2.5 shadow-[0_30px_60px_-20px_rgb(0_0_0/0.35)] ring-1 ring-neutral-700">
         <div className="overflow-hidden rounded-lg bg-background text-left text-foreground">
           <div aria-hidden className="flex items-center gap-3 border-b bg-muted/60 px-3 py-2">

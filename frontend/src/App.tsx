@@ -17,7 +17,7 @@ function Root() {
 
 /** Shown only while the first page's code loads. The landing page starts on the sand of its intro. */
 function FirstLoad() {
-  return window.location.pathname === '/' ? <div className="min-h-dvh bg-[#f5f2ec]" /> : <LoadingState />
+  return window.location.pathname === '/' ? <div className="min-h-dvh bg-[#f6f4f2]" /> : <LoadingState />
 }
 
 const router = createBrowserRouter([
