@@ -63,3 +63,7 @@ Acceptance: a full A journey produces the same case/action/receipt through text 
 [Audit findings and verification limits](../audits/2026-10-03-resolve.md). AUD-01 deterministic replies for actions/cases/financial outcomes now bypass freeform rewriting; number/sign, outcome polarity and supplied-link regression tests are added. Unit/conversation tests pass, but no real-model semantic qualification has run. For AUD-03, normalized TEXT input is saved and same-ID recovery uses atomic expected-version claims; trusted Voice consent is never reconstructed. Abandoned Voice and legacy claims with no saved payload fail closed and can still block later conversation turns until an authorized reconciliation policy exists. See current aggregate results and PostgreSQL blockers in [`context.md`](../../context.md).
 
 Update this plan and root context.md after each implemented and verified correction, recording commands/results and remaining work.
+
+### 2026-10-03 grounded response follow-up
+
+Resolve conversation answers now reject outcome claims unsupported by the available grounded facts, preventing the freeform response path from inventing a customer outcome. Focused conversation answer tests passed (**40 passed**); the aggregate Resolve suite is **439 passed, 36 PostgreSQL-gated skipped**. No real-model semantic qualification has run, so model answer quality and native-language phrasing remain open.

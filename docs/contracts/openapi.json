@@ -6717,9 +6717,6 @@
               "DEACTIVATE_VAS",
               "SEND_SETTINGS_INSTRUCTIONS",
               "CREATE_REVIEW_TICKET",
-              "ACTIVATE_PACKAGE",
-              "ACTIVATE_PACKAGE",
-              "ACTIVATE_PACKAGE",
               "ACTIVATE_PACKAGE"
             ],
             "title": "Action Type",
@@ -8141,9 +8138,6 @@
               "actions",
               "voice",
               "model",
-              "package_activation",
-              "package_activation",
-              "package_activation",
               "package_activation"
             ]
           }

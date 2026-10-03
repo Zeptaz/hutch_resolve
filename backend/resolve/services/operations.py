@@ -111,6 +111,12 @@ class MockSandboxWriter:
                      "result": json.dumps(result)})
         else:
             with self._engine.begin() as connection:
+                active_run = connection.execute(text("""
+                    SELECT id FROM sandbox.sandbox_runs
+                    WHERE id=:sandbox AND run_status='ACTIVE' FOR SHARE
+                """), {"sandbox": sandbox_id}).scalar_one_or_none()
+                if active_run is None:
+                    raise ProviderUnavailable("SANDBOX_RETIRED")
                 if action_type == "DEACTIVATE_VAS":
                     changed = connection.execute(text("""
                         UPDATE sandbox.subscriptions s SET status='CANCELLED',renew_enabled=false,version=s.version+1
@@ -366,10 +372,13 @@ class OperationRunner:
                 escalation_reason=operation["escalation_reason"])
         except ProviderUnavailable as exc:
             attempts = operation["attempt_count"]
-            terminal = attempts >= 3
-            status = "REVIEW_REQUIRED" if terminal else "UNKNOWN"
+            retired = str(exc) == "SANDBOX_RETIRED"
+            terminal = retired or attempts >= 3
+            status = "FAILED" if retired else "REVIEW_REQUIRED" if terminal else "UNKNOWN"
             retry_after = None if terminal else datetime.now(UTC) + timedelta(seconds=2 if attempts == 1 else 10)
-            result = {"code": str(exc), "message": "Provider outcome is not yet confirmed; no success is claimed.",
+            result = {"code": str(exc),
+                      "message": ("The sandbox run was retired before this provider write; no change was made."
+                                  if retired else "Provider outcome is not yet confirmed; no success is claimed."),
                       "actual_target_status": None, "provider_ticket_id": None}
             self._complete(operation, status, result, None, retry_after)
             logger.info(_worker_event(event="resolve_action", case_id=operation["case_id"],
@@ -495,6 +504,12 @@ class OperationRunner:
         now = datetime.now(UTC)
         terminal = status in {"SUCCEEDED", "FAILED", "REVIEW_REQUIRED"}
         with self._resolve.begin() as connection:
+            # Serialize CRM delivery backfill against agent review writes. Review
+            # updates take this same case lock before creating their sync job.
+            case_exists = connection.execute(text("SELECT id FROM resolve.cases WHERE id=:id FOR UPDATE"),
+                {"id": operation["case_id"]}).scalar_one_or_none()
+            if case_exists is None:
+                return
             claimed = connection.execute(text("UPDATE resolve.operations SET status=:status,outcome=CAST(:outcome AS jsonb),provider_operation_ref=:provider_ref,lease_until=NULL,recovery_after=:recovery,updated_at=:now WHERE id=:id AND status='RUNNING' AND attempt_count=:attempt RETURNING id"),
                 {"id": operation["id"], "status": status, "outcome": json.dumps(result), "provider_ref": provider_ref,
                  "recovery": recovery_after, "attempt": operation["attempt_count"], "now": now}).scalar_one_or_none()

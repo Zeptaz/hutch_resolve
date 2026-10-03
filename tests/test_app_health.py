@@ -4,6 +4,7 @@ import logging
 from fastapi.testclient import TestClient
 
 from backend.resolve.app.main import create_app
+from backend.resolve.app.config import Settings
 from tests.test_auth import ACCOUNT_ID, ORIGIN, build_client
 from uuid import UUID
 
@@ -104,8 +105,24 @@ def test_readiness_exposes_degraded_optional_capabilities():
     assert response.status_code == 200
     assert response.json() == {
         "status": "ready",
-        "capabilities": {"text": True, "actions": False, "voice": True, "model": False, "package_activation": False},
+        "capabilities": {"text": True, "actions": False, "voice": False, "model": False, "package_activation": False},
     }
+
+
+def test_readiness_reports_voice_only_when_all_grant_security_configuration_exists():
+    settings = Settings(
+        database_url="postgresql+psycopg://test:test@localhost/test",
+        app_origins=frozenset({ORIGIN}), app_secret_key=b"test-only-secret-key-not-for-deployment",
+        cookie_secure=False, session_minutes=30, demo_identities={},
+        voice_base_url="https://voice.example", voice_hmac_secret=b"v" * 32,
+        voice_grant_encryption_key=b"e" * 32,
+    )
+    app = create_app(database=Probe(result=True), settings=settings,
+                     conversation_service=object(), voice_client=object())
+    with TestClient(app) as client:
+        response = client.get("/api/v1/readyz")
+
+    assert response.json()["capabilities"]["voice"] is True
 
 
 def test_unavailable_action_runner_blocks_accept_before_confirmation_but_allows_decline():

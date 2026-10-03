@@ -28,4 +28,3 @@ SELECT format('GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA resolve TO %I', :'re
 SELECT format('GRANT UPDATE ON resolve.sessions, resolve.conversations, resolve.cases, resolve.action_proposals, resolve.operations, resolve.voice_bindings TO %I', :'resolve_user') \gexec
 SELECT format('REVOKE UPDATE ON resolve.receipts, resolve.audit_events, resolve.integration_events, resolve.model_calls, resolve.knowledge_articles FROM %I', :'resolve_user') \gexec
 SQL
-touch "$PGDATA/.hutch_initialized"

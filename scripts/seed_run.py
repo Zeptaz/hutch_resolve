@@ -15,7 +15,7 @@ def render(run_id: UUID, source: str, *, retire_active: bool = False) -> str:
     for value in values - {str(RUN)}:
         mapping[value] = str(uuid5(run_id, value))
     rendered = PATTERN.sub(lambda match: mapping[match.group()], source)
-    if "BEGIN;\n" not in rendered or not rendered.rstrip().endswith("COMMIT;"):
+    if rendered.count("BEGIN;") != 1 or rendered.count("COMMIT;") != 1 or not rendered.rstrip().endswith("COMMIT;"):
         raise ValueError("Seed SQL must contain one outer transaction")
     retirement = ""
     if retire_active:
@@ -32,8 +32,10 @@ WHERE run_status='ACTIVE' AND id<>'{run_id}';
         for suffix in range(5, 9)
     )
     # The package fixture predates the catalogue flag. Scope the allowlist to
-    # this generated run and its deterministic fixture IDs.
-    return rendered + f"\nBEGIN;\nUPDATE sandbox.offers SET available_for_purchase=true\nWHERE sandbox_id='{run_id}' AND id IN ({package_ids})\n  AND offer_kind='PACKAGE' AND recurring=false;\nCOMMIT;\n"
+    # this generated run and keep it in the fixture transaction.
+    allowlist = f"\nUPDATE sandbox.offers SET available_for_purchase=true\nWHERE sandbox_id='{run_id}' AND id IN ({package_ids})\n  AND offer_kind='PACKAGE' AND recurring=false;\n"
+    commit_at = rendered.rfind("COMMIT;")
+    return rendered[:commit_at] + allowlist + rendered[commit_at:]
 
 
 def main() -> None:

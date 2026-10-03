@@ -22,6 +22,7 @@ from .voice_client import VoiceSessionClient
 from .config import Settings
 from .database import Database
 from .observability import create_request_middleware
+from .body_limit import RequestBodyLimitMiddleware
 from backend.resolve.providers.sandbox import PostgresSandboxProvider
 from backend.resolve.services.facade import ResolveFacade
 from backend.resolve.services.operations import OperationRunner
@@ -158,6 +159,7 @@ def create_app(
     application.include_router(build_voice_router())
 
     application.middleware("http")(create_request_middleware(logging.getLogger("hutch_resolve.http")))
+    application.add_middleware(RequestBodyLimitMiddleware, max_bytes=1_048_576)
 
     @application.exception_handler(ResolveError)
     async def resolve_error_handler(request: Request, exc: ResolveError) -> JSONResponse:
@@ -230,7 +232,10 @@ def create_app(
             "capabilities": {
                 "text": request.app.state.conversation_service is not None,
                 "actions": request.app.state.action_execution_available,
-                "voice": request.app.state.voice_client is not None,
+                "voice": (request.app.state.voice_client is not None
+                    and request.app.state.settings.voice_base_url is not None
+                    and request.app.state.settings.voice_hmac_secret is not None
+                    and request.app.state.settings.voice_grant_encryption_key is not None),
                 "model": request.app.state.model_available,
                 "package_activation": (request.app.state.action_execution_available
                     and request.app.state.settings.package_activation_enabled),

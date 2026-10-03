@@ -1611,7 +1611,7 @@ export interface components {
              * Action Type
              * @enum {string}
              */
-            action_type: "DEACTIVATE_VAS" | "SEND_SETTINGS_INSTRUCTIONS" | "CREATE_REVIEW_TICKET" | "ACTIVATE_PACKAGE" | "ACTIVATE_PACKAGE" | "ACTIVATE_PACKAGE";
+            action_type: "DEACTIVATE_VAS" | "SEND_SETTINGS_INSTRUCTIONS" | "CREATE_REVIEW_TICKET" | "ACTIVATE_PACKAGE";
             /** Target Label */
             target_label: string;
             /** Consequences */

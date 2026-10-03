@@ -1,10 +1,22 @@
 import json
+import sys
 from pathlib import Path
 from pydantic import TypeAdapter
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 from backend.resolve.conversation import dto
 
-PATH = Path("docs/contracts/openapi.json")
+PATH = ROOT / "docs/contracts/openapi.json"
+
+
+def ensure_once(values: list, value: object) -> None:
+    """Add a contract value only once, including when repairing old generated files."""
+    values[:] = [item for index, item in enumerate(values) if item not in values[:index]]
+    if value not in values:
+        values.append(value)
+
+
 document = json.loads(PATH.read_text(encoding="utf-8-sig"))
 schemas = document["components"]["schemas"]
 
@@ -35,14 +47,14 @@ for name in ("ActionType", "ComplaintType"):
     schemas[name] = {"type": "string", "enum": [value.value for value in enum_type]}
 
 # Voice projection is intentionally narrower than the text proposal DTO.
-schemas["Proposal"]["properties"]["action_type"]["enum"].append("ACTIVATE_PACKAGE")
+ensure_once(schemas["Proposal"]["properties"]["action_type"]["enum"], "ACTIVATE_PACKAGE")
 schemas["Proposal"]["properties"]["package_terms"] = {
     "anyOf": [{"$ref": "#/components/schemas/PackageTerms"}, {"type": "null"}]
 }
 
 readiness = schemas["Readiness"]["properties"]["capabilities"]
 readiness["properties"]["package_activation"] = {"type": "boolean"}
-readiness["required"].append("package_activation")
+ensure_once(readiness["required"], "package_activation")
 
 document["info"]["version"] = "1.1.0"
 document["info"]["description"] = (

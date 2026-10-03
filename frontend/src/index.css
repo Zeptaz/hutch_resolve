@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import "./vendor/shadcn-tailwind.css";
 
 /*
  * Theme: tweakcn "autoblog" (https://tweakcn.com/themes/cmhxosuz5000804l7gqzefqxg),

@@ -131,3 +131,11 @@ def test_browser_message_cannot_set_trusted_fields() -> None:
     request = dto.MessageRequest.model_validate(example("message_request"))
     turn = dto.NormalizedTurn.from_message(example("conversation")["id"], request)
     assert turn.channel is dto.Channel.TEXT and turn.voice_evidence is None
+
+
+def test_package_contract_extensions_are_unique() -> None:
+    proposal_actions = SCHEMAS["Proposal"]["properties"]["action_type"]["enum"]
+    readiness_required = SCHEMAS["Readiness"]["properties"]["capabilities"]["required"]
+
+    assert proposal_actions.count("ACTIVATE_PACKAGE") == 1
+    assert readiness_required.count("package_activation") == 1

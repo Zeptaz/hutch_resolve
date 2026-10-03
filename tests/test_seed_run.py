@@ -25,6 +25,9 @@ def test_render_keeps_fixture_generation_non_retiring_by_default():
     assert str(uuid5(NEW_RUN, ACCOUNT)) in rendered
     assert "UPDATE resolve.sessions" not in rendered
     assert "UPDATE sandbox.sandbox_runs" not in rendered
+    assert rendered.count("BEGIN;") == 1
+    assert rendered.count("COMMIT;") == 1
+    assert rendered.index("UPDATE sandbox.offers") < rendered.rfind("COMMIT;")
 
 
 def test_retiring_render_revokes_old_sessions_atomically_before_new_fixture_insert():
@@ -40,6 +43,9 @@ def test_retiring_render_revokes_old_sessions_atomically_before_new_fixture_inse
     assert rendered.index("UPDATE sandbox.sandbox_runs") < rendered.index("INSERT INTO sample")
     assert f"id<>'{NEW_RUN}'" in rendered
     assert rendered.rstrip().endswith("COMMIT;")
+    assert rendered.count("BEGIN;") == 1
+    assert rendered.count("COMMIT;") == 1
+    assert rendered.index("UPDATE sandbox.offers") < rendered.rfind("COMMIT;")
 
 
 @pytest.mark.skipif(not os.getenv("RESET_IT_DATABASE_URL"),

@@ -200,3 +200,18 @@ Verification checkpoint: full default backend suite **438 passed, 35 PostgreSQL-
 - [x] Jayith browser voice handling preserves the same idempotency key for unknown grant outcomes, rotates after expired grants and ignores stale call startup failures; frontend typecheck/build/lint and mock e2e pass.
 - [x] Voice adapter safety fix buffers and verifies generated audio/transcript against Resolve speech text, falls back to canonical text and reports tool failures as typed errors without fabricated replies. Voice suite **52 passed**; pushed as `hutch_zeptazvoice/adapter_buildation` commit `3bc6a27`.
 - [ ] PostgreSQL-gated turn-claim/escalation persistence, package API projections, review delivery ordering and worker recovery remain unverified because the disposable database is unavailable. Abandoned Voice claim reconciliation remains fail-closed and unresolved.
+
+### Security and reproducibility phase — 2026-10-03
+
+- [x] Enforced Secure cookies for non-local configured origins; corrected trusted proxy address extraction and added direct-spoof/trusted-chain tests. Focused settings/auth tests: **17 passed**.
+- [x] Added a streaming request-body cap (1 MiB, stable `REQUEST_TOO_LARGE` envelope) and readiness now requires the Voice grant encryption key and HMAC/base URL configuration. Focused body/readiness tests pass.
+- [x] Review ticket completion now takes the case lock before delivery backfill, serializing with agent review writes. Sandbox provider writes verify the run remains ACTIVE under a row share-lock before mutation.
+- [x] Fixture package allowlisting now shares the seed/reset transaction. Docker `.hutch_initialized` readiness marker moved to a final `99-ready.sh` step after all root-level seeds.
+- [x] Revision `0010_least_privilege_package_catalogue` revokes unnecessary sandbox offer UPDATE from the Resolve role. PostgreSQL migration/grant verification remains DB-gated.
+- [x] Fixed package contract generator working-directory dependence and made enum/required-list extension idempotent. Two consecutive runs produce byte-identical OpenAPI; OpenAPI generated TypeScript and contract tests were refreshed.
+- [x] Removed unused `shadcn` CLI from frontend dependency graph while retaining its MIT stylesheet and license. Full public npm audit: **0 vulnerabilities**.
+- [x] Logout and review retry state are recoverable across failure/reload. Review retry retains the same persisted key/body for unknown network outcomes. Definitive 409/422 responses now clear the key; this prevents stale conflict requests from bypassing the “I've checked it” guard. Focused conflict and committed-response-lost Playwright tests both pass.
+- Verification: full default backend suite **439 passed, 36 PostgreSQL-gated skips**; `test_seed_run.py` in project venv **2 passed, 1 PostgreSQL-gated skip**; frontend typecheck/build pass, lint passes with six existing warnings. Expanded mock browser suite: **22 passed, 1 failed** before the definitive-conflict key fix; after the fix both affected scenarios passed (Playwright printed both green results, but Windows teardown hung and was interrupted). Rerun the full suite before release.
+- [ ] PostgreSQL integration for migration grants, reset atomicity, case-lock race, retired-run fencing and operation recovery cannot run without a disposable DB URL/usable Docker engine. Full mock browser suite and DB/live Voice/model release gates remain open.
+
+Full mock browser rerun after the conflict-key fix reports **22/22 passed**. The Playwright process still hangs during Windows teardown after reporting all tests green and had to be interrupted; treat test assertions as passed, while runner teardown remains an open tooling issue.

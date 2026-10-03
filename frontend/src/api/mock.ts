@@ -21,6 +21,8 @@ function loadState(): MockState {
 }
 
 const state = loadState()
+let failNextLogout = false
+let loseNextReviewResponse = false
 
 function save() {
   try {
@@ -136,6 +138,10 @@ function route(realm: Realm, method: string, path: string, opts: RequestOptions)
     return ok(state.agent)
   }
   if (method === 'DELETE' && path === '/agent/session') {
+    if (failNextLogout) {
+      failNextLogout = false
+      return fail(503, 'DEPENDENCY_UNAVAILABLE', 'simulated logout failure.', true)
+    }
     state.agent = null
     return ok(null, 204)
   }
@@ -220,11 +226,23 @@ export async function mockTransport(
   if (opts.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   const res = route(realm, method, path, opts)
   save()
+  if (loseNextReviewResponse && realm === 'agent' && method === 'PATCH' && path.includes('/review')) {
+    loseNextReviewResponse = false
+    return fail(503, 'DEPENDENCY_UNAVAILABLE', 'simulated lost review response after commit.', true)
+  }
   return structuredClone(res)
 }
 
 /** Dev-only switches for exercising loading / error / expiry states. */
 export const mockControls = {
+  /** Fail the next agent logout without revoking its synthetic session. */
+  failNextLogout() {
+    failNextLogout = true
+  },
+  /** Commit the next review mutation but lose its response to exercise idempotent retry. */
+  loseNextReviewResponse() {
+    loseNextReviewResponse = true
+  },
   /** Simulates a concurrent agent review so the stale-version draft path can be exercised. */
   reviewElsewhere(caseId: string, note = 'Another agent added a note.') {
     const detail = detailFor(caseId)

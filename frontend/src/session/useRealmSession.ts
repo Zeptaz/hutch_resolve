@@ -86,8 +86,14 @@ export function useRealmSession<S extends BaseSession>(
   const logout = useCallback(async () => {
     try {
       await logoutCall()
-    } finally {
       adopt(null, 'signed-out')
+      setError(null)
+    } catch (e) {
+      // A failed DELETE does not prove the cookie was revoked. Keep the local
+      // credentials intact and expose a recoverable connection error instead
+      // of pretending the user is signed out.
+      setError(e)
+      setStatus('error')
     }
   }, [logoutCall, adopt])
 

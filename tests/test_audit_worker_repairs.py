@@ -19,6 +19,9 @@ class _Connection:
     def execute(self, statement, params):
         sql = str(statement)
         self.statements.append((sql, params))
+        if "SELECT id FROM resolve.cases" in sql:
+            from types import SimpleNamespace
+            return SimpleNamespace(scalar_one_or_none=lambda: uuid4())
         assert "attempt_count=:attempt" in sql
         assert "status='RUNNING'" in sql
         return _NoClaimResult()
@@ -40,8 +43,8 @@ def test_stale_action_worker_cannot_change_case_delivery_audit_or_receipt():
                  "action_type": "CREATE_REVIEW_TICKET"}
     runner._complete(operation, "REVIEW_REQUIRED", {"code": "PROVIDER_UNAVAILABLE"},
                      None, datetime.now(UTC))
-    assert len(engine.connection.statements) == 1
-    assert engine.connection.statements[0][1]["attempt"] == 1
+    assert len(engine.connection.statements) == 2
+    assert engine.connection.statements[1][1]["attempt"] == 1
 
 
 def test_stale_review_worker_cannot_append_audit_or_replace_newer_state():

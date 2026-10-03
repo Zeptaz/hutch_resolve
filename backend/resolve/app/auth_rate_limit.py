@@ -12,20 +12,38 @@ from .auth import ResolveError
 
 
 def client_address(request: Request) -> str:
-    client = request.client.host if request.client else "unknown"
-    trusted = request.app.state.settings.trusted_proxy_ips
-    if client in trusted:
-        forwarded = request.headers.get("x-forwarded-for", "")
-        if forwarded:
-            candidate = forwarded.split(",", 1)[0].strip()
-            try:
-                return ipaddress.ip_address(candidate).compressed
-            except ValueError:
-                pass
+    raw_client = request.client.host if request.client else "unknown"
     try:
-        return ipaddress.ip_address(client).compressed
+        client = ipaddress.ip_address(raw_client).compressed
     except ValueError:
         return "unknown"
+
+    trusted = request.app.state.settings.trusted_proxy_ips
+    if client not in trusted:
+        # Forwarding headers are wholly untrusted when the TCP peer is not a
+        # configured proxy. Never let a direct caller choose its rate bucket.
+        return client
+
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if not forwarded.strip():
+        return client
+    try:
+        chain = [ipaddress.ip_address(value.strip()).compressed for value in forwarded.split(",")]
+        if any(not value.strip() for value in forwarded.split(",")):
+            raise ValueError("empty address in forwarded chain")
+    except ValueError:
+        # An invalid chain is ambiguous. Attribute the request to the trusted
+        # immediate peer instead of accepting a possibly spoofed partial chain.
+        return client
+
+    # Proxies append the address they observed. Walk from the immediate
+    # peer toward the caller, trusting each hop only while it is configured.
+    current = client
+    for candidate in reversed(chain):
+        if current not in trusted:
+            return current
+        current = candidate
+    return current
 
 
 def enforce(request: Request, bucket: str, limit: int) -> None:

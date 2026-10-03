@@ -68,11 +68,13 @@ class Settings:
         package_flag = os.getenv("RESOLVE_PACKAGE_ACTIVATION_ENABLED", "false").strip().lower()
         if package_flag not in {"true", "false"}:
             raise RuntimeError("RESOLVE_PACKAGE_ACTIVATION_ENABLED must be true or false")
-        trusted_proxy_ips = frozenset(value.strip() for value in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if value.strip())
         import ipaddress
         try:
-            for address in trusted_proxy_ips:
-                ipaddress.ip_address(address)
+            trusted_proxy_ips = frozenset(
+                ipaddress.ip_address(value.strip()).compressed
+                for value in os.getenv("TRUSTED_PROXY_IPS", "").split(",")
+                if value.strip()
+            )
         except ValueError as exc:
             raise RuntimeError("TRUSTED_PROXY_IPS must contain comma-separated IP addresses") from exc
         limits: dict[str, int] = {}
@@ -94,9 +96,20 @@ class Settings:
             raise RuntimeError("APP_SECRET_KEY must contain at least 32 bytes")
         if not origins:
             raise RuntimeError("APP_ORIGINS must contain at least one exact origin")
-        secure_setting = os.getenv("APP_COOKIE_SECURE", "false").lower()
+        secure_setting = os.getenv("APP_COOKIE_SECURE", "false").strip().lower()
         if secure_setting not in {"true", "false"}:
             raise RuntimeError("APP_COOKIE_SECURE must be true or false")
+        # Secure cookies are mandatory for any non-local deployment. Keep
+        # plain HTTP cookies available only for localhost development.
+        local_http_origins = True
+        for origin in origins:
+            parts = urlsplit(origin)
+            if (parts.scheme != "http" or parts.hostname not in {"localhost", "127.0.0.1", "::1"}
+                    or parts.path or parts.query or parts.fragment or parts.username or parts.password):
+                local_http_origins = False
+                break
+        if not local_http_origins and secure_setting != "true":
+            raise RuntimeError("APP_COOKIE_SECURE=true is required outside localhost HTTP development")
         raw_identities = os.getenv("DEMO_IDENTITIES_JSON", "{}").strip()
         try:
             parsed = json.loads(raw_identities)

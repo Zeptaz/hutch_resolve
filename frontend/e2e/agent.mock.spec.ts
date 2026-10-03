@@ -128,6 +128,30 @@ test('drafts survive a reload', async ({ page }) => {
   await expect(reviewPanel(page).getByLabel('Internal note', { exact: true })).toHaveValue('Half-written note')
 })
 
+test('a lost review response retries after reload with the same idempotency key', async ({ page }) => {
+  await queueRow(page, MOCK.D.line).click()
+  const panel = reviewPanel(page)
+  await panel.getByLabel('Internal note', { exact: true }).fill('Committed once despite a lost response.')
+  await mockControl(page, 'loseNextReviewResponse')
+  await panel.getByRole('button', { name: 'Add note' }).click()
+  await expect(panel.getByRole('alert')).toContainText('Not sent:')
+
+  const readStoredKey = () => page.evaluate(() => {
+    const key = Object.keys(sessionStorage).find((item) => item.startsWith('hutch-resolve.review-request.'))
+    return key ? (JSON.parse(sessionStorage.getItem(key)!) as { key: string }).key : null
+  })
+  const firstKey = await readStoredKey()
+  expect(firstKey).toBeTruthy()
+  await page.reload()
+  await expect(panel.getByLabel('Internal note', { exact: true })).toHaveValue('Committed once despite a lost response.')
+  expect(await readStoredKey()).toBe(firstKey)
+
+  await panel.getByRole('button', { name: 'Add note' }).click()
+  await expect(panel.getByText(/Saved as version/)).toBeVisible()
+  await expect(panel.getByRole('listitem').filter({ hasText: 'Committed once despite a lost response.' })).toHaveCount(1)
+  expect(await readStoredKey()).toBeNull()
+})
+
 test('j / k move through the queue, but never while typing a note', async ({ page }) => {
   await queueRow(page, MOCK.D.line).focus()
   await page.keyboard.press('j')
@@ -153,6 +177,17 @@ test('an expired session sends the agent back to sign in', async ({ page }) => {
   await mockControl(page, 'expireSession', 'agent')
   await page.reload()
   await expect(page.getByText('Your session ended. Sign in again to continue.')).toBeVisible()
+})
+
+test('a failed logout keeps the session recoverable instead of clearing it locally', async ({ page }) => {
+  await mockControl(page, 'failNextLogout')
+  await page.getByRole('button', { name: 'Sign out' }).click()
+  await expect(page.getByText('Could not reach Resolve')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Try again|Retry/i })).toBeVisible()
+
+  // The mock did not revoke the cookie; retrying restoration returns to the same session.
+  await page.getByRole('button', { name: /Try again|Retry/i }).click()
+  await expect(page.getByText('Signed in as')).toContainText('synthetic-review-agent')
 })
 
 test('a Resolve outage shows an error with retry, not an empty queue', async ({ page }) => {

@@ -53,3 +53,7 @@ Dependencies: J-01 can start immediately; J-02 integrates H-04/H-05/T-02; J-03 i
 [Audit findings and verification limits](../audits/2026-10-03-resolve.md). AUD-04 now stops microphone streams that arrive after the call closes and makes startup cleanup idempotent. Focused fake-media regressions pass. AUD-07 now tracks all operation IDs and refreshes their canonical status; AUD-03 chat reload can resume a persisted text turn with its original ID and body. The remaining turn-reconciliation limitation and PostgreSQL verification blockers are tracked in [`context.md`](../../context.md). Final e2e rerun, real microphone, full chat/call journeys, accessibility and live Resolve integration remain open until rerun/qualification.
 
 Update this plan and root context.md after each implemented and verified correction, recording commands/results and remaining work.
+
+### 2026-10-03 review durability follow-up
+
+Logout failures now preserve the recoverable agent session. Review updates persist the exact request body and idempotency key before sending, allowing a committed-but-lost response to replay after reload. Only unknown outcomes retain that key; definitive 409/422 responses retire it so a stale update remains blocked until the agent checks the latest case. Focused Playwright conflict and lost-response/reload scenarios both passed. The full mock E2E rerun reports **22/22 passed**; Windows Playwright teardown hung after all tests reported green and was interrupted. Frontend typecheck/build pass and lint exits 0 with six existing warnings.
