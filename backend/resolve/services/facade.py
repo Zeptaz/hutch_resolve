@@ -695,9 +695,8 @@ class ResolveFacade:
         with self._engine.connect() as connection:
             investigation = connection.execute(text("""
                 SELECT eligible_actions FROM resolve.investigations
-                WHERE sandbox_id=:sandbox AND case_id=:case AND id=:investigation
-            """), {"sandbox": context.sandbox_id, "case": case_id,
-                  "investigation": investigation_id}).mappings().one_or_none()
+                WHERE case_id=:case AND id=:investigation
+            """), {"case": case_id, "investigation": investigation_id}).mappings().one_or_none()
         if investigation is None:
             raise ResolveError(404, "RESOURCE_NOT_FOUND", "Investigation was not found")
         eligible = investigation["eligible_actions"] or []

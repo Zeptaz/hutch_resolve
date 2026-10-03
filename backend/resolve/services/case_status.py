@@ -21,7 +21,9 @@ def refresh_case_status(connection, case_id, now) -> str:
                       o.updated_at > coalesce((SELECT max(created_at) FROM resolve.review_events
                         WHERE case_id=c.id AND review_status='CLOSED'),'-infinity'::timestamptz))) AS failed_operation,
           EXISTS(SELECT 1 FROM resolve.operations o WHERE o.case_id=c.id
-                 AND o.action_type='CREATE_REVIEW_TICKET' AND o.status='SUCCEEDED'
+                 AND o.status='SUCCEEDED'
+                 AND EXISTS(SELECT 1 FROM resolve.action_proposals p WHERE p.id=o.proposal_id
+                            AND p.case_id=o.case_id AND p.action_type='CREATE_REVIEW_TICKET')
                  AND o.updated_at > coalesce((SELECT max(created_at) FROM resolve.review_events
                       WHERE case_id=c.id AND review_status='CLOSED'),'-infinity'::timestamptz)) AS delivered_handoff
         FROM resolve.cases c WHERE c.id=:case_id FOR UPDATE

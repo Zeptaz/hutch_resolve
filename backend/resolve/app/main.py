@@ -22,6 +22,7 @@ from .voice_client import VoiceSessionClient
 from .config import Settings
 from .database import Database
 from .observability import create_request_middleware
+from backend.resolve.providers.hubspot import HubSpotCrm
 from backend.resolve.providers.sandbox import PostgresSandboxProvider
 from backend.resolve.services.facade import ResolveFacade
 from backend.resolve.services.operations import OperationRunner
@@ -118,8 +119,12 @@ def create_app(
             )
         application.state.conversation_service = active_conversation_service
         application.state.operation_runner = None
+        crm = None
         if sandbox_engine is not None and hasattr(active_database, "engine") and resolve_facade is None:
-            runner = OperationRunner(active_database.engine, sandbox_engine)
+            if active_settings.crm_provider == "hubspot" and active_settings.hubspot is not None:
+                crm = HubSpotCrm(active_settings.hubspot)
+            logger.info("CRM provider for review tickets: %s", "hubspot" if crm else "mock")
+            runner = OperationRunner(active_database.engine, sandbox_engine, crm)
             application.state.operation_runner = runner
             operation_task = asyncio.create_task(_operation_loop(runner))
         # An injected facade is used by tests and embedded integrations which own
@@ -139,6 +144,8 @@ def create_app(
                     await operation_task
                 except asyncio.CancelledError:
                     pass
+            if crm is not None:
+                crm.close()
             if sandbox_database is not None:
                 sandbox_database.close()
             active_database.close()

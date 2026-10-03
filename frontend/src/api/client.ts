@@ -21,7 +21,9 @@ export type RawResponse = { status: number; body: unknown }
 type Transport = (realm: Realm, method: Method, path: string, opts: RequestOptions) => Promise<RawResponse>
 
 const liveTransport: Transport = async (_realm, method, path, opts) => {
-  const headers: Record<string, string> = { Accept: 'application/json' }
+  // Shared reads (operations, receipts) need the realm when one browser holds both
+  // customer and agent sessions, e.g. a demo with the chat and dashboard side by side.
+  const headers: Record<string, string> = { Accept: 'application/json', 'X-Resolve-Realm': _realm }
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
   if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey
   const csrf = method === 'GET' ? null : csrfTokens[_realm]

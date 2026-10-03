@@ -184,7 +184,7 @@ class AgentReviewService:
                 "next_step": "A human agent should review this case."}
         return {"case": case_view, "account": account, "conversation": conversation,
             "investigations": investigations, "proposals": proposals,
-            "confirmations": [dict(row) for row in confirmation_rows], "operations": operations,
+            "confirmations": [{**dict(row), "simulation": True} for row in confirmation_rows], "operations": operations,
             "receipts": receipts, "handoff": handoff,
             "review_notes": [{"id": row["id"], "actor_id": row["actor_id"], "note": row["note"],
                 "created_at": row["created_at"], "visibility": row["visibility"]} for row in reviews],

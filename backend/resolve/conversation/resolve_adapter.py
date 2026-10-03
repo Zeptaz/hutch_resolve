@@ -38,6 +38,9 @@ from .dto import (
 )
 from .errors import HTTP_STATUS, ResolveError
 
+# Reason stored with a review that Resolve offers on its own (conflicting or missing evidence).
+OFFERED_REVIEW_REASON = "Resolve offered a human review because the evidence needs a person to check it."
+
 _STATUS_FALLBACK = {
     400: "VALIDATION_ERROR",
     401: "UNAUTHENTICATED",
@@ -146,6 +149,10 @@ class ResolveFacadeAdapter:
     async def propose_action(
         self, ctx: AuthContext, case_id: UUID, request: ProposalRequest, command_key: str
     ) -> ProposalView:
+        if request.action_type is ActionType.CREATE_REVIEW_TICKET:
+            # Harry's facade requires a reason for every handoff; this path is Resolve's own offer.
+            return await self._propose_escalation(ctx, case_id, request.expected_version,
+                                                  request.investigation_id, OFFERED_REVIEW_REASON, command_key)
         result = await self._call(
             self._facade.propose_action,
             self._context(ctx),
@@ -204,8 +211,6 @@ class ResolveFacadeAdapter:
     async def prepare_escalation(
         self, ctx: AuthContext, case_id: UUID, request: EscalationRequest, command_key: str
     ) -> ProposalView:
-        # Harry has no prepare_escalation yet; his investigations list CREATE_REVIEW_TICKET as eligible,
-        # so the review proposal is requested through propose_action. The reason is not stored (gap).
         case = await self.get_case(ctx, case_id)
         investigation = case.investigation
         if investigation is None or investigation.id != request.investigation_id:
@@ -213,17 +218,22 @@ class ResolveFacadeAdapter:
         review = next((a for a in investigation.eligible_actions if a.action_type is ActionType.CREATE_REVIEW_TICKET), None)
         if review is None:
             raise ResolveError("ACTION_NOT_ALLOWED", "Resolve did not make a review request eligible")
-        return await self.propose_action(
-            ctx,
-            case_id,
-            ProposalRequest(
-                expected_version=case.version,
-                investigation_id=investigation.id,
-                action_type=ActionType.CREATE_REVIEW_TICKET,
-                target_id=review.target_id,
-            ),
-            command_key,
+        return await self._propose_escalation(ctx, case_id, case.version, investigation.id,
+                                              request.reason, command_key)
+
+    async def _propose_escalation(self, ctx: AuthContext, case_id: UUID, expected_version: int,
+                                  investigation_id: UUID, reason: str, command_key: str) -> ProposalView:
+        """Harry's propose_escalation keeps the reason and finds the eligible review target itself."""
+        result = await self._call(
+            self._facade.propose_escalation,
+            self._context(ctx),
+            case_id=case_id,
+            expected_version=expected_version,
+            investigation_id=investigation_id,
+            reason=reason,
+            request_key=command_key,
         )
+        return ProposalView.model_validate(result)
 
     async def get_operation(self, ctx: AuthContext, operation_id: UUID) -> OperationView:
         return OperationView.model_validate(await self._call(self._facade.get_operation, self._context(ctx), operation_id))

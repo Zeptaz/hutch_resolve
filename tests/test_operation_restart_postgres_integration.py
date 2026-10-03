@@ -149,7 +149,7 @@ def test_two_workers_claim_a_pending_ticket_action_once():
         current_case = facade.get_case(customer, case["id"])
         proposal = facade.propose_action(customer, case_id=case["id"], expected_version=current_case["version"],
             investigation_id=investigation["id"], action_type="CREATE_REVIEW_TICKET", target_id=account_id,
-            request_key=f"concurrent-ticket-{uuid4()}")
+            request_key=f"concurrent-ticket-{uuid4()}", escalation_reason="Integration test review.")
         confirmation = facade.confirm_action(customer, proposal_id=proposal["id"],
             proposal_hash=proposal["proposal_hash"], decision="ACCEPT", client_turn_id=uuid4())
         runner_a = OperationRunner(resolve_engine, sandbox_engine)

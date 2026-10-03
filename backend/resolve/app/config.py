@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from backend.resolve.providers.hubspot import HubSpotConfig
+
 
 @dataclass(frozen=True, slots=True)
 class DemoIdentity:
@@ -33,6 +35,8 @@ class Settings:
     auth_login_ip_limit: int = 30
     auth_login_identity_limit: int = 10
     voice_grant_encryption_key: bytes | None = None
+    crm_provider: str = "mock"
+    hubspot: HubSpotConfig | None = None
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -132,6 +136,10 @@ class Settings:
                 sandbox_id=sandbox_id,
                 account_id=account_id,
             )
+        crm_provider = os.getenv("CRM_PROVIDER", "mock").strip().lower() or "mock"
+        if crm_provider not in {"mock", "hubspot"}:
+            raise RuntimeError("CRM_PROVIDER must be mock or hubspot")
+        hubspot = HubSpotConfig.from_environment() if crm_provider == "hubspot" else None
         return cls(
             database_url=database_url,
             app_origins=origins,
@@ -147,4 +155,6 @@ class Settings:
             auth_login_ip_limit=limits["AUTH_LOGIN_IP_LIMIT"],
             auth_login_identity_limit=limits["AUTH_LOGIN_IDENTITY_LIMIT"],
             voice_grant_encryption_key=voice_grant_encryption_key,
+            crm_provider=crm_provider,
+            hubspot=hubspot,
         )
