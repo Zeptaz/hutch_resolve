@@ -53,6 +53,7 @@ export type CallState = {
   phase: CallPhase
   activity: CallActivity
   muted: boolean
+  micActive: boolean
   proposal: { data: VoiceProposal; responseId: string; status: ProposalStatus } | null
   liveAt: number | null
   endReason: string | null
@@ -63,6 +64,7 @@ const INITIAL: CallState = {
   phase: 'idle',
   activity: 'listening',
   muted: false,
+  micActive: false,
   proposal: null,
   liveAt: null,
   endReason: null,
@@ -75,7 +77,7 @@ type AudioPort = Pick<CallAudio,
 
 /** Mock mode exercises the protocol without requesting a microphone or AudioContext. */
 class MockAudio implements AudioPort {
-  onFrame: (pcm: ArrayBuffer) => void = () => {}
+  onFrame: (pcm: ArrayBuffer, level: number) => void = () => {}
   onDrained: (responseId: string) => void = () => {}
   onPlayingChange: (playing: boolean) => void = () => {}
   readonly micLevel = 0
@@ -114,6 +116,12 @@ export class VoiceCall {
   private playbackRetryTimer = 0
   private limitTimer = 0
   private grantRequestKey: string | null = null
+  private utterance: SpeechSynthesisUtterance | null = null
+  private speakingFallback = false
+  private speechTimer = 0
+  private heardSpeech = false
+  private quietFrames = 0
+  private inputClosed = false
 
   private handlers: CallHandlers = {}
 
@@ -153,8 +161,24 @@ export class VoiceCall {
       return this.fail({ kind: 'mic', mic: 'unsupported' })
     }
     const audio = this.audio
-    audio.onFrame = (pcm) => {
-      if (this.state.phase === 'live' && !this.state.muted && this.socket?.readyState === WebSocket.OPEN) this.socket.send(pcm)
+    audio.onFrame = (pcm, level) => {
+      const micActive = !this.inputClosed && !this.speakingFallback && !this.state.muted && level >= 0.012
+      if (micActive !== this.state.micActive) this.set({ micActive })
+      if (this.state.phase !== 'live' || this.state.muted || this.speakingFallback || this.inputClosed ||
+          this.socket?.readyState !== WebSocket.OPEN) return
+      if (micActive) {
+        this.heardSpeech = true
+        this.quietFrames = 0
+      } else if (this.heardSpeech) {
+        this.quietFrames++
+      }
+      if (!this.inputClosed) this.socket.send(pcm)
+      if (this.heardSpeech && this.quietFrames >= 9) {
+        this.send({ type: 'input_audio_end' })
+        this.heardSpeech = false
+        this.quietFrames = 0
+        this.inputClosed = true
+      }
     }
     audio.onDrained = (id) => this.drained(id)
     audio.onPlayingChange = (playing) => {
@@ -256,6 +280,7 @@ export class VoiceCall {
         break
       case 'greeting':
         this.handlers.onGreeting?.(msg.text)
+        this.speakVerifiedText(msg.text, false)
         break
       case 'transcript':
         // Only the caller's finalized turn is shown; assistant text comes from Resolve's reply_text.
@@ -265,20 +290,24 @@ export class VoiceCall {
         }
         break
       case 'resolve_result': {
+        this.stopSpeech()
         this.audio?.flush()
         this.awaitingPlaybackAck = null
         window.clearTimeout(this.playbackRetryTimer)
         this.playbackAttempts = 0
         this.reply = { id: msg.response_id, proposal: msg.proposal, fallback: false }
         this.set({
-          activity: 'listening',
+          activity: 'thinking',
           proposal: msg.proposal ? { data: msg.proposal, responseId: msg.response_id, status: msg.sensitive_audio ? 'reading' : 'text-only' } : null,
         })
         this.handlers.onResolveResult?.(msg)
         break
       }
       case 'audio_start':
-        if (this.reply?.id === msg.response_id) this.audio?.beginReply(msg.response_id)
+        if (this.reply?.id === msg.response_id) {
+          this.audio?.beginReply(msg.response_id)
+          if (this.state.error?.kind === 'voice' && this.state.error.code === 'speech_playback_unavailable') this.set({ error: null })
+        }
         break
       case 'audio_end':
         this.audio?.endReply(msg.response_id)
@@ -288,6 +317,7 @@ export class VoiceCall {
           this.reply.fallback = true
           this.handlers.onFallback?.(msg.response_id, msg.text)
           this.updateProposal(msg.response_id, 'text-only')
+          this.speakVerifiedText(msg.text)
         }
         break
       case 'playback_ack':
@@ -315,6 +345,7 @@ export class VoiceCall {
         this.updateProposal(msg.response_id, msg.accepted ? 'awaiting' : 'text-only')
         break
       case 'interrupted': {
+        this.stopSpeech()
         this.audio?.flush()
         this.awaitingPlaybackAck = null
         window.clearTimeout(this.playbackRetryTimer)
@@ -324,11 +355,13 @@ export class VoiceCall {
           this.set({ proposal: { ...p, status: 'interrupted' } })
         }
         this.reply = null
+        this.inputClosed = false
         this.set({ activity: 'listening' })
         break
       }
       case 'error':
         if (msg.code === 'voice_session_ending' || msg.code.startsWith('invalid_')) break // informational
+        if (msg.code === 'resolve_tool_failed') this.inputClosed = false
         this.set({ error: { kind: 'voice', code: msg.code } })
         break
       case 'ended':
@@ -340,9 +373,60 @@ export class VoiceCall {
   /** The reply's audio has fully played: report it, and nothing else. */
   private drained(id: string) {
     if (this.reply?.id !== id || this.reply.fallback || this.state.phase !== 'live') return
+    this.inputClosed = false
     this.awaitingPlaybackAck = id
     this.playbackAttempts = 1
     this.send({ type: 'playback_complete', response_id: id })
+  }
+
+  /** Speak only fixed greeting or Resolve-verified fallback text. This path
+   * never acknowledges proposal presentation, so consent stays text-only. */
+  private speakVerifiedText(text: string, reportFailure = true) {
+    if (API_MODE !== 'live' || !text.trim() || this.state.phase !== 'live') return
+    this.stopSpeech()
+    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+      if (reportFailure) this.set({ error: { kind: 'voice', code: 'speech_playback_unavailable' } })
+      this.inputClosed = false
+      return
+    }
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = /[\u0D80-\u0DFF]/.test(text) ? 'si-LK' : /[\u0B80-\u0BFF]/.test(text) ? 'ta-LK' : 'en-US'
+    utterance.rate = 1
+    this.utterance = utterance
+    this.speakingFallback = true
+    this.set({ activity: 'speaking' })
+    const finish = (failed: boolean) => {
+      if (this.utterance !== utterance) return
+      this.utterance = null
+      this.speakingFallback = false
+      this.inputClosed = false
+      window.clearTimeout(this.speechTimer)
+      if (this.state.phase === 'live') this.set(failed && reportFailure
+        ? { activity: 'listening', error: { kind: 'voice', code: 'speech_playback_unavailable' } }
+        : { activity: 'listening' })
+    }
+    utterance.onend = () => finish(false)
+    utterance.onerror = () => finish(true)
+    this.speechTimer = window.setTimeout(() => {
+      if (this.utterance !== utterance) return
+      this.stopSpeech()
+      this.inputClosed = false
+      this.set(reportFailure
+        ? { activity: 'listening', error: { kind: 'voice', code: 'speech_playback_unavailable' } }
+        : { activity: 'listening' })
+    }, 30_000)
+    try {
+      window.speechSynthesis.speak(utterance)
+    } catch {
+      finish(true)
+    }
+  }
+
+  private stopSpeech() {
+    window.clearTimeout(this.speechTimer)
+    this.utterance = null
+    this.speakingFallback = false
+    if (API_MODE === 'live') window.speechSynthesis?.cancel()
   }
 
   private updateProposal(responseId: string, status: ProposalStatus) {
@@ -373,6 +457,7 @@ export class VoiceCall {
 
   private teardown() {
     window.clearTimeout(this.limitTimer)
+    this.stopSpeech()
     const socket = this.socket
     this.socket = null
     if (socket) socket.onclose = null
@@ -382,5 +467,8 @@ export class VoiceCall {
     this.awaitingPlaybackAck = null
     window.clearTimeout(this.playbackRetryTimer)
     this.playbackAttempts = 0
+    this.heardSpeech = false
+    this.quietFrames = 0
+    this.inputClosed = false
   }
 }

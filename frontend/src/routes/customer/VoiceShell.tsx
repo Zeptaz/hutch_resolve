@@ -209,6 +209,10 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
             active ? state.activity === 'listening' ? 'Listening' : state.activity === 'speaking' ? 'Speaking' : 'Thinking' :
             state.phase === 'ended' ? 'Call ended. Continue by text or call again.' : 'Press the microphone to start.'}
         </p>
+        {active && <p className="text-xs text-muted-foreground" aria-live="polite">
+          {state.micActive ? 'Microphone is picking up your voice.' : state.activity === 'thinking' ?
+            'Waiting for Resolve to finish the spoken reply.' : 'Microphone is on. Speak, then pause for a reply.'}
+        </p>}
         {(caption.user || caption.reply) && <div className="w-full space-y-3 text-left" aria-live="polite">
           {caption.user && <p className="ml-auto w-fit max-w-[90%] rounded-2xl bg-primary px-4 py-2 text-primary-foreground">{caption.user}</p>}
           {caption.reply && <p className="w-fit max-w-[90%] rounded-2xl bg-card px-4 py-2">{caption.reply}</p>}
@@ -216,6 +220,8 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         {state.error && <p role="alert" className="text-sm text-destructive">
           {state.error.kind === 'grant' ? describeError(state.error.error) : state.error.kind === 'mic' ?
             'Microphone unavailable. Check browser permission or continue by text.' :
+            state.error.code === 'speech_playback_unavailable' ?
+              'Speech playback is unavailable. Read the reply on screen or continue by text.' :
             'Voice is unavailable. Continue by text.'}
         </p>}
         {active && <div className="flex gap-2">

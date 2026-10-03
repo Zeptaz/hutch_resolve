@@ -35,7 +35,7 @@ export class CallAudio {
   private carry: Uint8Array | null = null
 
   /** Called with each 100 ms microphone frame. */
-  onFrame: (pcm: ArrayBuffer) => void = () => {}
+  onFrame: (pcm: ArrayBuffer, level: number) => void = () => {}
   /** Called once a reply's audio has been fully played (after audio_end). */
   onDrained: (responseId: string) => void = () => {}
   /** Called when playback starts or stops, for the speaking indicator. */
@@ -80,7 +80,7 @@ export class CallAudio {
       this.capture.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; level: number }>) => {
         if (this.closed) return
         this.inputLevel = e.data.level
-        this.onFrame(e.data.pcm)
+        this.onFrame(e.data.pcm, e.data.level)
       }
       // The worklet must be pulled by the graph to run; a muted gain keeps the mic out of the speakers.
       this.sink = this.ctx.createGain()
