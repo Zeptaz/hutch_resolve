@@ -192,7 +192,9 @@ function WhyHere({ detail }: { detail: AgentCaseDetail }) {
   const conflicts = new Set(inv?.conflicts ?? [])
   const missing = new Set(inv?.missing ?? [])
   const reasons = [...new Set([...(inv?.review_reasons ?? []), ...conflicts, ...missing])]
-  const askedForPerson = detail.proposals.some((p) => p.action_type === 'CREATE_REVIEW_TICKET') && detail.confirmations.some((c) => c.decision === 'ACCEPT')
+  // Only an accepted review offer counts; accepting another action (e.g. a renewal stop) does not.
+  const reviewOffers = new Set(detail.proposals.filter((p) => p.action_type === 'CREATE_REVIEW_TICKET').map((p) => p.id))
+  const acceptedReview = detail.confirmations.some((c) => c.decision === 'ACCEPT' && reviewOffers.has(c.proposal_id))
   const calc = inv?.calculations[0]
 
   return (
@@ -204,7 +206,7 @@ function WhyHere({ detail }: { detail: AgentCaseDetail }) {
       <div className="flex flex-col gap-4">
         <p className="text-base leading-snug text-balance">
           {state ? HEADLINE[state] : 'Resolve has not investigated this case yet.'}
-          {askedForPerson && ' The customer also asked for a human review.'}
+          {acceptedReview && ' The customer accepted a human review.'}
         </p>
         {reasons.length > 0 && (
           <ul className="flex flex-col gap-1.5">
