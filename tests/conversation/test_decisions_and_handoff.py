@@ -202,3 +202,21 @@ def test_follow_up_offer_invalidated_by_the_finished_first_action_is_offered_aga
     done = h.send(ctx, h.turn(conv, {"type": "action_decision", "proposal_id": str(again.id),
                                      "proposal_hash": again.proposal_hash, "decision": "ACCEPT"}))
     assert done.operation_ids
+
+
+def test_declining_a_requested_review_does_not_offer_the_same_review_again(hm: Harness) -> None:
+    """F lists the VAS stop, then the review. If the customer asks for a person while the review is
+    still a listed option and then declines it, the same review must not come straight back."""
+    hm.model.on("I want a person", extraction(intent="HUMAN_REQUEST"))
+    ctx = customer(ACCOUNT_F)
+    conv = hm.open(ctx)
+    offered = hm.send(ctx, hm.turn(conv, details("VAS_DISPUTE")))
+    assert next(c for c in offered.cards if c.type == "confirmation").data.action_type == "DEACTIVATE_VAS"
+    assert [c.action_type for c in hm.state(conv).pending_choices] == ["CREATE_REVIEW_TICKET"]
+    asked = hm.send(ctx, hm.turn(conv, text("I want a person")))
+    review = next(c for c in asked.cards if c.type == "confirmation").data
+    assert review.action_type == "CREATE_REVIEW_TICKET"
+    declined = hm.send(ctx, hm.turn(conv, {"type": "action_decision", "proposal_id": str(review.id),
+                                           "proposal_hash": review.proposal_hash, "decision": "DECLINE"}))
+    assert not [c for c in declined.cards if c.type == "confirmation"]
+    assert declined.pending_question is None

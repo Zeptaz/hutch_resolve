@@ -168,11 +168,23 @@ Method: every opt-in PostgreSQL test file on its own fresh database (`sh scripts
 | 10 | Low | Tevin (mine) | Resolve-offered review reason claimed the evidence needed checking even when it reconciled | Neutral, always-true reason | Browser A |
 | 11 | Process | All | The default suite skips every database test, which is how items 1-8 and the earlier six bugs reached `ResolveDev` | `scripts/run_db_tests.sh` | 14 files, all pass |
 | 13 | Medium | Process | Running the database tests against the app's own database let the app's worker execute test operations; in HubSpot mode it sent three test tickets to HubSpot | `run_db_tests.sh` uses its own container and port (55435) and removes it afterwards | Test tickets archived; rerun on 55435 |
+| 14 | High | Harry (finding 12) | A proven recharge upgraded a provisional ledger (e.g. late posting) to SUFFICIENT | Conservative merge: CONFLICTING > PARTIAL > SUFFICIENT | Conversation fault test: xfail turned into a hard assertion, fails without the fix |
+| 15 | Medium | Harry (policy) | Scenario F listed the review before the safe VAS stop | Stable sort puts `DEACTIVATE_VAS` first | Scenario DB test; browser F in Tamil |
+| 16 | Medium | Tevin | A fully reconciled answer (B) still pushed an unprompted review, reading as doubt | No unprompted review when every finding is `LEDGER_RECONCILED`/`QUOTA_RECONCILED`; still available on request; E (payment pending) still offers it | Real-facade conversation test; browser B |
+| 17 | Medium | Tevin | Declining a requested review re-offered the same review as the "next" option (loop) | The decided action is never re-offered | Unit test (fails without the fix); browser B |
+| 18 | Medium | Jayith | Chat input enabled before the conversation opened, so an early send could fail; caused the one failing Playwright test | Input disabled until the conversation exists | Playwright mock suite 19/19 |
+| 19 | Low | Tevin/Jayith | Sinhala/Tamil drafts told customers to press 'Yes, go ahead' (the button is translated); 24 UI labels missing in SI/TA (demo sign-in, packages) | Button names corrected; 24 labels drafted per language, marked for fluent review | Locale tests; browser SI/TA |
 | 12 | Docs | All | README readiness revision stale (`0007`) and no macOS reset path | README updated; macOS scripts | Reviewed |
 
 Merge resolution: upstream already fixed `case_status`, the `escalation_reason` column (in `0009_package_activation`; our `0009_escalation_reason` was dropped), the readiness revision and the realm header. Still needed from this branch: `turn_claims`, `propose_escalation` filter, confirmation `simulation`, the conversation adapter reason, and items 1-10 above.
 
-Not fixed (reported): Harry finding 12 (a provisional ledger is labelled SUFFICIENT; existing xfail); four frontend lint warnings (Jayith); Playwright suite not run here (browsers not installed); live Voice untested (no Voice service); Sinhala/Tamil wording not rechecked in the browser; HubSpot call chain can outlast the 15 s lease with more than one worker.
+Remaining checks (same day): Playwright mock suite 19/19 with installed Chrome; browser runs of B (English), C (Sinhala), F (Tamil) and a mock-CRM fallback drill on D (mock ticket UUID; zero HubSpot tickets created). E's review offer is covered by the real-facade conversation test.
+
+Not fixed (reported):
+- **Sinhala/Tamil case replies are English.** By design, case replies (money, findings, offers, consent) are never machine-translated; they switch to Sinhala/Tamil only after a fluent person reviews `locales/si.json`/`ta.json` and sets `"status": "REVIEWED"` (see `conversation/LANGUAGE_REVIEW.md`). Resolve finding sentences stay English even then (needs per-finding-code templates with Harry). UI chrome is localized.
+- Live Voice untested here (needs the Zeptaz Voice service, Gemini Live credentials and a microphone); Resolve's bridge and Voice conversation paths pass on PostgreSQL.
+- Four frontend lint warnings and two icon buttons without accessible names (header cases button, sign-in dialog close) (Jayith).
+- HubSpot call chain can outlast the 15 s lease with more than one worker.
 
 ## Verification log
 
@@ -185,5 +197,6 @@ Not fixed (reported): Harry finding 12 (a provisional ledger is labelled SUFFICI
 | 2026-10-03 | Phase 1 live spike | `scripts/hubspot_setup.py check/properties/spike --keep` against the team HubSpot account; UI check in browser | Gate 1 passed; duplicate create is HTTP 400 (handled); default suite 459 passed, 41 skipped; writer integration 6 passed |
 | 2026-10-03 | Phases 5-6 browser run | Worktree app (`CRM_PROVIDER=hubspot`) on 8080, frontend on 5173, real HubSpot | Customer D to HubSpot ticket, agent start and close mirrored in HubSpot, dashboard link verified; 7 defects patched (table above); default suite 459 passed, 41 skipped; DB suites 15 passed on a fresh database; frontend typecheck/lint pass |
 | 2026-10-03 | Phase 6 natural language and outage | Gemini key loaded (`readyz` model true); browser run on fresh database; realm-header fix; adapter test | Outage then delivery verified; default suite 462 passed, 41 skipped; frontend typecheck/lint pass |
+| 2026-10-03 | Remaining checks | Playwright mock suite; browser B/C(si)/F(ta); mock fallback drill; locale checks; finding 12 | Playwright 19/19; default suite 458 passed, 46 skipped; all 14 DB files pass; items 14-19 fixed |
 | 2026-10-03 | Merge `46d41ed` and full audit | `sh scripts/run_db_tests.sh` (14 files), default suite, frontend typecheck/lint/build, browser A with Gemini + HubSpot | All DB files pass; default 457 passed, 44 skipped; 12 findings fixed (audit table) |
 | 2026-10-03 | Phase 0 integration baseline | CRM-related opt-in PostgreSQL files on a fresh database | Blocked by `ResolveDev` schema drift; to be reported to Harry |

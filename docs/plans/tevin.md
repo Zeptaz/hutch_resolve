@@ -71,3 +71,6 @@ Update this plan and root context.md after each implemented and verified correct
 - `_confirm` re-offers an action on a fresh proposal when the earlier offer was invalidated by a finished action (follow-up offers after a VAS stop); `test_follow_up_offer_invalidated_by_the_finished_first_action_is_offered_again`.
 - `turn_fingerprint` excludes the bridge-derived `voice_evidence.presentation_response_id`, so a retried Voice turn replays instead of conflicting.
 - Verification: default suite 457 passed, 44 skipped; conversation DB suites pass on fresh databases; browser scenario A with Gemini.
+- No unprompted human review when every finding is reconciled (`LEDGER_RECONCILED`/`QUOTA_RECONCILED`); the review stays available on request, and pending or unexplained findings still offer it.
+- An action just accepted or declined is never re-offered as the "next" option (one human review per case).
+- Locale drafts: button names in `package_offer_hint` now match the translated UI labels. Case replies remain English until a fluent reviewer marks the locales REVIEWED.

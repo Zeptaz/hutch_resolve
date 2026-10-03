@@ -25,7 +25,7 @@ MORNING_START = datetime.fromisoformat("2026-10-02T00:00:00+05:30")
 MORNING_END = datetime.fromisoformat("2026-10-02T12:00:00+05:30")
 
 
-def _investigate(engine, line_alias: str):
+def _investigate(engine, line_alias: str, complaint: str = "BALANCE_RECHARGE"):
     with engine.connect() as connection:
         account_id = connection.execute(text(
             "SELECT id FROM sandbox.accounts WHERE sandbox_id=:run AND line_alias=:alias"),
@@ -38,10 +38,10 @@ def _investigate(engine, line_alias: str):
     facade = ResolveFacade(engine, PostgresSandboxProvider(engine))
     conversation = facade.create_conversation(context)
     case = facade.create_case(context, conversation_id=conversation["id"], client_turn_id=uuid4(),
-        expected_conversation_version=1, complaint_type="BALANCE_RECHARGE",
+        expected_conversation_version=1, complaint_type=complaint,
         window_start=MORNING_START, window_end=MORNING_END, reported_facts={})
     investigation = facade.investigate(context, case_id=case["id"], expected_version=case["version"],
-        command_key=f"scenario-it-{uuid4()}", complaint_type="BALANCE_RECHARGE",
+        command_key=f"scenario-it-{uuid4()}", complaint_type=complaint,
         window_start=MORNING_START, window_end=MORNING_END, reported_facts={})
     return facade, context, case, investigation
 
@@ -72,3 +72,9 @@ def test_d_conflict_never_offers_an_account_change(engine):
     _, _, _, investigation = _investigate(engine, "SIM-LK-0004")
     assert investigation["evidence_state"] == "CONFLICTING"
     assert [item["action_type"] for item in investigation["eligible_actions"]] == ["CREATE_REVIEW_TICKET"]
+
+
+def test_f_lists_the_vas_stop_before_the_review(engine):
+    _, _, _, investigation = _investigate(engine, "SIM-LK-0006", "VAS_DISPUTE")
+    actions = [item["action_type"] for item in investigation["eligible_actions"]]
+    assert actions[0] == "DEACTIVATE_VAS" and "CREATE_REVIEW_TICKET" in actions

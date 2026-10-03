@@ -474,10 +474,10 @@ class ResolveFacade:
                 result["missing"] = sorted(set(result["missing"] + recharge_result["missing"]))
                 result["conflicts"] = sorted(set(result["conflicts"] + recharge_result["conflicts"]))
                 result["review_reasons"] = sorted(set(result["review_reasons"] + recharge_result["review_reasons"]))
+                # Combine conservatively: a proven recharge must not upgrade a provisional ledger
+                # (e.g. a late posting not yet visible) to SUFFICIENT; the question is about the balance.
                 if "CONFLICTING" in {result["evidence_state"], recharge_result["evidence_state"]}:
                     result["evidence_state"] = "CONFLICTING"
-                elif recharge_result["evidence_state"] == "SUFFICIENT":
-                    result["evidence_state"] = "SUFFICIENT"
                 elif "PARTIAL" in {result["evidence_state"], recharge_result["evidence_state"]}:
                     result["evidence_state"] = "PARTIAL"
                 additional_source_status.append({"source": "RECHARGE_FULFILMENT", "fetched_at": datetime.now(UTC),
@@ -524,6 +524,9 @@ class ResolveFacade:
             result["eligible_actions"][0:0] = [
                 {"action_type": "DEACTIVATE_VAS", "target_id": target["target_id"], "target_label": target["target_label"]}
                 for target in self._provider.eligible_vas_targets(context.sandbox_id, context.account_id)]  # type: ignore[attr-defined]
+        # The safe, confirmed future-renewal stop is listed before the human review (scenarios A and F);
+        # the sort is stable, so every other action keeps its order.
+        result["eligible_actions"].sort(key=lambda item: item["action_type"] != "DEACTIVATE_VAS")
         investigation_id = uuid4()
         created_at = datetime.now(UTC)
         source_status = alternate_source_status if statement is None else [{

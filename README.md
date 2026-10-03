@@ -42,6 +42,7 @@ The database volume is Docker-managed, outside the OneDrive-synced repository. `
 - A fresh fixture run arms 13 one-shot faults (late and duplicate postings, VAS write failures, a CRM outage), so the first journeys after a reset are deliberately imperfect. `python scripts/demo_faults.py list` shows them; `clear` gives a predictable happy path; `arm crm-outage` (or `crm-lost-response`, `vas-rejected`, ...) prepares exactly the failure to show.
 - `sh scripts/run_db_tests.sh` runs every opt-in PostgreSQL test file on its own freshly reset database (a separate `hutch-test-db` on port 55435, never the app's database) with the derived fixture runs the tests expect. The default `pytest` run skips all of them, so run this before calling the backend verified.
 - Demo phrasing: "this morning" and "today" resolve to the 2 October fixture day; "yesterday" means 1 October and finds no events.
+- Languages: the interface is English, Sinhala and Tamil. Case replies stay English until a fluent reviewer approves `backend/resolve/conversation/locales/si.json` and `ta.json` (see `LANGUAGE_REVIEW.md`); say so if asked.
 
 ## HubSpot CRM (optional)
 
