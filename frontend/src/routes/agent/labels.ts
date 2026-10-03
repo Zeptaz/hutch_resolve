@@ -65,7 +65,7 @@ export const DISPOSITION_HINT: Record<string, string> = {
 }
 
 const SYNC: Record<string, string> = {
-  NOT_APPLICABLE: 'No ticket to sync',
+  NOT_APPLICABLE: 'Nothing to sync yet',
   PENDING: 'Sync pending',
   UNKNOWN: 'Sync unconfirmed',
   SYNCED: 'Synced to ticket',

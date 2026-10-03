@@ -294,7 +294,10 @@ export function ReviewPanel({ detail, onChanged }: { detail: AgentCaseDetail; on
             </p>
           </div>
 
-          {mode === 'close' && <p className="animate-fade-in text-xs text-muted-foreground">Closing the review changes no account, evidence or ticket status.</p>}
+          {mode === 'close' && <p className="animate-fade-in text-xs text-muted-foreground">
+              Closing the review changes no account or evidence.
+              {detail.handoff?.provider_ticket_id ? ' Your outcome and note are added to the review ticket.' : ''}
+            </p>}
 
           {changedSince && feedback?.kind !== 'conflict' && (
             <Notice tone="warning">

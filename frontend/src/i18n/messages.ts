@@ -42,6 +42,7 @@ export const en = {
   'chat.demoCredential': 'Demo credential',
   'chat.signIn': 'Sign in',
   'chat.signingIn': 'Signing in…',
+  'chat.signInRejected': 'That identity or credential is not right. Check them and try again.',
   'chat.cases': 'Cases',
   'chat.casesDescription': 'Cases, receipts and human review for this chat.',
   'chat.message': 'Message',
@@ -434,6 +435,8 @@ export const si: Messages = {
   'review.note':
     'සමාලෝචකයෙකුට කිසිවක් යැවීමට පෙර, යවන දේ ඔබට පෙනෙන අතර ඔබ එය තහවුරු කළ යුතුය. මෙයින් මුදල් ආපසු ගෙවීමක් සිදු නොවේ.',
   'review.submit': 'සමාලෝචන ඉල්ලීම සූදානම් කරන්න',
+  // Machine-drafted 2026-10-03; needs a fluent review.
+  'chat.signInRejected': 'එම අනන්‍යතාව හෝ මුරපදය නිවැරදි නැත. ඒවා පරීක්ෂා කර නැවත උත්සාහ කරන්න.',
 }
 
 /** UNREVIEWED DRAFT — needs fluent Tamil review. */
@@ -637,4 +640,6 @@ export const ta: Messages = {
   'review.note':
     'மதிப்பாய்வாளருக்கு எதுவும் செல்வதற்கு முன், அனுப்பப்படுவதைப் பார்த்து நீங்கள் உறுதிப்படுத்துவீர்கள். இதனால் பணம் திருப்பித் தரப்படாது.',
   'review.submit': 'மதிப்பாய்வுக் கோரிக்கையைத் தயாரிக்கவும்',
+  // Machine-drafted 2026-10-03; needs a fluent review.
+  'chat.signInRejected': 'அந்த அடையாளம் அல்லது கடவுச்சொல் சரியில்லை. சரிபார்த்து மீண்டும் முயலவும்.',
 }
