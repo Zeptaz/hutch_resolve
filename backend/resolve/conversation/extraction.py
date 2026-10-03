@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .dto import CONTRACT_ACTION_TYPES, ActionType, ComplaintType, Language, MAX_TEXT_CHARS
 from .model import ModelClient, ModelError, ModelReply
 
-PROMPT_VERSION = "extract-v5"
+PROMPT_VERSION = "extract-v6"
 TOTAL_BUDGET_SECONDS = 6.0
 MAX_WINDOW = timedelta(days=30)
 # Sri Lanka observes no DST; a fixed offset avoids a tzdata dependency.
@@ -40,6 +40,14 @@ class Intent(StrEnum):
     PACKAGES = "PACKAGES"  # wants package suggestions, or wants the assistant to activate one (prototype)
     OFF_TOPIC = "OFF_TOPIC"  # nothing to do with their mobile service
     OTHER = "OTHER"
+
+
+class AccountTopic(StrEnum):
+    """What an ACCOUNT_ENQUIRY asks about; the reply is rendered from Resolve's account view."""
+
+    BALANCE = "BALANCE"
+    SERVICES = "SERVICES"  # value-added services (VAS) / subscriptions they pay for
+    PACKAGES = "PACKAGES"  # data/voice packages they currently have
 
 
 class Script(StrEnum):
@@ -104,6 +112,7 @@ class Extraction(BaseModel):
     faq_query: Annotated[str, Field(max_length=200)] | None
     summary: Annotated[str, Field(max_length=300)] | None
     ambiguities: list[Ambiguity]
+    account_topic: AccountTopic | None = None  # optional so older payloads and fakes stay valid
 
     @property
     def amount_minor(self) -> int | None:
@@ -145,10 +154,11 @@ RESPONSE_SCHEMA: dict[str, Any] = {
         "faq_query": _nullable({"type": "string", "maxLength": 200}),
         "summary": _nullable({"type": "string", "maxLength": 300}),
         "ambiguities": {"type": "array", "items": _enum(Ambiguity)},
+        "account_topic": _nullable(_enum(AccountTopic)),
     },
     "required": [
         "intent", "decision", "action_choice", "detected_language", "script", "complaint_type", "time_reference",
-        "amount_lkr", "recharge_reference", "faq_query", "summary", "ambiguities",
+        "amount_lkr", "recharge_reference", "faq_query", "summary", "ambiguities", "account_topic",
     ],
 }
 
@@ -166,7 +176,8 @@ intent:
 - NEW_COMPLAINT: a problem with balance/recharge, data running out, no connection, or an unexpected service charge.
 - FOLLOW_UP: a question about findings already given for the active case.
 - CORRECTION: the customer changes facts (time, amount, which service) of the active case.
-- ACCOUNT_ENQUIRY: asks for their own balance, packages or account state without reporting a problem.
+- ACCOUNT_ENQUIRY: asks about their OWN line without reporting a problem: balance, which value-added services (VAS)
+  or subscriptions they have / pay for, which packages they have. Questions about "my" services/charges are never FAQ.
 - FAQ: a general question about services, OR the customer wants to do something themselves and needs to know how:
   reload/recharge/top up, activate a package or data plan themselves, use the app, check balance in general,
   contact support or register a complaint. A greeting before the request ("hi, ...") does not change this. Set faq_query.
@@ -196,6 +207,8 @@ Extract only what the customer actually said. Never guess numbers or dates.
 - amount_lkr: an amount the customer stated, in rupees (e.g. "Rs.500", "500 rupees", "panseeya" = 500). null if none.
 - time_reference: relative to the provided current local date. TODAY, YESTERDAY, LAST_N_HOURS/LAST_N_DAYS with count,
   DATE with start_date, DATE_RANGE with start_date and end_date (YYYY-MM-DD). NONE if no time was mentioned.
+- account_topic (ACCOUNT_ENQUIRY only, else null): BALANCE (balance, money left), SERVICES (VAS, subscriptions,
+  services or service charges they have/pay for), PACKAGES (packages/bundles they have, data left in them).
 - faq_query: for FAQ only, a few English keywords for the topic (e.g. "how to reload", "activate data package",
   "contact support"). Otherwise null.
 - summary: one neutral English sentence describing the complaint, without names or numbers not in the message. null if not a complaint.
@@ -210,7 +223,12 @@ Examples (message -> key fields):
 "net eka wada na" -> NEW_COMPLAINT, si, LATIN, CONNECTIVITY
 "en balance kuraindhu pochu" -> NEW_COMPLAINT, ta, LATIN, BALANCE_RECHARGE
 "Why am I charged for video alerts? I never subscribed" -> NEW_COMPLAINT, en, LATIN, VAS_DISPUTE
-"what is my balance" -> ACCOUNT_ENQUIRY
+"what is my balance" -> ACCOUNT_ENQUIRY, account_topic BALANCE
+"what VAS do I have?" -> ACCOUNT_ENQUIRY, account_topic SERVICES
+"Mata VAS charges monadwada kiyanna puluwanda?" -> ACCOUNT_ENQUIRY, si, LATIN, account_topic SERVICES
+"mage VAS charges mokadda" -> ACCOUNT_ENQUIRY, si, LATIN, account_topic SERVICES
+"mata thiyena packages monawada" -> ACCOUNT_ENQUIRY, si, LATIN, account_topic PACKAGES
+"Mata VAS charges gana poddak check karanna puluwan da?" -> NEW_COMPLAINT, si, LATIN, VAS_DISPUTE (asks to check/look into charges)
 "how do I activate a package" -> FAQ, faq_query "package activation"
 "hi mata reload ekak danna one" -> FAQ, si, faq_query "how to reload"
 "reload karanne kohomada" -> FAQ, si, faq_query "how to reload"

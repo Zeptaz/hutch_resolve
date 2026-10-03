@@ -139,6 +139,12 @@ class TurnDraft:
     source_reply_text: str | None = None
     # Already written in the customer's language/style (e.g. by the package agent): do not rewrite again.
     localized: bool = False
+    # Opt-in (text chat only): a findings/offer/balance reply that may be rewritten into the customer's
+    # style although it mentions case facts. Its card stays the authoritative English record, the
+    # rewrite must pass the strict fact check and keep `keep_exact` verbatim. Operation outcomes,
+    # consent prompts and declines never set this.
+    rewrite_allowed: bool = False
+    keep_exact: tuple[str, ...] = ()
 
 
 class ConversationRepository(Protocol):

@@ -64,7 +64,7 @@ async def main(messages: list[str]) -> int:
             print(f"  FALLBACK: {outcome.failure}")
             continue
         ex = outcome.extraction
-        print(f"  intent={ex.intent} lang={ex.detected_language} script={ex.script} complaint={ex.complaint_type}")
+        print(f"  intent={ex.intent} lang={ex.detected_language} script={ex.script} complaint={ex.complaint_type} topic={ex.account_topic}")
         print(f"  time={ex.time_reference.kind} count={ex.time_reference.count} amount_lkr={ex.amount_lkr} ambiguities={list(ex.ambiguities)}")
         for reply in outcome.replies:
             print(f"  model={reply.model} tokens in/out={reply.input_tokens}/{reply.output_tokens}")
@@ -99,6 +99,7 @@ def score(case: dict, extraction) -> list[str]:
         "detected_language": extraction.detected_language,
         "time_kind": extraction.time_reference.kind,
         "amount_lkr": extraction.amount_lkr,
+        "account_topic": extraction.account_topic,
     }
     for field, expected in expect.items():
         if field == "intent_not":

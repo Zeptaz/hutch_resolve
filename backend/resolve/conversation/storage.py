@@ -289,10 +289,13 @@ class PostgresKnowledgeRepository:
                 SELECT id AS article_id,article_key,language,title,content,source_url AS url,
                   reviewed_at,version,scope
                 FROM resolve.knowledge_articles
-                WHERE language=:language AND reviewed_at IS NOT NULL
+                WHERE language IN (:language,'en') AND reviewed_at IS NOT NULL
                   AND (search_vector @@ plainto_tsquery('simple',:query)
                        OR EXISTS (SELECT 1 FROM unnest(aliases) a WHERE :query ILIKE '%' || a || '%'))
-                ORDER BY ts_rank(search_vector,plainto_tsquery('simple',:query)) DESC,article_key
+                -- Reviewed cards in the customer's language first; English cards otherwise (the
+                -- grounded answerer replies in the customer's style). faq_query is English keywords.
+                ORDER BY (language=:language) DESC,
+                  ts_rank(search_vector,plainto_tsquery('simple',:query)) DESC,article_key
                 LIMIT :limit
             """), {"language": language.value, "query": query, "limit": min(max(limit, 1), 3)}).mappings().all()
         return [KnowledgeCard.model_validate(dict(row)) for row in rows]

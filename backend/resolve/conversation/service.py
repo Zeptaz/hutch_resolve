@@ -18,6 +18,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from . import templates as t
@@ -67,6 +68,7 @@ from .dto import (
 from .errors import ResolveError
 from .extraction import (
     AMBIGUITY_PRIORITY,
+    AccountTopic,
     Ambiguity,
     Extraction,
     ExtractionContext,
@@ -100,6 +102,9 @@ MAX_WINDOW = timedelta(days=30)
 TURN_BUDGET_SECONDS = {Channel.TEXT: 15.0, Channel.VOICE: 7.0}
 MIN_REWRITE_SECONDS = 1.5  # below this, keep the English reply rather than risk the deadline
 _DEADLINE: ContextVar[float | None] = ContextVar("turn_deadline", default=None)
+# Channel of the turn being handled: text replies use paragraphs and card-backed offers, Voice speaks all of it.
+_CHANNEL: ContextVar[Channel] = ContextVar("turn_channel", default=Channel.TEXT)
+PARAGRAPH = "\n\n"
 _CRITICAL_REPLY = re.compile(
     r"\b(?:lkr|rs\.?|balance|charged|paid|refund|credit(?:ed)?|recharg(?:e|ed)|"
     r"active|inactive|pending|succeed(?:ed)?|fail(?:ed|ure)?|approv(?:ed|al)|"
@@ -119,6 +124,9 @@ Q_COMPLAINT_DETAILS = "COMPLAINT_DETAILS"
 Q_LOGIN_REQUIRED = "LOGIN_REQUIRED"
 Q_CONFIRM_ACTION = "CONFIRM_ACTION"
 Q_DESCRIBE_COMPLAINT = "DESCRIBE_COMPLAINT"
+# After listing value-added services: "shall I check your charge records?" A yes only looks at records
+# (a VAS_DISPUTE investigation); it never changes the account, so it is not action consent.
+Q_OFFER_CHARGE_CHECK = "OFFER_CHARGE_CHECK"
 # Text only: a details form carries its own complaint type and could override the one being collected.
 Q_CLARIFY = {
     Ambiguity.TIME_WINDOW: ("CLARIFY_TIME_WINDOW", "clarify_time_window", ["text"]),
@@ -188,6 +196,7 @@ class ConversationService:
             return outcome.result
         claim = outcome.claim
         token = _DEADLINE.set(self._monotonic() + self._budgets[turn.channel])
+        channel_token = _CHANNEL.set(turn.channel)
         try:
             start = claim.state
             if start.script is None:  # nothing detected from the customer yet: use the UI hint
@@ -200,7 +209,8 @@ class ConversationService:
             raise
         finally:
             _DEADLINE.reset(token)
-        return await self._conversations.complete_turn(ctx, claim, _user_body(turn, state.language), draft, state)
+            _CHANNEL.reset(channel_token)
+        return await self._conversations.complete_turn(ctx, claim, _user_body(turn, _lang(state, turn.channel)), draft, state)
 
     def _remaining(self) -> float:
         deadline = _DEADLINE.get()
@@ -222,11 +232,11 @@ class ConversationService:
             return await self._on_case_selection(ctx, turn, inp, state)
         if isinstance(inp, PackageQueryInput):
             if not _is_customer(ctx):
-                return _ask(state, Q_LOGIN_REQUIRED, t.text("packages_login", state.language), ["text"])
+                return _ask(state, Q_LOGIN_REQUIRED, t.text("packages_login", _lang(state)), ["text"])
             return await self._package_catalogue(ctx, turn, state)
         if isinstance(inp, PackageSelectionInput):
             if not _is_customer(ctx):
-                return _ask(state, Q_LOGIN_REQUIRED, t.text("packages_login", state.language), ["text"])
+                return _ask(state, Q_LOGIN_REQUIRED, t.text("packages_login", _lang(state)), ["text"])
             return await self._package_selection(ctx, turn, inp, state)
         raise ResolveError("VALIDATION_ERROR", "unsupported input type")
 
@@ -245,9 +255,20 @@ class ConversationService:
         choice = _match_choice(state, extraction)
         if choice is not None:
             return await self._choose_action(ctx, turn, choice, state)
+        # "ow"/"yes" answers the latest question. When that was the charge-records check, it only starts a
+        # look-up; an older offer stays open on its card and is never accepted by this (or any typed/spoken
+        # yes without its own presentation evidence).
+        if (intent is Intent.ACTION_DECISION and state.candidate is not None
+                and state.pending_question is not None and state.pending_question.code == Q_OFFER_CHARGE_CHECK):
+            if extraction.decision is SpokenDecision.ACCEPT:
+                return await self._collect_complaint(ctx, turn, extraction, state, state.candidate, now)
+            if extraction.decision is SpokenDecision.DECLINE:
+                return _ask(state.evolve(candidate=None), Q_CHOOSE_COMPLAINT, t.text("anything_else", _lang(state)),
+                            ["category_selection", "text"])
+            return _ask(state, Q_OFFER_CHARGE_CHECK, t.text("offer_charge_check", _lang(state)), ["text"])
         if intent is Intent.ACTION_DECISION:
             if state.pending_proposal is None:
-                return TurnDraft(reply_text=t.text("no_pending_action", state.language), case_id=state.active_case_id), state
+                return TurnDraft(reply_text=t.text("no_pending_action", _lang(state)), case_id=state.active_case_id), state
             if turn.channel is Channel.VOICE and _is_customer(ctx):
                 return await self._spoken_decision(ctx, turn, inp, extraction, state)
             # Typed "yes" is never consent: text chat uses the explicit action_decision control.
@@ -255,21 +276,21 @@ class ConversationService:
         if intent is Intent.FAQ:
             return await self._faq(ctx, turn, inp.text, extraction, state)
         if intent is Intent.OFF_TOPIC:
-            return _ask(state, Q_CHOOSE_COMPLAINT, t.text("off_topic", state.language), ["category_selection", "text"])
+            return _ask(state, Q_CHOOSE_COMPLAINT, t.text("off_topic", _lang(state)), ["category_selection", "text"])
         if intent is Intent.PACKAGES:
             if not _is_customer(ctx):
-                return _ask(state, Q_LOGIN_REQUIRED, t.text("packages_login", state.language), ["text"])
+                return _ask(state, Q_LOGIN_REQUIRED, t.text("packages_login", _lang(state)), ["text"])
             return await self._package_catalogue(ctx, turn, state)
         if not _is_customer(ctx):
             if intent is Intent.OTHER:
-                return _ask(state, Q_LOGIN_REQUIRED, t.text("guest_help", state.language), ["text"])
+                return _ask(state, Q_LOGIN_REQUIRED, t.text("guest_help", _lang(state)), ["text"])
             return _login_required(state)
 
         if state.candidate is not None and intent in _CONTINUES_CANDIDATE:
             return await self._collect_complaint(ctx, turn, extraction, state, state.candidate, now)
         match intent:
             case Intent.ACCOUNT_ENQUIRY:
-                return await self._account(ctx, state)
+                return await self._account(ctx, state, extraction.account_topic)
             case Intent.NEW_COMPLAINT:
                 return await self._collect_complaint(ctx, turn, extraction, state, Candidate(), now)
             case Intent.CORRECTION if state.active_case_id:
@@ -284,8 +305,8 @@ class ConversationService:
                 return await self._collect_complaint(ctx, turn, extraction, state, Candidate(), now)
             case Intent.OTHER if state.active_case_id and state.pending_proposal is None:
                 # "thanks", "ok" after a case: offer more help instead of restarting the menu.
-                return _ask(state, Q_CHOOSE_COMPLAINT, t.text("anything_else", state.language), ["category_selection", "text"])
-        return _ask(state, Q_CHOOSE_COMPLAINT, t.text("choose_complaint", state.language), ["category_selection", "text"])
+                return _ask(state, Q_CHOOSE_COMPLAINT, t.text("anything_else", _lang(state)), ["category_selection", "text"])
+        return _ask(state, Q_CHOOSE_COMPLAINT, t.text("choose_complaint", _lang(state)), ["category_selection", "text"])
 
     async def _extract(
         self, ctx: AuthContext, turn: NormalizedTurn, text: str, state: DialogueState, now: datetime
@@ -313,22 +334,33 @@ class ConversationService:
         return outcome.extraction
 
     async def _localize(self, ctx: AuthContext, turn: NormalizedTurn, draft: TurnDraft, state: DialogueState) -> TurnDraft:
-        """Re-express the reply in the customer's language/style; keep English on any doubt."""
+        """Re-express the reply in the customer's language/style; keep English on any doubt.
+
+        Two tiers. Findings, offers and balances (drafts marked `rewrite_allowed`) may be rewritten
+        in text chat: the card beside them remains Resolve's authoritative English record, consent
+        stays on the card's buttons, and the rewrite must pass the strict fact check. Everything
+        else keeps the earlier rule: operation outcomes, consent prompts, declines and any other
+        reply that mentions case facts stay deterministic (reviewed locale templates, or English).
+        """
         if self._rewriter is None or self._rewriter.style_for(state.language, state.script) is None:
-            return draft
-        # Financial facts, case findings, action choices/outcomes, confirmations and
-        # handoffs are Resolve-owned wording. A lexical validator cannot establish
-        # that a translated sentence preserves consent or operational meaning.
-        if (draft.case_id is not None or state.active_case_id is not None or draft.operation_ids
-                or draft.cards or draft.citations or state.pending_proposal is not None
-                or _CRITICAL_REPLY.search(draft.reply_text)):
             return draft
         if draft.citations or draft.localized:
             return draft  # reviewed knowledge text, or already written in the customer's style
+        case_reply = draft.rewrite_allowed and turn.channel is Channel.TEXT
+        if not case_reply:
+            if t.locale_active(_lang(state, turn.channel)):
+                return draft  # fluent-reviewed template wording is already in the customer's style
+            # A lexical validator cannot establish that a translated sentence preserves consent or
+            # operational meaning, so these replies are never freeform-rewritten.
+            if (draft.case_id is not None or state.active_case_id is not None or draft.operation_ids
+                    or draft.cards or state.pending_proposal is not None
+                    or _CRITICAL_REPLY.search(draft.reply_text)):
+                return draft
         remaining = self._remaining()
         if remaining < MIN_REWRITE_SECONDS:
             return draft  # not enough of the turn budget left (e.g. Voice after a slow extraction)
-        outcome = await self._rewriter.rewrite(draft.reply_text, state.language, state.script, budget_seconds=remaining - 0.5)
+        outcome = await self._rewriter.rewrite(draft.reply_text, state.language, state.script, budget_seconds=remaining - 0.5,
+                                               keep_exact=draft.keep_exact if case_reply else ())
         client, reply = self._rewriter.client, outcome.reply
         await self._safe_record(ctx, ModelCallRecord(
             request_id=ctx.request_id, conversation_id=turn.conversation_id, case_id=draft.case_id or state.active_case_id,
@@ -343,8 +375,7 @@ class ConversationService:
         question = draft.pending_question
         if question is not None and question.text == draft.reply_text:
             question = question.model_copy(update={"text": outcome.text})
-        return TurnDraft(reply_text=outcome.text, case_id=draft.case_id, cards=draft.cards, citations=draft.citations,
-                         pending_question=question, operation_ids=draft.operation_ids, source_reply_text=draft.reply_text)
+        return replace(draft, reply_text=outcome.text, pending_question=question, source_reply_text=draft.reply_text)
 
     async def _safe_record(self, ctx: AuthContext, record: ModelCallRecord) -> None:
         try:
@@ -404,8 +435,8 @@ class ConversationService:
         if not _is_customer(ctx):
             return _login_required(state)
         if state.candidate is not None and state.candidate.complaint_type is not None:
-            return _ask(state, Q_COMPLAINT_DETAILS, t.text("complaint_details", state.language), ["complaint_details", "text"])
-        return _ask(state, Q_CHOOSE_COMPLAINT, t.text("choose_complaint", state.language), ["category_selection", "text"])
+            return _ask(state, Q_COMPLAINT_DETAILS, t.text("complaint_details", _lang(state)), ["complaint_details", "text"])
+        return _ask(state, Q_CHOOSE_COMPLAINT, t.text("choose_complaint", _lang(state)), ["category_selection", "text"])
 
     async def _collect_complaint(
         self,
@@ -417,7 +448,7 @@ class ConversationService:
         now: datetime,
     ) -> Step:
         """Merge new candidates, ask at most one clarification per turn, then investigate."""
-        lang = state.language
+        lang = _lang(state)
         window = resolve_window(ex.time_reference, now)
         ambiguities = list(dict.fromkeys([*base.ambiguities, *ex.ambiguities]))
         if ex.time_reference.kind is not TimeKind.NONE and window is None:
@@ -456,7 +487,7 @@ class ConversationService:
 
     async def _correct(self, ctx: AuthContext, turn: NormalizedTurn, ex: Extraction, state: DialogueState, now: datetime) -> Step:
         """Changed facts request a new investigation revision of the same case through Resolve."""
-        lang = state.language
+        lang = _lang(state)
         case = await self._facade.get_case(ctx, state.active_case_id)
         previous = case.investigation
         window = resolve_window(ex.time_reference, now)
@@ -488,7 +519,7 @@ class ConversationService:
 
     async def _follow_up(self, ctx: AuthContext, state: DialogueState) -> Step:
         """Answer from the saved investigation; never re-investigate or re-propose."""
-        lang = state.language
+        lang = _lang(state)
         case = await self._facade.get_case(ctx, state.active_case_id)
         if case.investigation is None:
             return _ask(state, Q_COMPLAINT_DETAILS, t.text("complaint_details", lang), ["complaint_details", "text"])
@@ -496,30 +527,32 @@ class ConversationService:
         pending = state.pending_proposal if state.pending_proposal and state.pending_proposal.case_id == case.id else None
         if pending is not None:
             question = PendingQuestion(code=Q_CONFIRM_ACTION, text=t.text("confirm_prompt", lang), allowed_input_types=["action_decision", "text"])
-            draft = TurnDraft(
-                reply_text=f"{draft.reply_text} {t.text('offer_still_open', lang)}",
-                case_id=case.id,
-                cards=draft.cards,
-                pending_question=question,
-            )
+            draft = replace(draft, reply_text=_paragraphs([draft.reply_text, t.text("offer_still_open", lang)]),
+                            case_id=case.id, pending_question=question)
             return draft, state.evolve(pending_question=question)
         return draft, state.evolve(pending_question=None)
 
-    async def _account(self, ctx: AuthContext, state: DialogueState) -> Step:
-        lang = state.language
+    async def _account(self, ctx: AuthContext, state: DialogueState, topic: AccountTopic | None = None) -> Step:
+        """Answer from Resolve's account view: balance by default, or the services/packages asked about."""
+        lang = _lang(state)
         account = await self._facade.get_account(ctx)
+        if topic is AccountTopic.SERVICES:
+            return _services_reply(account, state, lang)
+        if topic is AccountTopic.PACKAGES:
+            return _packages_reply(account, state, lang)
         parts = [
             t.text("account_balance", lang, wallet=b.wallet.lower(), amount=t.format_lkr(b.amount_minor), as_of=t.format_time(b.as_of))
             for b in account.balances
         ] or [t.text("account_no_balance", lang)]
         if any(not s.complete for s in account.source_status):
             parts.append(t.text("account_incomplete", lang))
-        return TurnDraft(reply_text=" ".join(parts), case_id=state.active_case_id, cards=[AccountCard(data=account)]), state.evolve(
+        return TurnDraft(reply_text=" ".join(parts), case_id=state.active_case_id, cards=[AccountCard(data=account)],
+                         rewrite_allowed=True), state.evolve(
             pending_question=None
         )
 
     async def _status(self, ctx: AuthContext, state: DialogueState) -> Step:
-        lang = state.language
+        lang = _lang(state)
         if state.active_case_id is None:
             if state.last_activation is not None:
                 return await self._activation_status(ctx, state)
@@ -548,7 +581,7 @@ class ConversationService:
 
     async def _human_request(self, ctx: AuthContext, turn: NormalizedTurn, ex: Extraction, state: DialogueState) -> Step:
         """A person reviews a case with its evidence, so a case must exist first."""
-        lang = state.language
+        lang = _lang(state)
         case = await self._facade.get_case(ctx, state.active_case_id) if state.active_case_id else None
         if case is None or case.investigation is None:
             return _ask(state, Q_CHOOSE_COMPLAINT, t.text("human_needs_case", lang), ["category_selection", "text"])
@@ -567,10 +600,11 @@ class ConversationService:
 
     async def _faq(self, ctx: AuthContext, turn: NormalizedTurn, text: str, ex: Extraction, state: DialogueState) -> Step:
         """Reviewed knowledge cards only; guests allowed; never account data."""
-        lang = state.language
-        cards = await self._knowledge.search(ctx, ex.faq_query or text, lang, limit=3)
+        lang = _lang(state)
+        cards = await self._knowledge.search(ctx, ex.faq_query or text, state.language, limit=3)
         if not cards:
-            return TurnDraft(reply_text=t.text("faq_none", lang), case_id=state.active_case_id), state
+            return TurnDraft(reply_text=t.text("faq_none", lang), case_id=state.active_case_id,
+                             rewrite_allowed=not t.locale_active(lang)), state
         if self._answerer is not None and self._remaining() >= MIN_REWRITE_SECONDS:
             grounded = await self._grounded_answer(ctx, turn, text, cards, state)
             if grounded is not None:
@@ -617,7 +651,7 @@ class ConversationService:
     # --- packages (Resolve owns catalogue, usage, eligibility and actions) -------
 
     async def _package_catalogue(self, ctx: AuthContext, turn: NormalizedTurn, state: DialogueState) -> Step:
-        lang = state.language
+        lang = _lang(state)
         try:
             usage = UsageSummary.model_validate(await self._facade.get_package_usage(ctx))
             offers = [PackageOfferView.model_validate(offer) for offer in await self._facade.list_package_offers(ctx)]
@@ -660,7 +694,7 @@ class ConversationService:
     async def _package_selection(
         self, ctx: AuthContext, turn: NormalizedTurn, inp: PackageSelectionInput, state: DialogueState
     ) -> Step:
-        lang = state.language
+        lang = _lang(state)
         if state.pending_proposal is not None:
             return _confirm_prompt(state, turn.channel)
         if not any(offer.id == inp.offer_id for offer in state.packages_shown):
@@ -689,7 +723,7 @@ class ConversationService:
         return draft, new_state
 
     async def _activation_status(self, ctx: AuthContext, state: DialogueState) -> Step:
-        lang = state.language
+        lang = _lang(state)
         ref = state.last_activation
         operation = await self._facade.get_operation(ctx, ref.operation_id)
         reply = t.text("activation_status", lang, package=ref.package_label, status=t.operation_status_text(operation.status, lang))
@@ -705,12 +739,12 @@ class ConversationService:
         state = state.evolve(candidate=base.model_copy(update={"complaint_type": inp.complaint_type}))
         if self._extractor is not None:
             # Ask in plain words; the details form is the fallback when no model can read the answer.
-            reply = t.text("describe_complaint", state.language, complaint=t.complaint_label(inp.complaint_type, state.language))
+            reply = t.text("describe_complaint", _lang(state), complaint=t.complaint_label(inp.complaint_type, _lang(state)))
             return _ask(state, Q_DESCRIBE_COMPLAINT, reply, ["text"])
-        return _ask(state, Q_COMPLAINT_DETAILS, t.text("complaint_details", state.language), ["complaint_details", "text"])
+        return _ask(state, Q_COMPLAINT_DETAILS, t.text("complaint_details", _lang(state)), ["complaint_details", "text"])
 
     async def _on_details(self, ctx: AuthContext, turn: NormalizedTurn, inp: DetailsInput, state: DialogueState) -> Step:
-        lang = state.language
+        lang = _lang(state)
         window_problem = _window_problem(inp)
         if window_problem:
             candidate = Candidate(complaint_type=inp.complaint_type, reported_facts=inp.reported_facts, ambiguities=[Ambiguity.TIME_WINDOW])
@@ -749,7 +783,7 @@ class ConversationService:
             command_key(conv_id, turn_id, "investigate", case.id),
         )
         proposal, alternatives = await self._propose_first(ctx, turn, case.id, investigation)
-        draft = _investigation_draft(investigation, proposal, state.language, alternatives)
+        draft = _investigation_draft(investigation, proposal, _lang(state), alternatives)
         return draft, _after_investigation(state, turn, case.id, proposal, draft, alternatives)
 
     async def _choose_action(self, ctx: AuthContext, turn: NormalizedTurn, choice: ActionChoice, state: DialogueState) -> Step:
@@ -759,7 +793,7 @@ class ConversationService:
         previous = _pending_as_choice(state.pending_proposal)
         if previous is not None and previous.action_type is not choice.action_type and previous not in rest:
             rest.append(previous)  # the earlier offer stays reachable
-        draft = _offer_with_alternatives(proposal, rest, state.language, choice.case_id)
+        draft = _offer_with_alternatives(proposal, rest, _lang(state), choice.case_id)
         return draft, state.evolve(
             pending_choices=rest, pending_question=draft.pending_question, pending_proposal=_proposal_ref(proposal, turn)
         )
@@ -792,7 +826,7 @@ class ConversationService:
         )
 
     async def _on_decision(self, ctx: AuthContext, turn: NormalizedTurn, inp: DecisionInput, state: DialogueState) -> Step:
-        lang = state.language
+        lang = _lang(state)
         pending = state.pending_proposal
         # Only the proposal currently presented in this conversation can be decided here.
         if pending is None or pending.proposal_id != inp.proposal_id or pending.proposal_hash != inp.proposal_hash:
@@ -809,7 +843,7 @@ class ConversationService:
 
     async def _confirm(self, ctx: AuthContext, turn: NormalizedTurn, state: DialogueState, decision: Decision, voice_evidence) -> Step:
         """Record ACCEPT/DECLINE for the pending proposal. Declines are recorded too."""
-        lang = state.language
+        lang = _lang(state)
         pending = state.pending_proposal
         cleared = state.evolve(pending_proposal=None, pending_question=None)
         try:
@@ -849,7 +883,7 @@ class ConversationService:
                 raise
             offer = _offer_with_alternatives(proposal, remaining[1:], lang, pending.case_id)
             draft = TurnDraft(
-                reply_text=f"{base.reply_text} {offer.reply_text}", case_id=pending.case_id, cards=base.cards + offer.cards,
+                reply_text=_paragraphs([base.reply_text, offer.reply_text]), case_id=pending.case_id, cards=base.cards + offer.cards,
                 pending_question=offer.pending_question, operation_ids=base.operation_ids,
             )
             return draft, cleared.evolve(
@@ -859,7 +893,7 @@ class ConversationService:
         return base, cleared.evolve(pending_choices=others)
 
     async def _on_case_selection(self, ctx: AuthContext, turn: NormalizedTurn, inp: CaseSelectionInput, state: DialogueState) -> Step:
-        lang = state.language
+        lang = _lang(state)
         try:
             case = await self._facade.get_case(ctx, inp.case_id)
         except ResolveError as err:
@@ -885,6 +919,12 @@ class ConversationService:
 # --- helpers ------------------------------------------------------------------
 
 
+def _lang(state: DialogueState, channel: Channel | None = None) -> t.Locale:
+    """Template locale for this reply. Voice is spoken, so romanized wording is for typed chat only."""
+    channel = channel or _CHANNEL.get()
+    return t.locale_for(state.language, None if channel is Channel.VOICE else state.script)
+
+
 def _check_trusted_fields(ctx: AuthContext, turn: NormalizedTurn) -> None:
     if turn.channel is not ctx.channel:
         raise ResolveError("VALIDATION_ERROR", "turn channel does not match authenticated channel")
@@ -897,22 +937,67 @@ def _is_customer(ctx: AuthContext) -> bool:
     return ctx.role is Role.CUSTOMER and ctx.account_id is not None and ctx.sandbox_id is not None
 
 
-def _ask(state: DialogueState, code: str, reply: str, allowed: list[InputType]) -> Step:
+def _ask(state: DialogueState, code: str, reply: str, allowed: list[InputType], *, rewrite: bool = True) -> Step:
+    """A fixed prompt with no case facts. It may be put in the customer's style in text chat even when the
+    conversation has a case, unless a reviewed locale already wrote it or it asks for consent."""
     question = PendingQuestion(code=code, text=reply, allowed_input_types=allowed)
-    draft = TurnDraft(reply_text=reply, case_id=state.active_case_id, pending_question=question)
+    draft = TurnDraft(reply_text=reply, case_id=state.active_case_id, pending_question=question,
+                      rewrite_allowed=rewrite and not t.locale_active(_lang(state)))
     return draft, state.evolve(pending_question=question)
 
 
 def _login_required(state: DialogueState) -> Step:
-    return _ask(state, Q_LOGIN_REQUIRED, t.text("login_required", state.language), ["text"])
+    return _ask(state, Q_LOGIN_REQUIRED, t.text("login_required", _lang(state)), ["text"])
 
 
 def _confirm_prompt(state: DialogueState, channel: Channel = Channel.TEXT) -> Step:
     key = "confirm_prompt_voice" if channel is Channel.VOICE else "confirm_prompt"
-    return _ask(state, Q_CONFIRM_ACTION, t.text(key, state.language), ["action_decision", "text"])
+    return _ask(state, Q_CONFIRM_ACTION, t.text(key, _lang(state)), ["action_decision", "text"], rewrite=False)
 
 
-def _operation_draft(operation: OperationView, action_type: ActionType, lang: Language) -> TurnDraft:
+def _subscription_status(status: str) -> str:
+    return status.lower().replace("_", " ")
+
+
+def _services_reply(account, state: DialogueState, lang: t.Locale) -> Step:
+    """Which value-added services the line has. Prices are not in the account view, so offer to check the
+    charge records (a VAS investigation in Resolve) instead of guessing an amount."""
+    services = [s for s in account.subscriptions if s.kind == "VAS"]
+    card = AccountCard(data=account)
+    if not services:
+        draft = TurnDraft(reply_text=t.text("account_no_services", lang), case_id=state.active_case_id, cards=[card],
+                          rewrite_allowed=True)
+        return draft, state.evolve(pending_question=None)
+    listed = "; ".join(
+        t.text("service_renews" if s.renewal else "service_no_renewal", lang, name=s.name, status=_subscription_status(s.status))
+        for s in services
+    )
+    question = PendingQuestion(code=Q_OFFER_CHARGE_CHECK, text=t.text("offer_charge_check", lang), allowed_input_types=["text"])
+    reply = _paragraphs([t.text("account_services", lang, services=listed), question.text])
+    draft = TurnDraft(reply_text=reply, case_id=state.active_case_id, cards=[card], pending_question=question,
+                      rewrite_allowed=True, keep_exact=tuple(s.name for s in services))
+    return draft, state.evolve(pending_question=question, candidate=Candidate(complaint_type=ComplaintType.VAS_DISPUTE))
+
+
+def _packages_reply(account, state: DialogueState, lang: t.Locale) -> Step:
+    packages = [s for s in account.subscriptions if s.kind == "PACKAGE"]
+    if not packages:
+        reply = t.text("account_no_packages", lang)
+    else:
+        items = []
+        for p in packages:
+            status = _subscription_status(p.status)
+            if p.remaining_bytes is not None:
+                items.append(t.text("package_item_data", lang, name=p.name, status=status, data=format_gb(p.remaining_bytes)))
+            else:
+                items.append(t.text("service_renews" if p.renewal else "service_no_renewal", lang, name=p.name, status=status))
+        reply = t.text("account_packages", lang, packages="; ".join(items))
+    draft = TurnDraft(reply_text=reply, case_id=state.active_case_id, cards=[AccountCard(data=account)],
+                      rewrite_allowed=True, keep_exact=tuple(p.name for p in packages))
+    return draft, state.evolve(pending_question=None)
+
+
+def _operation_draft(operation: OperationView, action_type: ActionType, lang: t.Locale) -> TurnDraft:
     """Report the actual operation state; an accepted request is never described as done."""
     status = t.operation_status_text(operation.status, lang)
     if action_type is ActionType.CREATE_REVIEW_TICKET:
@@ -926,14 +1011,7 @@ def _operation_draft(operation: OperationView, action_type: ActionType, lang: La
 
 
 def _prefixed(draft: TurnDraft, prefix: str) -> TurnDraft:
-    return TurnDraft(
-        reply_text=f"{prefix} {draft.reply_text}",
-        case_id=draft.case_id,
-        cards=draft.cards,
-        citations=draft.citations,
-        pending_question=draft.pending_question,
-        operation_ids=draft.operation_ids,
-    )
+    return replace(draft, reply_text=f"{prefix} {draft.reply_text}")
 
 
 def opening_question(language: Language | str) -> PendingQuestion:
@@ -944,7 +1022,7 @@ def opening_question(language: Language | str) -> PendingQuestion:
 
 
 def _checked_prefix(
-    complaint_type: ComplaintType, facts: ReportedFacts, start: datetime, end: datetime, defaulted: bool, lang: Language
+    complaint_type: ComplaintType, facts: ReportedFacts, start: datetime, end: datetime, defaulted: bool, lang: t.Locale
 ) -> str:
     """What was checked, restating only what the customer reported (type, typed amount; no model text)."""
     key = "checked_default_window" if defaulted else "checked_window"
@@ -977,46 +1055,69 @@ def _citations(cards: list[KnowledgeCard]) -> list[Citation]:
                      scope=c.scope) for c in cards]
 
 
-def _offer_draft(proposal: ProposalView, lang: Language, case_id) -> TurnDraft:
+def _offer_draft(proposal: ProposalView, lang: t.Locale, case_id) -> TurnDraft:
     question = PendingQuestion(code=Q_CONFIRM_ACTION, text=t.text("confirm_prompt", lang), allowed_input_types=["action_decision", "text"])
-    reply = t.text("offer_action", lang, action=t.action_label(proposal.action_type, lang), target=proposal.target_label, consequences=proposal.consequences)
-    return TurnDraft(reply_text=reply, case_id=case_id, cards=[ConfirmationCard(data=proposal)], pending_question=question)
+    # Resolve's consequences stay in the message: they carry limits such as "does not repair the network".
+    reply = t.text("offer_action", lang, action=t.action_label(proposal.action_type, lang), target=proposal.target_label,
+                   consequences=proposal.consequences)
+    return TurnDraft(reply_text=reply, case_id=case_id, cards=[ConfirmationCard(data=proposal)], pending_question=question,
+                     rewrite_allowed=True, keep_exact=(proposal.target_label,))
 
 
-def _offer_with_alternatives(proposal: ProposalView, alternatives: list[ActionChoice], lang: Language, case_id) -> TurnDraft:
+def _offer_with_alternatives(proposal: ProposalView, alternatives: list[ActionChoice], lang: t.Locale, case_id) -> TurnDraft:
     offer = _offer_draft(proposal, lang, case_id)
     if not alternatives:
         return offer
     options = "; ".join(f"{t.action_label(a.action_type, lang)} ({a.target_label})" for a in alternatives)
-    return TurnDraft(reply_text=f"{offer.reply_text} {t.text('other_options', lang, options=options)}", case_id=case_id,
-                     cards=offer.cards, pending_question=offer.pending_question)
+    return replace(offer, reply_text=f"{offer.reply_text} {t.text('other_options', lang, options=options)}",
+                   keep_exact=(*offer.keep_exact, *(a.target_label for a in alternatives)))
+
+
+def _paragraphs(parts: list[str]) -> str:
+    """Typed chat reads better in short paragraphs; Voice speaks one continuous reply."""
+    joiner = " " if _CHANNEL.get() is Channel.VOICE else PARAGRAPH
+    return joiner.join(part for part in parts if part)
 
 
 def _investigation_draft(
-    inv: InvestigationResult, proposal: ProposalView | None, lang: Language, alternatives: list[ActionChoice] | None = None
+    inv: InvestigationResult, proposal: ProposalView | None, lang: t.Locale, alternatives: list[ActionChoice] | None = None
 ) -> TurnDraft:
-    """Reply strictly from Resolve's findings; no number is computed or rephrased here."""
-    parts = [finding.text for finding in inv.findings] or [t.text("no_findings", lang)]
+    """Reply strictly from Resolve's findings; no number is computed or rephrased here.
+
+    Paragraphs: what was found; what limits the answer (missing/conflicting records, Resolve's
+    customer-facing limits); what I can do next. Every finding stays in the text and in its card.
+    """
+    findings = [finding.text for finding in inv.findings] or [t.text("no_findings", lang)]
+    if inv.complaint_type is ComplaintType.VAS_DISPUTE:
+        # Answer "what was I charged?" in words: quote each posted VAS charge line exactly as Resolve
+        # listed it in the calculation (no sum, no sign change); the card shows the full ledger.
+        charges = [t.format_lkr(term.value) for calc in inv.calculations if calc.unit == "LKR_MINOR"
+                   for term in calc.terms if term.label == "VAS_CHARGE"]
+        if charges:
+            findings.insert(0, t.text("vas_charge_lines", lang, amounts=", ".join(charges)))
+    limits = []
     if inv.evidence_state is EvidenceState.PARTIAL:
         missing = ", ".join(dict.fromkeys(t.missing_label(code, lang) for code in inv.missing)) or t.missing_label("unknown", lang)
-        parts.append(t.text("evidence_partial", lang, missing=missing))
+        limits.append(t.text("evidence_partial", lang, missing=missing))
     elif inv.evidence_state is EvidenceState.CONFLICTING:
-        parts.append(t.text("evidence_conflicting", lang))
+        limits.append(t.text("evidence_conflicting", lang))
     # Resolve's customer-facing limits (e.g. future renewal vs past dispute). Code-style reasons such as
     # OPENING_SNAPSHOT_MISSING are already explained by the missing-records sentence and never shown raw.
-    parts += [reason for reason in inv.review_reasons if not _CODE.fullmatch(reason)]
+    limits += [reason for reason in dict.fromkeys(inv.review_reasons)
+               if not _CODE.fullmatch(reason) and reason not in findings]
 
     cards: list = [CalculationCard(data=calc) for calc in inv.calculations]
     cards += [FindingCard(data=finding) for finding in inv.findings]
 
-    question = None
+    question, offer_text, keep = None, "", ()
     if proposal is not None:
         offer = _offer_with_alternatives(proposal, alternatives or [], lang, inv.case_id)
-        parts.append(offer.reply_text)
+        offer_text, keep = offer.reply_text, offer.keep_exact
         cards += offer.cards
         question = offer.pending_question
 
-    return TurnDraft(reply_text=" ".join(parts), case_id=inv.case_id, cards=cards, pending_question=question)
+    return TurnDraft(reply_text=_paragraphs([" ".join(findings), " ".join(limits), offer_text]), case_id=inv.case_id,
+                     cards=cards, pending_question=question, rewrite_allowed=True, keep_exact=keep)
 
 
 def _after_investigation(
@@ -1065,7 +1166,7 @@ def _proposal_ref(proposal: ProposalView, turn: NormalizedTurn) -> PendingPropos
     )
 
 
-def _user_body(turn: NormalizedTurn, lang: Language) -> str:
+def _user_body(turn: NormalizedTurn, lang: t.Locale) -> str:
     """Readable stand-in for button/form turns; the structured input itself is in the fingerprint."""
     inp = turn.input
     if isinstance(inp, TextInput):
