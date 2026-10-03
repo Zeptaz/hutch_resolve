@@ -1,5 +1,14 @@
 # HUTCH Resolve: team source of truth
 
+### Full-system verification and fixes — 2026-10-03
+
+- [x] All **39 PostgreSQL-gated checks** in the Resolve suite were run against separate disposable PostgreSQL 18 Compose projects with fresh migration/fixture state; each passed. Coverage includes action faults, operation restart, package activation, quota, review sync/recovery, audit worker, signed Voice bridge, domain repairs, conversation/facade, seed/reset and turn reconciliation. Existing shared containers were left untouched.
+- [x] Implemented revision 0011 and agent-only `POST /api/v1/agent/conversations/{conversation_id}/turns/{turn_id}/reconcile`. It requires an expired claim and valid AGENT run scope, refuses PENDING/RUNNING/UNKNOWN related operations, records a durable audit event, and makes the old turn terminal/non-replayable. Database integration checks exercise active lease and unresolved-operation refusal, settlement after a terminal operation result, audit persistence, same-turn replay denial and a fresh succeeding turn. API test verifies CSRF and scoped context.
+- [x] Fixed recharge/ledger evidence severity merging so a complete recharge lookup cannot upgrade an incomplete ledger result to SUFFICIENT. Removed the former expected-failure marker; the PostgreSQL conversation test now passes.
+- [x] Migration-upgrade path from revision 0010 to head applied successfully. PostgreSQL privilege check confirms `hutch_resolve_app` can SELECT `sandbox.offers` and cannot UPDATE it. Fresh setup/migration/seed also passed across isolated test groups.
+- [x] Final non-database Resolve suite: **443 passed, 39 PostgreSQL-gated skipped** (the gated checks passed separately above). Frontend OpenAPI generation, typecheck and production build pass; mock browser suite **23/23 passed and exited 0**. Voice repository was not changed; its prior test run remains **52 passed**. No live model/microphone call was performed.
+- [ ] Live configured model/microphone qualification and production release soak remain open. The safe mock end-to-end path is qualified; these live credentials/hardware checks are separate gates.
+
 ### Audit remediation update — 2026-10-03
 
 - [x] Fixed turn-claim row mapping and package-only proposal evaluation; corrected strict package evidence, proposal, dashboard and operation projections.
@@ -11,7 +20,7 @@
 - [x] Frontend durability: failed logout preserves recoverable session state; agent review retries persist same body/key across reload and can replay after a committed response is lost. Voice grant retry/call startup guards remain passing.
 - [x] Contract/dependency cleanup: package contract generator is idempotent and root-relative; duplicate OpenAPI/type enum entries removed. Unused `shadcn` CLI removed, MIT stylesheet/license vendored. Full npm audit reports zero vulnerabilities.
 - Verification on ResolveDev: backend suite **439 passed, 36 PostgreSQL-gated skipped**; seed tests **2 passed, 1 DB-gated skipped**; frontend typecheck/build pass; lint exits 0 with six existing warnings; full mock E2E after the review retry fix reports **22/22 passed**. Playwright's Windows process hung during teardown after all tests reported green and was interrupted; its command did not exit cleanly. The earlier failure exposed that a definitive `409 STALE_VERSION` retained the retry key and left Add note enabled. Definitive `409`/`422` responses now clear the key; network/unknown outcomes retain it. Focused conflict + committed-response-lost browser tests also both passed. Voice suite **52 passed**. Contract generator run twice produced identical SHA-256 `75259C6F9F9E3857ECD8C08FFACF261A3A177ECB071D428AAB5092D002363E9E`; full npm audit reports zero vulnerabilities.
-- [ ] PostgreSQL transaction/recovery, migration grant check, package strict projection, escalation state persistence and CRM delivery ordering remain open because no disposable DB URL/usable engine is available. Abandoned-turn reconciliation remains fail-closed and unresolved. Playwright teardown hangs on Windows after green test completion and needs runner cleanup. See `docs/plans/harry.md` for remaining audit work.
+- [x] PostgreSQL transaction/recovery, migration grant, package projection, escalation persistence and CRM delivery checks completed in isolated disposable databases. Abandoned-turn reconciliation now has an audited, terminal agent path. The expanded browser suite exits cleanly (23/23). See `docs/plans/harry.md` for details.
 
 Updated: 2026-10-03. The mock sandbox, Resolve business backend, in-process conversation controller and combined frontend are implemented to the tested scope below. Browser Voice/model and final release qualification remain open. Historical baseline rows below record earlier findings; current status is in the task list and latest checkpoints. Checkboxes describe implementation and verification, not approval of a design.
 
@@ -84,7 +93,7 @@ Other static findings to address: C's offer advertises 20 GB but its grant is 10
 - [Concrete examples](docs/contracts/examples.json): synthetic contract fixtures, not actual API results.
 - [Voice wire contract](https://github.com/Zeptaz/hutch_zeptazvoice/blob/main/docs/hutch-resolve-contract.md): existing external interface and known runtime limitations.
 
-Shared contract version is `1.1.0` after adding typed synthetic one-shot package selection and action terms. Harry owns shared DTOs, migrations and facade; Tevin owns the conversation module; Jayith builds against examples. `openapi.json` is design documentation until runtime parity is tested. Generate frontend types from it during implementation. Runtime OpenAPI must match the reviewed contract.
+Shared contract version is `1.2.0`, including agent-authorized terminal reconciliation for stalled turns. Harry owns shared DTOs, migrations and facade; Tevin owns the conversation module; Jayith builds against examples. `openapi.json` is design documentation until runtime parity is tested. Generate frontend types from it after changes. Runtime OpenAPI must match the reviewed contract.
 
 Development: frontend `http://localhost:5173` proxies `/api` to Resolve `http://localhost:8080`; PostgreSQL uses existing `localhost:55432`; Voice is separately configured, default `http://localhost:8088`. Browser audio connects directly to the returned Voice URL. Tevin's module needs no network service credentials. See contracts for secrets, cookies, CSRF, IDs and errors.
 

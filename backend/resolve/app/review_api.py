@@ -120,6 +120,18 @@ class ReviewResult(StrictModel):
     updated_at: datetime
 
 
+class TurnReconciliationRequest(StrictModel):
+    note: str = Field(min_length=10, max_length=1000)
+
+
+class TurnReconciliationResult(StrictModel):
+    conversation_id: UUID
+    turn_id: UUID
+    state: Literal["ABANDONED"]
+    case_ids: list[UUID]
+    operations: list[dict[str, Any]]
+
+
 def _facade(request: Request):
     facade = request.app.state.resolve_facade
     if facade is None:
@@ -157,5 +169,14 @@ def build_review_router() -> APIRouter:
         return _facade(request).update_review(context, case_id=case_id, expected_version=body.expected_version,
             idempotency_key=str(idempotency_key), review_status=body.review_status, disposition=body.disposition,
             note=body.note, reopen_reason=body.reopen_reason)
+
+    @router.post("/conversations/{conversation_id}/turns/{turn_id}/reconcile",
+                 response_model=TurnReconciliationResult, tags=["Agent"])
+    def reconcile_turn(conversation_id: UUID, turn_id: UUID, body: TurnReconciliationRequest,
+                       request: Request, origin: str | None = Header(default=None),
+                       csrf: str | None = Header(default=None, alias="X-CSRF-Token")) -> dict[str, Any]:
+        context = authenticated_agent_mutation(request, origin, csrf)
+        return _facade(request).reconcile_turn(context, conversation_id=conversation_id,
+            turn_id=turn_id, note=body.note)
 
     return router

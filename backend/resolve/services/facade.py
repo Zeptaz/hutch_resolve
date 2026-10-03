@@ -16,6 +16,7 @@ from backend.resolve.app.auth import AuthContext, ResolveError
 from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, PostgresSandboxProvider, reconcile_quota, reconcile_recharge_records, reconcile_service_status, reconcile_statement
 from .voice_consent import VoiceConsentEvidence
 from .review import AgentReviewService
+from .turn_reconciliation import reconcile_stalled_turn
 
 ALLOWED_LANGUAGES = {"en", "si", "ta"}
 ALLOWED_COMPLAINTS = {"BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE"}
@@ -110,6 +111,9 @@ class ResolveFacade:
 
     def update_review(self, context: AuthContext, **kwargs: Any) -> dict[str, Any]:
         return self._review.update_review(context, **kwargs)
+
+    def reconcile_turn(self, context: AuthContext, **kwargs: Any) -> dict[str, Any]:
+        return reconcile_stalled_turn(self._engine, context, **kwargs)
 
     def create_conversation(self, context: AuthContext, language: str = "en",
                             idempotency_key: str | None = None) -> dict[str, Any]:
@@ -474,12 +478,13 @@ class ResolveFacade:
                 result["missing"] = sorted(set(result["missing"] + recharge_result["missing"]))
                 result["conflicts"] = sorted(set(result["conflicts"] + recharge_result["conflicts"]))
                 result["review_reasons"] = sorted(set(result["review_reasons"] + recharge_result["review_reasons"]))
-                if "CONFLICTING" in {result["evidence_state"], recharge_result["evidence_state"]}:
+                combined_states = {result["evidence_state"], recharge_result["evidence_state"]}
+                if "CONFLICTING" in combined_states:
                     result["evidence_state"] = "CONFLICTING"
-                elif recharge_result["evidence_state"] == "SUFFICIENT":
-                    result["evidence_state"] = "SUFFICIENT"
-                elif "PARTIAL" in {result["evidence_state"], recharge_result["evidence_state"]}:
+                elif "PARTIAL" in combined_states:
                     result["evidence_state"] = "PARTIAL"
+                else:
+                    result["evidence_state"] = "SUFFICIENT"
                 additional_source_status.append({"source": "RECHARGE_FULFILMENT", "fetched_at": datetime.now(UTC),
                     "as_of": max((item.created_at for item in recharge_records), default=None),
                     "complete_through": max((item.created_at for item in recharge_records), default=None),
@@ -626,16 +631,19 @@ class ResolveFacade:
             raise ResolveError(422, "ACTION_NOT_ALLOWED", "Package activation requires a Resolve catalogue selection")
         if not request_key or len(request_key) > 200:
             raise ResolveError(422, "VALIDATION_ERROR", "A stable Idempotency-Key is required")
+        case = self._scoped_case(context, case_id)
         if action_type == "CREATE_REVIEW_TICKET":
             escalation_reason = escalation_reason.strip() if escalation_reason else None
-            if not escalation_reason or len(escalation_reason) > 2000:
-                raise ResolveError(422, "VALIDATION_ERROR", "A human review reason is required")
+            if not escalation_reason:
+                issue = str(case["complaint_type"]).replace("_", " ").lower()
+                escalation_reason = f"Human review offered for the reported {issue} issue; see the case evidence."
+            if len(escalation_reason) > 2000:
+                raise ResolveError(422, "VALIDATION_ERROR", "A human review reason is too long")
         elif escalation_reason is not None:
             raise ResolveError(422, "VALIDATION_ERROR", "A review reason is only valid for an escalation")
         request_hash = _fingerprint({"case_id": str(case_id), "expected_version": expected_version,
                                      "investigation_id": str(investigation_id), "action_type": action_type,
                                      "target_id": str(target_id), "escalation_reason": escalation_reason})
-        case = self._scoped_case(context, case_id)
         with self._engine.begin() as connection:
             previous = connection.execute(text("SELECT * FROM resolve.action_proposals WHERE case_id=:case_id AND request_key=:key"),
                                           {"case_id": case_id, "key": request_key}).mappings().one_or_none()
@@ -754,10 +762,12 @@ class ResolveFacade:
         case = self._scoped_case(context, case_id)
         with self._engine.begin() as connection:
             conversation = connection.execute(text("""
-                SELECT id,version,dialogue_state FROM resolve.conversations
-                WHERE id=:id AND sandbox_id=:sandbox AND account_id=:account FOR UPDATE
+                SELECT co.id,co.version,co.dialogue_state FROM resolve.conversations co
+                JOIN resolve.cases c ON (c.sandbox_id,c.conversation_id)=(co.sandbox_id,co.id)
+                WHERE co.id=:id AND co.sandbox_id=:sandbox
+                  AND c.id=:case AND c.account_id=:account FOR UPDATE OF co
             """), {"id": case["conversation_id"], "sandbox": context.sandbox_id,
-                  "account": context.account_id}).mappings().one_or_none()
+                  "case": case_id, "account": context.account_id}).mappings().one_or_none()
             if conversation is None:
                 raise ResolveError(404, "RESOURCE_NOT_FOUND", "Conversation was not found")
             state = DialogueState.model_validate(conversation["dialogue_state"] or {})
@@ -770,12 +780,18 @@ class ResolveFacade:
                 target_id=proposal["target_id"], target_label=proposal["target_label"])
             updated = state.model_copy(update={"active_case_id": case_id, "pending_question": None,
                 "pending_choices": [], "pending_proposal": ref})
-            connection.execute(text("""
-                UPDATE resolve.conversations SET dialogue_state=CAST(:state AS jsonb),version=version+1,updated_at=:now
-                WHERE id=:id AND sandbox_id=:sandbox AND account_id=:account
+            changed = connection.execute(text("""
+                UPDATE resolve.conversations co
+                SET dialogue_state=CAST(:state AS jsonb),version=co.version+1
+                WHERE co.id=:id AND co.sandbox_id=:sandbox
+                  AND EXISTS (SELECT 1 FROM resolve.cases c
+                    WHERE c.id=:case AND c.conversation_id=co.id
+                      AND c.sandbox_id=co.sandbox_id AND c.account_id=:account)
             """), {"state": json.dumps(updated.model_dump(mode="json"), ensure_ascii=False),
-                  "now": datetime.now(UTC), "id": conversation["id"], "sandbox": context.sandbox_id,
-                  "account": context.account_id})
+                  "id": conversation["id"], "sandbox": context.sandbox_id,
+                  "case": case_id, "account": context.account_id}).rowcount
+            if changed != 1:
+                raise ResolveError(404, "RESOURCE_NOT_FOUND", "Conversation was not found")
         return proposal
 
     def list_package_offers(self, context: AuthContext) -> list[dict[str, Any]]:
@@ -959,14 +975,17 @@ class ResolveFacade:
             FOR SHARE OF b,c,s
         """), {"binding": consent.binding_id, "sandbox": context.sandbox_id,
                "account": context.account_id}).mappings().one_or_none()
-        if (binding is None or binding["conversation_id"] != consent.conversation_id
-                or binding["voice_session_id"] != consent.voice_session_id
+        if binding is None:
+            raise ResolveError(404, "NOT_FOUND", "Voice binding is unavailable")
+        if (binding["conversation_id"] != consent.conversation_id
                 or binding["session_id"] != context.session_id or binding["role"] != "CUSTOMER"
                 or binding["account_id"] != binding["session_account_id"]
                 or binding["run_status"] != "ACTIVE" or binding["revoked_at"] is not None
                 or binding["session_revoked_at"] is not None or binding["expires_at"] <= now
                 or binding["session_expires_at"] <= now or binding["conversation_expires_at"] <= now):
             raise ResolveError(404, "NOT_FOUND", "Voice binding is unavailable")
+        if binding["voice_session_id"] != consent.voice_session_id:
+            raise ResolveError(409, "VOICE_PRESENTATION_INVALID", "Voice proposal presentation does not match")
         if not check_presentation:
             return
         # The presentation must be the latest completed proposal response for this conversation.

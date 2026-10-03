@@ -8,6 +8,14 @@ Reuse PostgreSQL, schemas 001-003, seed/reset tooling, six synthetic scenarios, 
 
 Keep one application process. Suggested module ownership: `backend/resolve/{api,auth,contracts,services,providers,persistence,integrations,worker}` belongs to Harry; `backend/resolve/conversation` belongs to Tevin. Harry composes routers/dependencies and exports DTOs/facade. No HTTP call to the same process between dialogue and services. External Voice stays in its existing repository.
 
+## Current full-system verification checkpoint — 2026-10-03
+
+- [x] PostgreSQL-gated Resolve suite checks: **39/39 passed** across isolated PostgreSQL 18 projects (fresh migrations and synthetic fixtures; no shared DB touched). Suites cover turn recovery, action faults, operation restart, package activation, quota, review synchronization/recovery, audit worker, signed Voice bridge, domain and conversation/facade journeys, and seed/reset.
+- [x] Added migration `0011_turn_recovery` and agent-only, CSRF-protected reconciliation route. It is fail-closed for active leases and related PENDING/RUNNING/UNKNOWN operations, writes an audit event, and makes the same turn terminal. A confirmed integration test verifies no Voice/text replay and permits a fresh turn.
+- [x] Replaced the old expected failure for partial ledger evidence with a passing integration assertion; recharge evidence cannot promote an incomplete ledger to SUFFICIENT.
+- [x] Fresh schema migration and upgrade from `0010_offer_readonly` to head both applied. App-role offer privileges verified read-only. Full Resolve suite: **443 passed, 39 PostgreSQL-gated skipped** in the no-DB run; those 39 gated checks passed separately. API contract/type generation, frontend typecheck/build and mock E2E **23/23** pass; Playwright exits 0.
+- [ ] Real model/microphone qualification and production soak remain open. Zeptaz Voice was not modified in this phase; previously run Voice tests report **52 passed**.
+
 ## H-01: database and fixture baseline
 
 - [x] Establish Alembic lifecycle without replaying CREATE TABLE over data. Validate schemas 001-003 before baseline adoption; on fresh Compose PostgreSQL, upgrade through `0003_case_investigations`. Repeated upgrade is idempotent.
@@ -153,7 +161,7 @@ Opt-in suite limitation: the legacy PostgreSQL modules mutate shared fixture row
 - [ ] Readiness checks DB/migration head; Voice/model outage degrades channel capability and does not mark deterministic text unavailable. Protected diagnostic metrics only; no extra observability service required.
 - [x] H-09a Safe HTTP request logs include request ID, method, route template, status, elapsed time and stable error code; tests confirm query/body/header values and exception messages are not logged.
 - [x] H-09b Action/review-sync worker logs include case and operation/review-event IDs, action type, attempt count, terminal/current status, duration and bounded error code. They omit provider results, customer content and exception messages; three unit tests plus the existing HTTP observability tests pass.
-- [ ] Pytest covers reconciliation, permissions, provider faults, proposal/operation concurrency, restart and contracts. Coordinate Playwright with Jayith and dialogue tests with Tevin. Test both fresh setup and upgrade of the existing database.
+- [x] Pytest covers reconciliation, permissions, provider faults, proposal/operation concurrency, restart and contracts. All 39 PostgreSQL-gated checks passed on isolated PostgreSQL 18; fresh migration and upgrade from 0010 both applied. Frontend mock E2E passed 23/23 with clean process exit. The real model/microphone gate remains separately open.
 - [ ] Final README/configuration/dependency lock/demo access match the submitted commit; secrets shared separately. Confirm seven-day demo retention/cleanup and no audio recording.
 
 ## Verification log
@@ -185,21 +193,21 @@ Work order and time boxes are in context.md. Harry owns the critical path; publi
 
 The [audit and remediation status](../audits/2026-10-03-resolve.md) tracks findings from baseline `2b52b72` on `ResolveDev`. The implementation remains within the reviewed architecture and this phase changed only `hutch_resolve`; it did not access the Zeptaz Voice repository.
 
-- Fixed and unit/API-verified: AUD-01 deterministic response/rewrite safeguards; AUD-02 investigation Origin/CSRF; AUD-04 late microphone cleanup; AUD-06 explicit auth realm; AUD-11 redacted catch-all error envelope and request ID. AUD-05 escalation API/reason, AUD-07 Voice operation projection, AUD-08 review-event backfill, AUD-09 aggregate case status, AUD-10 encrypted idempotent Voice grant provisioning, AUD-12 shared throttling and proxy policy are implemented, but their PostgreSQL transactional/recovery acceptance checks remain open.
-- AUD-03 is partial: atomic expected-version claim, persisted text input and safe same-turn resume are implemented. Abandoned Voice and old claims without saved input are refused without replaying consent or side effects, but still need an authorized durable reconciliation path to unblock subsequent turns.
+- Fixed and unit/API-verified: AUD-01 deterministic response/rewrite safeguards; AUD-02 investigation Origin/CSRF; AUD-04 late microphone cleanup; AUD-06 explicit auth realm; AUD-11 redacted catch-all error envelope and request ID. AUD-05 escalation API/reason, AUD-07 Voice operation projection, AUD-08 review-event backfill, AUD-09 aggregate case status, AUD-10 encrypted idempotent Voice grant provisioning, AUD-12 shared throttling and proxy policy are implemented. Their PostgreSQL checks passed as recorded in the current checkpoint above.
+- AUD-03 now has agent-authorized durable reconciliation for abandoned claims. It refuses ambiguous operations, audits the terminal decision, blocks replay, and permits a fresh turn after reconciliation; the isolated PostgreSQL test verifies these transitions.
 - Readiness now advertises text/actions/Voice/model capabilities. Both the HTTP confirmation endpoint and shared facade reject ACCEPT before persistence when action execution is unavailable. Canonical contract/OpenAPI and generated frontend types include readiness capabilities and retryable `503 ACTION_EXECUTION_UNAVAILABLE`.
 
-Verification checkpoint: full default backend suite **438 passed, 35 PostgreSQL-gated skips**; focused action-capability/domain tests **56 passed, 1 PostgreSQL-gated skip**; Python compileall and `git diff --check` pass. Frontend typecheck, production build and final mock e2e (18/18) pass. Docker engine access is denied and no disposable PostgreSQL URL is configured, so migration, database locking, worker/outbox, concurrent idempotency, and crash-recovery changes are not fully qualified. Keep related tasks open until those gates pass. Implementation commit `aa6af0e` was pushed to `ResolveDev`.
+Historical checkpoint before the isolated DB harness was made available: backend suite **438 passed, 35 PostgreSQL-gated skips** and frontend mock e2e **18/18**. The current results supersede this snapshot above.
 
 ### Follow-up remediation phase — 2026-10-03
 
-- [x] Fixed durable text/voice turn claim lookup to return the locked conversation row mapping, not its first scalar field. Added a PostgreSQL regression to the existing opt-in domain test; it remains skipped without `DOMAIN_IT_DATABASE_URL`.
-- [x] Scoped escalation investigation reads through the owning case/account; preserve the reason in the proposal; store a typed pending-proposal reference in the conversation so the case-panel handoff reaches the normal confirmation card/endpoint and survives a refresh. The PostgreSQL regression for claim + escalation persistence is added but not yet run.
+- [x] Fixed durable text/voice turn claim lookup to return the locked conversation row mapping, not its first scalar field. Isolated PostgreSQL regression passed.
+- [x] Scoped escalation investigation reads through the owning case/account; preserve the reason in the proposal; store a typed pending-proposal reference in the conversation so the case-panel handoff reaches the normal confirmation card/endpoint and survives a refresh. Isolated PostgreSQL claim/escalation persistence passed.
 - [x] Avoid eager evaluation of package-only consequence fields on VAS/settings/review proposals. Project strict package evidence, proposal terms and operation outcome fields through the existing API shapes; provider-only activation details remain internal to the receipt/outcome store.
 - [x] Tevin answer grounding rejects unsupported customer outcome claims; focused answer tests pass. The guard is deliberately conservative lexical validation and does not establish arbitrary semantic entailment.
 - [x] Jayith browser voice handling preserves the same idempotency key for unknown grant outcomes, rotates after expired grants and ignores stale call startup failures; frontend typecheck/build/lint and mock e2e pass.
 - [x] Voice adapter safety fix buffers and verifies generated audio/transcript against Resolve speech text, falls back to canonical text and reports tool failures as typed errors without fabricated replies. Voice suite **52 passed**; pushed as `hutch_zeptazvoice/adapter_buildation` commit `3bc6a27`.
-- [ ] PostgreSQL-gated turn-claim/escalation persistence, package API projections, review delivery ordering and worker recovery remain unverified because the disposable database is unavailable. Abandoned Voice claim reconciliation remains fail-closed and unresolved.
+- [x] PostgreSQL-gated turn-claim/escalation persistence, package API projections, review delivery ordering, worker recovery and abandoned-turn reconciliation were verified on isolated disposable databases; see the current checkpoint above.
 
 ### Security and reproducibility phase — 2026-10-03
 
@@ -207,11 +215,11 @@ Verification checkpoint: full default backend suite **438 passed, 35 PostgreSQL-
 - [x] Added a streaming request-body cap (1 MiB, stable `REQUEST_TOO_LARGE` envelope) and readiness now requires the Voice grant encryption key and HMAC/base URL configuration. Focused body/readiness tests pass.
 - [x] Review ticket completion now takes the case lock before delivery backfill, serializing with agent review writes. Sandbox provider writes verify the run remains ACTIVE under a row share-lock before mutation.
 - [x] Fixture package allowlisting now shares the seed/reset transaction. Docker `.hutch_initialized` readiness marker moved to a final `99-ready.sh` step after all root-level seeds.
-- [x] Revision `0010_least_privilege_package_catalogue` revokes unnecessary sandbox offer UPDATE from the Resolve role. PostgreSQL migration/grant verification remains DB-gated.
+- [x] Revision `0010_least_privilege_package_catalogue` revokes unnecessary sandbox offer UPDATE from the Resolve role. Disposable PostgreSQL confirms read=true/update=false; upgrade from this revision through 0011 succeeds.
 - [x] Fixed package contract generator working-directory dependence and made enum/required-list extension idempotent. Two consecutive runs produce byte-identical OpenAPI; OpenAPI generated TypeScript and contract tests were refreshed.
 - [x] Removed unused `shadcn` CLI from frontend dependency graph while retaining its MIT stylesheet and license. Full public npm audit: **0 vulnerabilities**.
 - [x] Logout and review retry state are recoverable across failure/reload. Review retry retains the same persisted key/body for unknown network outcomes. Definitive 409/422 responses now clear the key; this prevents stale conflict requests from bypassing the “I've checked it” guard. Focused conflict and committed-response-lost Playwright tests both pass.
 - Verification: full default backend suite **439 passed, 36 PostgreSQL-gated skips**; `test_seed_run.py` in project venv **2 passed, 1 PostgreSQL-gated skip**; frontend typecheck/build pass, lint passes with six existing warnings. Expanded mock browser suite: **22 passed, 1 failed** before the definitive-conflict key fix; after the fix both affected scenarios passed (Playwright printed both green results, but Windows teardown hung and was interrupted). Rerun the full suite before release.
-- [ ] PostgreSQL integration for migration grants, reset atomicity, case-lock race, retired-run fencing and operation recovery cannot run without a disposable DB URL/usable Docker engine. Full mock browser suite and DB/live Voice/model release gates remain open.
+- [x] PostgreSQL integration for migration grants, reset atomicity, case-lock races, retired-run fencing and operation recovery passed on disposable databases. Full mock browser suite now exits cleanly after 23/23 passing tests. Live Voice/model release qualification remains open.
 
-Full mock browser rerun after the conflict-key fix reports **22/22 passed**. The Playwright process still hangs during Windows teardown after reporting all tests green and had to be interrupted; treat test assertions as passed, while runner teardown remains an open tooling issue.
+Historical mock browser rerun after the conflict-key fix reported **22/22 passed** but the Playwright process hung during Windows teardown. The current 23-test run exits cleanly; see the verification checkpoint above.

@@ -1,4 +1,4 @@
-"""Pydantic mirrors of the shared contract v1.1.0 (docs/contracts/openapi.json).
+"""Pydantic mirrors of the shared contract v1.2.0 (docs/contracts/openapi.json).
 
 Provisional: Harry owns the canonical shared DTOs. Until `resolve.contracts`
 exists, the conversation module uses these mirrors; tests check field-level
@@ -15,7 +15,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_serializer, model_validator
 
-CONTRACT_VERSION = "1.1.0"
+CONTRACT_VERSION = "1.2.0"
 MAX_SAFE_INT = 9007199254740991
 MAX_TEXT_CHARS = 4000
 

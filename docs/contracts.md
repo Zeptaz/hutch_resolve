@@ -1,6 +1,6 @@
-# Shared implementation contracts v1.1.0
+# Shared implementation contracts v1.2.0
 
-**Mixed implementation status.** Resolve implements health/readiness, session lifecycle, scoped case APIs, deterministic investigation and action services, receipts, agent review, text conversation routes and the signed Voice bridge. The conversation controller is mounted in the same process and uses Resolve's persisted turn claims and facade. The combined customer chat/call and agent frontend builds. Disposable PostgreSQL verifies text replay, guest upgrade and the signed Voice proposal/confirmation path. A real browser microphone/model call and release qualification remain open. See [OpenAPI 3.1](contracts/openapi.json). [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
+**Mixed implementation status.** Resolve implements health/readiness, session lifecycle, scoped case APIs, deterministic investigation and action services, receipts, agent review, text conversation routes and the signed Voice bridge. The conversation controller is mounted in the same process and uses Resolve's persisted turn claims and facade. The combined customer chat/call and agent frontend builds. PostgreSQL verifies text replay, guest upgrade, action/worker recovery, dashboard review, package/quota behavior and signed Voice consent. Agent-authorized stalled-turn reconciliation is defined below and covered on disposable PostgreSQL. Real browser microphone/model qualification and release soak remain open. See [OpenAPI 3.1](contracts/openapi.json). [Examples](contracts/examples.json) are synthetic design fixtures. Harry owns shared contracts; revise these documents before implementations diverge.
 
 ## Ownership and connections
 
@@ -39,7 +39,7 @@ Resolve generates session/conversation/case/investigation/proposal/operation/rec
 - Versions begin at1. Mutable writes include expected_version. Lists use `{items,next_cursor}`, default limit25/max100; opaque cursor binds filters/order. Provider pagination is separately100/max500.
 - DTOs reject unknown fields except immutable source payload/telemetry maps explicitly allowing them.
 - Mutations require Idempotency-Key except session lifecycle, messages (client_turn_id) and Voice callbacks (event/turn IDs). Browser Idempotency-Key values are UUIDs. Persist subject+route+key, canonical request fingerprint and result. Matching retry replays response; changed body409. Authenticate scope before replay; check replay before stale-version rejection. Voice grant replay returns the same encrypted-at-rest, short-lived grant; expired or uncertain grants cannot be minted again under the same key.
-- Persist one active turn claim per conversation before remote/model calls, without holding locks during calls. Identical in-progress turn returns409 TURN_IN_PROGRESS/retryable=true. Other concurrent turns return CONVERSATION_BUSY or STALE_VERSION. Recover abandoned claims with original downstream keys. Persist final messages/result and advance conversation.version once.
+- Persist one active turn claim per conversation before remote/model calls, without holding locks during calls. Identical in-progress turn returns409 TURN_IN_PROGRESS/retryable=true. Other concurrent turns return CONVERSATION_BUSY or STALE_VERSION. An expired text claim can be retried with its original downstream key; a Voice claim is never automatically replayed without fresh signed evidence. An agent may explicitly reconcile a stalled claim only after confirming no related operation is PENDING, RUNNING or UNKNOWN. Reconciliation is audited and terminal: the same turn returns409 TURN_ABANDONED and cannot be replayed; the customer starts a new turn.
 
 Error envelope: `{error:{code,message,retryable,request_id,details}}`; return X-Request-Id. Details contain safe validation/current-version information, never another account's data. Unhandled exceptions return `500 INTERNAL_ERROR` with this envelope; exception messages and customer/provider payloads are not exposed. Investigation writes require Origin and CSRF. Anonymous creation/login use shared PostgreSQL fixed-window buckets; defaults are 30 anonymous creations/client/10 minutes, 30 login attempts/client/10 minutes and 10/client+identity/10 minutes. `TRUSTED_PROXY_IPS` is empty by default; a single sanitized X-Forwarded-For address is honored only from an exact listed proxy IP. Rate-limit failures return `429 RATE_LIMITED` with `Retry-After: 600`.
 
@@ -48,7 +48,7 @@ Error envelope: `{error:{code,message,retryable,request_id,details}}`; return X-
 | 401 | UNAUTHENTICATED, SESSION_EXPIRED, INVALID_SERVICE_SIGNATURE | Reauthenticate |
 | 403 | ROLE_FORBIDDEN, CSRF_FAILED, ORIGIN_FORBIDDEN | Correct permission/context |
 | 404 | RESOURCE_NOT_FOUND | Hide inaccessible entity details |
-| 409 | STALE_VERSION, IDEMPOTENCY_CONFLICT, PROPOSAL_INVALIDATED, TURN_IN_PROGRESS, CONVERSATION_BUSY | Refresh/clarify; same-ID retry only when retryable |
+| 409 | STALE_VERSION, IDEMPOTENCY_CONFLICT, PROPOSAL_INVALIDATED, TURN_IN_PROGRESS, CONVERSATION_BUSY, TURN_ABANDONED, TURN_ALREADY_SETTLED, TURN_OUTCOME_UNRESOLVED | Refresh/clarify; same-ID retry only when retryable; reconcile unresolved operations before settling a stalled turn |
 | 422 | VALIDATION_ERROR, ACTION_NOT_ALLOWED, PROPOSAL_EXPIRED, CONFIRMATION_REQUIRED | Fix input/request new proposal |
 | 429 | RATE_LIMITED | Honor Retry-After |
 | 503 | DEPENDENCY_UNAVAILABLE, ACTION_EXECUTION_UNAVAILABLE | Safe fallback; bounded idempotent retry. An accepted action is never persisted when its worker/writer is unavailable. |
@@ -83,6 +83,7 @@ All paths use `/api/v1`; OpenAPI defines exact fields and response models. Sessi
 | GET /agent/cases | Implemented: filters, exact case/line alias search, signed cursor -> scoped queue |
 | GET /agent/cases/{id} | Implemented: sandbox-scoped AgentCaseDetail |
 | PATCH /agent/cases/{id}/review | Implemented: versioned/idempotent review and internal note; delivered mock ticket gets a durable sync job |
+| POST /agent/conversations/{conversation_id}/turns/{turn_id}/reconcile | Implemented: AGENT cookie, exact Origin and CSRF required; note required; expired claim only; refuses unresolved related operations; audited terminal state; never replays the customer/Voice turn |
 | GET /healthz; /readyz | Process/DB-migration readiness; `/readyz` reports text/actions/voice/model capability flags and returns 503 when PostgreSQL is unavailable. Text remains usable when optional Voice/model integrations are down; actions require the sandbox writer and worker. |
 
 Case creation is an internal facade operation invoked by conversation intake. Public FAQ cannot create account cases. Health routes are under `/api/v1` in Resolve; Voice retains existing `/healthz`.

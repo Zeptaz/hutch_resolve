@@ -512,6 +512,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/conversations/{conversation_id}/turns/{turn_id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * reconcile a stalled turn
+         * @description Agent-only terminal reconciliation of an expired turn claim. Refuses while related account operations are PENDING, RUNNING or UNKNOWN. Never replays the turn or its Voice consent.
+         */
+        post: operations["reconcile_stalled_conversation_turn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2104,6 +2124,26 @@ export interface components {
              * @constant
              */
             simulation: true;
+        };
+        TurnReconciliationRequest: {
+            /** @description Agent rationale recorded in the immutable reconciliation audit event. */
+            note: string;
+        };
+        TurnReconciliationOperation: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            status: "SUCCEEDED" | "FAILED" | "REVIEW_REQUIRED";
+        };
+        TurnReconciliationResult: {
+            /** Format: uuid */
+            conversation_id: string;
+            /** Format: uuid */
+            turn_id: string;
+            /** @constant */
+            state: "ABANDONED";
+            case_ids: string[];
+            operations: components["schemas"]["TurnReconciliationOperation"][];
         };
     };
     responses: never;
@@ -4541,6 +4581,81 @@ export interface operations {
             };
             /** @description Dependency unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    reconcile_stalled_conversation_turn: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": string;
+                Origin: string;
+            };
+            path: {
+                conversation_id: string;
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TurnReconciliationRequest"];
+            };
+        };
+        responses: {
+            /** @description Turn marked abandoned with case and operation context */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TurnReconciliationResult"];
+                };
+            };
+            /** @description Error; see shared contract codes */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; see shared contract codes */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; see shared contract codes */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; see shared contract codes */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; see shared contract codes */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

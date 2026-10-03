@@ -2,7 +2,7 @@
 
 from alembic import op
 
-revision = "0010_least_privilege_package_catalogue"
+revision = "0010_offer_readonly"
 down_revision = "0009_package_activation"
 branch_labels = None
 depends_on = None

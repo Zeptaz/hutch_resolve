@@ -35,7 +35,7 @@ def claim_turn(engine: Engine, *, sandbox_id: UUID | None, conversation_id: UUID
         if scoped is None:
             raise ResolveError(404, "NOT_FOUND", "Conversation is unavailable")
         prior = connection.execute(text("""
-            SELECT input_hash,downstream_key,lease_until,completed_at,result
+            SELECT input_hash,downstream_key,lease_until,completed_at,abandoned_at,result
             FROM resolve.turn_claims WHERE conversation_id=:conversation AND client_turn_id=:turn
             FOR UPDATE
         """), {"conversation": conversation_id, "turn": turn_id}).mappings().one_or_none()
@@ -44,11 +44,13 @@ def claim_turn(engine: Engine, *, sandbox_id: UUID | None, conversation_id: UUID
         if prior is not None and prior["completed_at"] is not None:
             result = prior["result"]
             return TurnClaim(None, prior["downstream_key"], json.loads(result) if isinstance(result, str) else result)
+        if prior is not None and prior.get("abandoned_at") is not None:
+            raise ResolveError(409, "TURN_ABANDONED", "This turn was reconciled and cannot be replayed")
         if expected_version is not None and scoped["version"] != expected_version:
             raise ResolveError(409, "STALE_VERSION", "Conversation changed; refresh before sending", False)
         other = connection.execute(text("""
             SELECT client_turn_id FROM resolve.turn_claims
-            WHERE conversation_id=:conversation AND client_turn_id<>:turn AND completed_at IS NULL
+            WHERE conversation_id=:conversation AND client_turn_id<>:turn AND completed_at IS NULL AND abandoned_at IS NULL
             LIMIT 1
         """), {"conversation": conversation_id, "turn": turn_id}).scalar_one_or_none()
         if other is not None:
@@ -83,7 +85,7 @@ def complete_turn(connection: Any, *, conversation_id: UUID, turn_id: UUID,
     changed = connection.execute(text("""
         UPDATE resolve.turn_claims SET completed_at=:now,result=CAST(:result AS jsonb)
         WHERE conversation_id=:conversation AND client_turn_id=:turn
-          AND claim_token=:token AND completed_at IS NULL
+          AND claim_token=:token AND completed_at IS NULL AND abandoned_at IS NULL
     """), {"now": now, "result": json.dumps(result), "conversation": conversation_id,
           "turn": turn_id, "token": token}).rowcount
     if changed != 1:
@@ -96,6 +98,6 @@ def release_turn(engine: Engine, *, conversation_id: UUID, turn_id: UUID,
         connection.execute(text("""
             UPDATE resolve.turn_claims SET lease_until=:now
             WHERE conversation_id=:conversation AND client_turn_id=:turn
-              AND claim_token=:token AND completed_at IS NULL
+              AND claim_token=:token AND completed_at IS NULL AND abandoned_at IS NULL
         """), {"now": now or datetime.now(UTC), "conversation": conversation_id,
               "turn": turn_id, "token": token})

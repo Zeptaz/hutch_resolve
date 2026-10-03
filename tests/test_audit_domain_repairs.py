@@ -33,6 +33,32 @@ def test_agent_login_succeeds_after_anonymous_customer_session():
         assert client.get("/api/v1/session").json()["role"] == "GUEST"
 
 
+def test_agent_turn_reconciliation_endpoint_requires_csrf_and_forwards_scoped_context():
+    client, _ = build_client()
+    calls = []
+    conversation_id, turn_id = uuid4(), uuid4()
+    def reconcile(context, **kwargs):
+        calls.append((context, kwargs))
+        return {"conversation_id": conversation_id, "turn_id": turn_id,
+            "state": "ABANDONED", "case_ids": [], "operations": []}
+    path = f"/api/v1/agent/conversations/{conversation_id}/turns/{turn_id}/reconcile"
+    body = {"note": "Reviewed the stalled case and confirmed no pending action."}
+    with client:
+        client.app.state.resolve_facade.reconcile_turn = reconcile
+        login = client.post("/api/v1/agent/sessions", json={"demo_identity": "agent", "credential": "agent-pass"},
+                            headers={"Origin": ORIGIN})
+        csrf = login.json()["csrf_token"]
+        denied = client.post(path, json=body, headers={"Origin": ORIGIN})
+        assert denied.status_code == 403 and denied.json()["error"]["code"] == "CSRF_FAILED"
+        accepted = client.post(path, json=body,
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf})
+    assert accepted.status_code == 200
+    assert accepted.json()["state"] == "ABANDONED"
+    context, kwargs = calls[0]
+    assert context.role == "AGENT" and context.sandbox_id == UUID("00000000-0000-0000-0000-000000000001")
+    assert kwargs == {"conversation_id": conversation_id, "turn_id": turn_id, "note": body["note"]}
+
+
 class _MissingCaseResult:
     def mappings(self):
         return self
@@ -157,7 +183,8 @@ def test_postgres_voice_confirmation_requires_recorded_presentation_and_persists
         current = facade.get_case(context, case["id"])
         proposal = facade.propose_action(context, case_id=case["id"], expected_version=current["version"],
             investigation_id=investigation["id"], action_type="CREATE_REVIEW_TICKET",
-            target_id=eligible["target_id"], request_key=f"voice-domain-proposal-{uuid4()}")
+            target_id=eligible["target_id"], request_key=f"voice-domain-proposal-{uuid4()}",
+            escalation_reason="Customer requested a connectivity review.")
         binding_id, voice_session_id, response_id, presentation_turn = uuid4(), str(uuid4()), str(uuid4()), uuid4()
         with engine.begin() as connection:
             connection.execute(text("""
@@ -181,7 +208,7 @@ def test_postgres_voice_confirmation_requires_recorded_presentation_and_persists
                        "proposal": {"id": str(proposal["id"]), "proposal_hash": proposal["proposal_hash"]}})})
         turn_id = uuid4()
         consent = VoiceConsentEvidence(binding_id=binding_id, voice_session_id=voice_session_id,
-            conversation_id=conversation["id"], turn_id=turn_id, language="en", final_transcript="Yes.",
+            conversation_id=UUID(str(conversation["id"])), turn_id=turn_id, language="en", final_transcript="Yes.",
             presented_proposal_id=proposal["id"], presented_proposal_hash=proposal["proposal_hash"],
             presentation_response_id=response_id)
         other_binding, other_voice_session = uuid4(), str(uuid4())
@@ -193,8 +220,20 @@ def test_postgres_voice_confirmation_requires_recorded_presentation_and_persists
             """), {"id": other_binding, "sandbox": run_id, "conversation": conversation["id"],
                    "voice_session": other_voice_session, "account": account_id,
                    "expires": datetime.now(UTC) + timedelta(minutes=3)})
+            scoped_binding = connection.execute(text("""
+                SELECT b.id,b.sandbox_id,b.account_id,b.conversation_id,c.session_id,s.role,
+                       s.account_id AS session_account_id,r.run_status
+                FROM resolve.voice_bindings b JOIN resolve.conversations c
+                  ON (c.sandbox_id,c.id)=(b.sandbox_id,b.conversation_id)
+                JOIN resolve.sessions s ON (s.sandbox_id,s.id)=(c.sandbox_id,c.session_id)
+                JOIN sandbox.sandbox_runs r ON r.id=b.sandbox_id WHERE b.id=:id
+            """), {"id": other_binding}).mappings().one()
+            assert scoped_binding["account_id"] == account_id
+            assert scoped_binding["conversation_id"] == UUID(str(conversation["id"]))
+            assert scoped_binding["session_id"] == session_id
+            assert scoped_binding["run_status"] == "ACTIVE"
         borrowed = VoiceConsentEvidence(binding_id=other_binding, voice_session_id=other_voice_session,
-            conversation_id=conversation["id"], turn_id=turn_id, language="en", final_transcript="Yes.",
+            conversation_id=UUID(str(conversation["id"])), turn_id=turn_id, language="en", final_transcript="Yes.",
             presented_proposal_id=proposal["id"], presented_proposal_hash=proposal["proposal_hash"],
             presentation_response_id=response_id)
         with pytest.raises(ResolveError) as wrong_binding:

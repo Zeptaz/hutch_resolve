@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "HUTCH Resolve planned API",
-    "version": "1.1.0",
-    "description": "Shared Resolve wire contract v1.1.0. Adds typed synthetic one-shot package selection and activation; see docs/contracts.md for boundaries, feature flag and verification status."
+    "title": "HUTCH Resolve API",
+    "version": "1.2.0",
+    "description": "Shared Resolve wire contract v1.2.0. Adds agent-authorized stalled-turn reconciliation; see docs/contracts.md for safety and verification status."
   },
   "servers": [
     {
@@ -3557,6 +3557,130 @@
           },
           "503": {
             "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/conversations/{conversation_id}/turns/{turn_id}/reconcile": {
+      "post": {
+        "operationId": "reconcile_stalled_conversation_turn",
+        "summary": "reconcile a stalled turn",
+        "description": "Agent-only terminal reconciliation of an expired turn claim. Refuses while related account operations are PENDING, RUNNING or UNKNOWN. Never replays the turn or its Voice consent.",
+        "tags": [
+          "Agent"
+        ],
+        "x-owner": "Harry",
+        "security": [
+          {
+            "AgentSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TurnReconciliationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Turn marked abandoned with case and operation context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnReconciliationResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; see shared contract codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error; see shared contract codes",
             "content": {
               "application/json": {
                 "schema": {
@@ -8455,6 +8579,81 @@
           "simulation"
         ],
         "type": "object"
+      },
+      "TurnReconciliationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "note"
+        ],
+        "properties": {
+          "note": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 1000,
+            "description": "Agent rationale recorded in the immutable reconciliation audit event."
+          }
+        }
+      },
+      "TurnReconciliationOperation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUCCEEDED",
+              "FAILED",
+              "REVIEW_REQUIRED"
+            ]
+          }
+        }
+      },
+      "TurnReconciliationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversation_id",
+          "turn_id",
+          "state",
+          "case_ids",
+          "operations"
+        ],
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "const": "ABANDONED"
+          },
+          "case_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TurnReconciliationOperation"
+            }
+          }
+        }
       }
     },
     "parameters": {

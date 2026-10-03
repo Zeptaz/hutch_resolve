@@ -68,7 +68,8 @@ def _prepare_action(resolve_engine, run_id: UUID, account_alias: str, complaint_
     current = facade.get_case(context, case["id"])
     proposal = facade.propose_action(context, case_id=case["id"], expected_version=current["version"],
         investigation_id=investigation["id"], action_type=action_type, target_id=eligible["target_id"],
-        request_key=f"action-fault-proposal-{uuid4()}")
+        request_key=f"action-fault-proposal-{uuid4()}",
+        escalation_reason="Customer requested a human review." if action_type == "CREATE_REVIEW_TICKET" else None)
     confirmation = facade.confirm_action(context, proposal_id=proposal["id"],
         proposal_hash=proposal["proposal_hash"], decision="ACCEPT", client_turn_id=uuid4())
     return facade, context, case["id"], confirmation["operation_id"]

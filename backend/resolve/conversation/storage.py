@@ -102,7 +102,7 @@ class PostgresConversationRepository:
             pending_turn = connection.execute(text("""
                 SELECT client_turn_id,lease_until,claimed_at,input_payload
                 FROM resolve.turn_claims
-                WHERE conversation_id=:conversation AND completed_at IS NULL
+                WHERE conversation_id=:conversation AND completed_at IS NULL AND abandoned_at IS NULL
                 ORDER BY claimed_at,client_turn_id LIMIT 1
             """), {"conversation": conversation_id}).mappings().one_or_none()
             state = DialogueState.model_validate(row["dialogue_state"] or {})
@@ -148,11 +148,13 @@ class PostgresConversationRepository:
         with self.engine.begin() as connection:
             self._scoped(connection, ctx, conversation_id, lock=True)
             claim = connection.execute(text("""
-                SELECT lease_until,input_payload,completed_at FROM resolve.turn_claims
+                SELECT lease_until,input_payload,completed_at,abandoned_at FROM resolve.turn_claims
                 WHERE conversation_id=:conversation AND client_turn_id=:turn FOR UPDATE
             """), {"conversation": conversation_id, "turn": turn_id}).mappings().one_or_none()
             if claim is None or claim["completed_at"] is not None:
                 raise ResolveError("RESOURCE_NOT_FOUND", "Pending turn is unavailable")
+            if claim["abandoned_at"] is not None:
+                raise ResolveError("TURN_ABANDONED", "This turn was reconciled and cannot be replayed")
             if claim["lease_until"] > datetime.now(UTC):
                 raise ResolveError("TURN_IN_PROGRESS", "This turn is still being processed", retryable=True)
             payload = _plain(claim["input_payload"] or {})

@@ -257,8 +257,8 @@ def test_seeded_faults_as_in_harrys_app_are_reported_safely() -> None:
         assert all(card.data.action_type == "CREATE_REVIEW_TICKET" for card in d.cards if card.type == "confirmation")
         assert not re.search(r"\b[A-Z]+(?:_[A-Z]+)+\b", d.reply_text)
 
-        if any(f.code == "LEDGER_PARTIAL" for f in a_inv.findings) and a_inv.evidence_state == "SUFFICIENT":
-            pytest.xfail("Harry finding 12: provisional ledger (LEDGER_PARTIAL) is labelled SUFFICIENT")
+        if any(f.code == "LEDGER_PARTIAL" for f in a_inv.findings):
+            assert a_inv.evidence_state in {"PARTIAL", "CONFLICTING"}
     finally:
         app_engine.dispose()
         sandbox_engine.dispose()
