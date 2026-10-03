@@ -279,3 +279,16 @@ def test_seeded_faults_as_in_harrys_app_are_reported_safely() -> None:
     finally:
         app_engine.dispose()
         sandbox_engine.dispose()
+
+
+@pytest.mark.skipif(not (DB_URL and SANDBOX_URL), reason="needs an isolated migrated Resolve database")
+def test_reconciled_answer_does_not_push_a_review_but_a_pending_payment_does(harry_real) -> None:
+    """B: every number reconciles, so no unprompted review. E: the payment is captured but not
+    credited, so the review is still offered."""
+    ctx, conv, repo, service, _ = journey(harry_real, UUID("20000000-0000-0000-0000-000000000002"))
+    data = send(service, repo, ctx, conv, details("DATA_DEPLETION"))
+    assert not [card for card in data.cards if card.type == "confirmation"]
+
+    ctx_e, conv_e, repo_e, service_e, _ = journey(harry_real, UUID("20000000-0000-0000-0000-000000000005"))
+    pending = send(service_e, repo_e, ctx_e, conv_e, details())
+    assert [card.data.action_type for card in pending.cards if card.type == "confirmation"] == ["CREATE_REVIEW_TICKET"]

@@ -70,7 +70,7 @@
       "packages_unavailable": "මට දැන් පැකේජ ලබා ගත නොහැකි විය. කරුණාකර මොහොතකින් නැවත උත්සාහ කරන්න.",
       "package_best_fit": "{period} තුළ ඔබ ඩේටා {used} භාවිතා කළා. වඩාත්ම ගැළපෙන්නේ {name}: {validity} සඳහා {data}, {price}.",
       "package_alternatives": "වෙනත් විකල්ප: {options}.",
-      "package_offer_hint": "එය සක්‍රිය කිරීමට offer එකේ 'Yes, go ahead' ඔබන්න, නැතහොත් ඔබට අවශ්‍ය වෙනත් පැකේජය මට කියන්න.",
+      "package_offer_hint": "එය සක්‍රිය කිරීමට offer එකේ 'ඔව්, කරගෙන යන්න' ඔබන්න, නැතහොත් ඔබට අවශ්‍ය වෙනත් පැකේජය මට කියන්න.",
       "package_choose": "ඔබට අවශ්‍ය එක මට කියන්න, ඔබට තහවුරු කිරීමට මම එය සූදානම් කරන්නම්.",
       "package_reload_first": "ඔබේ ප්‍රධාන ශේෂය {balance}, එබැවින් ඔබට පළමුව අවම වශයෙන් {reload} රීලෝඩ් කිරීමට සිදුවේ.",
       "accepted_package": "{package} සක්‍රිය කිරීම ඉල්ලා ඇත. {status}",

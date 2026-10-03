@@ -117,6 +117,10 @@ _CRITICAL_REPLY = re.compile(
 # Knowledge topics where a signed-in customer's current balance is useful context.
 _BALANCE_TOPICS = {"how-to-reload", "check-balance-how", "reload-not-received", "prepaid-recharge"}
 _CODE = re.compile(r"[A-Z0-9_]+")
+# Resolve refuses a proposal when its target changed after the investigation; try the next option.
+_SKIPPABLE_OFFER_ERRORS = {"STALE_VERSION", "ACTION_NOT_ALLOWED", "PROPOSAL_INVALIDATED"}
+# Findings meaning "every number reconciles, nothing outstanding": no unprompted human review.
+_RECONCILED_FINDINGS = {"LEDGER_RECONCILED", "QUOTA_RECONCILED"}
 
 # Pending question codes shared with the frontend.
 Q_CHOOSE_COMPLAINT = "CHOOSE_COMPLAINT_TYPE"
@@ -801,15 +805,32 @@ class ConversationService:
     async def _propose_first(
         self, ctx: AuthContext, turn: NormalizedTurn, case_id, investigation: InvestigationResult
     ) -> tuple[ProposalView | None, list[ActionChoice]]:
-        """Offer Resolve's first eligible action now and keep the rest, so buttons alone reach every option."""
+        """Offer Resolve's first eligible action now and keep the rest, so buttons alone reach every option.
+
+        If Resolve refuses an action because its target changed since the investigation, offer the
+        next one instead of failing the whole turn; the findings are still shown.
+
+        When every finding says the records reconcile (nothing is outstanding), a human review is
+        not pushed unasked, since it would read as doubt about the answer. It stays available if
+        the customer asks for a person. Pending or unexplained findings still offer it.
+        """
         choices = [
             ActionChoice(case_id=case_id, investigation_id=investigation.id, action_type=a.action_type,
                          target_id=a.target_id, target_label=a.target_label)
             for a in investigation.eligible_actions
         ]
-        if not choices:
-            return None, []
-        return await self._request_proposal(ctx, turn, choices[0]), choices[1:]
+        kept: list[ActionChoice] = []
+        if (investigation.evidence_state is EvidenceState.SUFFICIENT and investigation.findings
+                and all(finding.code in _RECONCILED_FINDINGS for finding in investigation.findings)):
+            kept = [c for c in choices if c.action_type is ActionType.CREATE_REVIEW_TICKET]
+            choices = [c for c in choices if c.action_type is not ActionType.CREATE_REVIEW_TICKET]
+        for index, choice in enumerate(choices):
+            try:
+                return await self._request_proposal(ctx, turn, choice), choices[index + 1:] + kept
+            except ResolveError as exc:
+                if exc.code not in _SKIPPABLE_OFFER_ERRORS:
+                    raise
+        return None, kept
 
     async def _request_proposal(self, ctx: AuthContext, turn: NormalizedTurn, choice: ActionChoice) -> ProposalView:
         current: CaseView = await self._facade.get_case(ctx, choice.case_id)
@@ -841,6 +862,31 @@ class ConversationService:
             return _confirm_prompt(state, Channel.VOICE)
         return await self._confirm(ctx, turn, state, inp.decision, voice_evidence)
 
+    async def _refresh_offer(self, ctx: AuthContext, turn: NormalizedTurn, state: DialogueState,
+                             cleared: DialogueState) -> Step | None:
+        """Offer the same action again when the case moved on after it was offered.
+
+        A follow-up offer made while an earlier action is still running is invalidated when that
+        action finishes. Resolve still lists the action, so ask once more on a fresh proposal; the
+        customer confirms again and nothing runs on the stale one.
+        """
+        pending = state.pending_proposal
+        choice = _pending_as_choice(pending)
+        if choice is None:
+            return None
+        try:
+            proposal = await self._request_proposal(ctx, turn, choice)
+        except ResolveError as err:
+            if err.code in _SKIPPABLE_OFFER_ERRORS or err.code == "RESOURCE_NOT_FOUND":
+                return None
+            raise
+        lang = state.language
+        rest = [c for c in state.pending_choices if c.case_id == pending.case_id and not _same_action(c, pending)]
+        offer = _offer_with_alternatives(proposal, rest, lang, pending.case_id)
+        draft = TurnDraft(reply_text=f"{t.text('proposal_invalidated', lang)} {offer.reply_text}",
+                          case_id=pending.case_id, cards=offer.cards, pending_question=offer.pending_question)
+        return draft, cleared.evolve(pending_proposal=_proposal_ref(proposal, turn), pending_question=offer.pending_question)
+
     async def _confirm(self, ctx: AuthContext, turn: NormalizedTurn, state: DialogueState, decision: Decision, voice_evidence) -> Step:
         """Record ACCEPT/DECLINE for the pending proposal. Declines are recorded too."""
         lang = _lang(state)
@@ -859,6 +905,10 @@ class ConversationService:
                 return _confirm_prompt(state, turn.channel)
             if err.code not in _PROPOSAL_ERROR_TEMPLATES:
                 raise
+            if decision is Decision.ACCEPT and err.code == "PROPOSAL_INVALIDATED":
+                refreshed = await self._refresh_offer(ctx, turn, state, cleared)
+                if refreshed is not None:
+                    return refreshed
             return TurnDraft(reply_text=t.text(_PROPOSAL_ERROR_TEMPLATES[err.code], lang), case_id=pending.case_id), cleared
 
         if decision is Decision.DECLINE or result.operation is None:
@@ -871,7 +921,8 @@ class ConversationService:
             base = TurnDraft(reply_text=t.text("accepted_package", lang, package=label, status=status),
                              case_id=pending.case_id, operation_ids=[result.operation.id])
             cleared = cleared.evolve(last_activation=ActivationRef(operation_id=result.operation.id, package_label=label))
-        remaining = [c for c in state.pending_choices if c.case_id == pending.case_id]
+        # The action just accepted or declined is never offered again as the "next" option.
+        remaining = [c for c in state.pending_choices if c.case_id == pending.case_id and not _same_action(c, pending)]
         others = [c for c in state.pending_choices if c.case_id != pending.case_id]
         if remaining:
             # Offer the next listed option, so a customer using only buttons can still reach it.
@@ -1135,6 +1186,14 @@ def _after_investigation(
         pending_proposal=_proposal_ref(proposal, turn) if proposal else None,
         pending_choices=list(alternatives),
     )
+
+
+def _same_action(choice: ActionChoice, ref: PendingProposalRef) -> bool:
+    """True when a listed choice is the action of the proposal just decided. A case has one human
+    review whatever its target; other actions (e.g. several VAS stops) must also match the target."""
+    if choice.action_type is not ref.action_type:
+        return False
+    return choice.action_type is ActionType.CREATE_REVIEW_TICKET or str(choice.target_id) == str(ref.target_id)
 
 
 def _pending_as_choice(ref: PendingProposalRef | None) -> ActionChoice | None:
