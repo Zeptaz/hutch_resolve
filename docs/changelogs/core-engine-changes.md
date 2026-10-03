@@ -265,4 +265,4 @@ code was kept wherever main had already fixed the same defect. Nothing was pushe
   contacts: ready" after the next step) and `python scripts/hubspot_setup.py properties`; restart the backend
   (no contact warning at startup); run one chat handoff and confirm the ticket shows the contact in HubSpot.
   Earlier tickets are not back-filled.
-- Commit: see the commit that adds this entry on `tevin/crm-integration`.
+- Commit: `4074776`.
