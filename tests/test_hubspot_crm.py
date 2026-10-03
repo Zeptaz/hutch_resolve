@@ -22,6 +22,7 @@ class FakeHubSpot:
         self.ticket_notes: dict[str, list[str]] = {}
         self.requests: list[httpx.Request] = []
         self.fail_next: list[object] = []
+        self.missing_properties: set[str] = set()
         self._next_id = 9000
 
     def _id(self) -> str:
@@ -60,8 +61,21 @@ class FakeHubSpot:
                 self.tickets[ticket_id].update(body["properties"])
                 return httpx.Response(200, json={"id": ticket_id})
         if method == "GET" and path.startswith("/crm/v4/objects/tickets/") and path.endswith("/associations/notes"):
-            ticket_id = path.split("/")[5]
-            return httpx.Response(200, json={"results": [{"toObjectId": int(n)} for n in self.ticket_notes.get(ticket_id, [])]})
+            notes = self.ticket_notes.get(path.split("/")[5], [])
+            start, limit = int(request.url.params.get("after", "0")), int(request.url.params.get("limit", "100"))
+            page = {"results": [{"toObjectId": int(n)} for n in notes[start:start + limit]]}
+            if start + limit < len(notes):
+                page["paging"] = {"next": {"after": str(start + limit)}}
+            return httpx.Response(200, json=page)
+        if method == "GET" and path.startswith("/crm/v3/pipelines/tickets/"):
+            if path.rsplit("/", 1)[-1] != "0":
+                return httpx.Response(404, json={"category": "OBJECT_NOT_FOUND"})
+            return httpx.Response(200, json={"id": "0", "stages": [{"id": s} for s in ("1", "2", "3", "4")]})
+        if method == "GET" and path.startswith("/crm/v3/properties/tickets/"):
+            name = path.rsplit("/", 1)[-1]
+            if name in self.missing_properties:
+                return httpx.Response(404, json={"category": "OBJECT_NOT_FOUND"})
+            return httpx.Response(200, json={"name": name, "hasUniqueValue": name == "resolve_operation_id"})
         if method == "POST" and path == "/crm/v3/objects/notes/batch/read":
             return httpx.Response(200, json={"results": [{"id": i["id"], "properties": self.notes[i["id"]]}
                                                          for i in body["inputs"] if i["id"] in self.notes]})
@@ -285,3 +299,35 @@ def test_unknown_crm_provider_is_rejected(monkeypatch):
     monkeypatch.setenv("CRM_PROVIDER", "salesforce")
     with pytest.raises(RuntimeError, match="CRM_PROVIDER"):
         Settings.from_environment()
+
+
+def test_review_marker_is_found_on_a_later_page_of_notes(hubspot):
+    fake, crm = hubspot
+    case_id = uuid4()
+    ticket_id = _create(crm, case_id=case_id)
+    event_id = uuid4()
+    for index in range(150):
+        note_id = str(50_000 + index)
+        marker = f"[resolve-review:{event_id}]" if index == 140 else "older agent note"
+        fake.notes[note_id] = {"hs_note_body": marker}
+        fake.ticket_notes.setdefault(ticket_id, []).append(note_id)
+    status, _ = crm.sync_review(ticket_id=ticket_id, event_id=event_id, case_id=case_id, case_version=0,
+                                review_status="IN_REVIEW", disposition=None, note="Replay after lost reply.")
+    assert status == "SUCCEEDED"
+    assert len(fake.ticket_notes[ticket_id]) == 150  # found on page 2, so no duplicate note
+    pages = [r for r in fake.requests if r.url.path.endswith("/associations/notes")]
+    assert len(pages) == 2
+
+
+def test_startup_check_passes_on_a_ready_account(hubspot):
+    _, crm = hubspot
+    assert crm.verify() == []
+
+
+def test_startup_check_names_each_problem():
+    fake = FakeHubSpot()
+    fake.missing_properties.add("resolve_case_id")
+    crm = HubSpotCrm(_config(stage_closed="9"), HubSpotTicketClient(_config(), transport=httpx.MockTransport(fake)))
+    assert crm.verify() == ["STAGE_CLOSED_NOT_IN_PIPELINE", "PROPERTY_NOT_FOUND"]
+    fake.fail_next.append(401)
+    assert crm.verify() == ["CRM_AUTH_REJECTED"]

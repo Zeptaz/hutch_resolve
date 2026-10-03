@@ -24,6 +24,7 @@ TICKET_PROPERTIES = ("resolve_operation_id", "resolve_case_id", "resolve_queue",
                      "resolve_evidence_state", "resolve_review_version")
 _REASON_LIMIT = 500
 _NOTE_LIMIT = 2000
+_MAX_NOTE_PAGES = 20
 _COMPLAINT_LABELS = {"BALANCE_RECHARGE": "Balance or recharge", "DATA_DEPLETION": "Data depletion",
                      "CONNECTIVITY": "Connectivity", "VAS_DISPUTE": "VAS dispute"}
 
@@ -159,16 +160,34 @@ class HubSpotTicketClient:
         return self._json(response).get("properties") or {}
 
     def review_note_exists(self, ticket_id: str, marker: str) -> bool:
-        response = self._request("GET", f"/crm/v4/objects/tickets/{ticket_id}/associations/notes",
-                                 params={"limit": "100"}, not_found_code="TICKET_NOT_FOUND")
-        note_ids = [str(item["toObjectId"]) for item in self._json(response).get("results") or []
-                    if item.get("toObjectId") is not None]
-        if not note_ids:
-            return False
-        response = self._request("POST", "/crm/v3/objects/notes/batch/read", body={
-            "inputs": [{"id": note_id} for note_id in note_ids], "properties": ["hs_note_body"]})
-        return any(marker in str((item.get("properties") or {}).get("hs_note_body") or "")
-                   for item in self._json(response).get("results") or [])
+        """Read the ticket's associated notes page by page (100 per page) looking for the marker."""
+        after: str | None = None
+        for _ in range(_MAX_NOTE_PAGES):
+            params = {"limit": "100", **({"after": after} if after else {})}
+            response = self._request("GET", f"/crm/v4/objects/tickets/{ticket_id}/associations/notes",
+                                     params=params, not_found_code="TICKET_NOT_FOUND")
+            page = self._json(response)
+            note_ids = [str(item["toObjectId"]) for item in page.get("results") or []
+                        if item.get("toObjectId") is not None]
+            if note_ids:
+                notes = self._request("POST", "/crm/v3/objects/notes/batch/read", body={
+                    "inputs": [{"id": note_id} for note_id in note_ids], "properties": ["hs_note_body"]})
+                if any(marker in str((item.get("properties") or {}).get("hs_note_body") or "")
+                       for item in self._json(notes).get("results") or []):
+                    return True
+            after = ((page.get("paging") or {}).get("next") or {}).get("after")
+            if not after:
+                return False
+        # Too many notes to scan: report unknown rather than risk writing a duplicate.
+        raise CrmUnavailable("CRM_NOTE_SCAN_INCOMPLETE")
+
+    def get_pipeline(self, pipeline_id: str) -> dict[str, Any]:
+        return self._json(self._request("GET", f"/crm/v3/pipelines/tickets/{pipeline_id}",
+                                        not_found_code="PIPELINE_NOT_FOUND"))
+
+    def get_ticket_property(self, name: str) -> dict[str, Any]:
+        return self._json(self._request("GET", f"/crm/v3/properties/tickets/{name}",
+                                        not_found_code="PROPERTY_NOT_FOUND"))
 
     def create_note(self, ticket_id: str, body: str) -> str:
         timestamp = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -199,10 +218,24 @@ class HubSpotCrm:
     def close(self) -> None:
         self._client.close()
 
-    def ticket_url(self, ticket_id: str) -> str | None:
-        if not self._config.portal_id:
-            return None
-        return f"{self._config.app_base}/contacts/{self._config.portal_id}/record/0-5/{ticket_id}"
+    def verify(self) -> list[str]:
+        """Startup check: the key works, the pipeline has the configured stages and the
+        idempotency property exists as a unique value. Returns problem codes, empty when ready."""
+        problems: list[str] = []
+        try:
+            pipeline = self._client.get_pipeline(self._config.pipeline_id)
+            stage_ids = {str(stage.get("id")) for stage in pipeline.get("stages") or []}
+            for name, stage in (("NEW", self._config.stage_new), ("IN_REVIEW", self._config.stage_in_review),
+                                ("CLOSED", self._config.stage_closed)):
+                if stage not in stage_ids:
+                    problems.append(f"STAGE_{name}_NOT_IN_PIPELINE")
+            for name in TICKET_PROPERTIES:
+                prop = self._client.get_ticket_property(name)
+                if name == "resolve_operation_id" and not prop.get("hasUniqueValue"):
+                    problems.append("OPERATION_ID_NOT_UNIQUE")
+        except (CrmUnavailable, CrmRejected) as exc:
+            problems.append(exc.code)
+        return problems
 
     def _stage_for(self, review_status: str) -> str:
         return {"NEW": self._config.stage_new, "IN_REVIEW": self._config.stage_in_review,

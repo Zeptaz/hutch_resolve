@@ -515,6 +515,15 @@ class ResolveFacade:
                 if reported_subscription is None or reported_subscription == str(target["target_id"]):
                     result["eligible_actions"].append({"action_type": "DEACTIVATE_VAS", "target_id": target["target_id"],
                                                         "target_label": target["target_label"]})
+        elif (complaint_type == "BALANCE_RECHARGE" and statement is not None and statement.complete
+              and result["evidence_state"] == "SUFFICIENT"
+              and any(item.kind == "VAS_CHARGE" for item in statement.postings)):
+            # Scenario A: a fully reconciled balance that includes a recurring VAS charge offers the
+            # same confirmed future-renewal stop as a VAS dispute, ahead of a human review. Past
+            # charges are unchanged; conflicting or partial evidence never reaches this branch.
+            result["eligible_actions"][0:0] = [
+                {"action_type": "DEACTIVATE_VAS", "target_id": target["target_id"], "target_label": target["target_label"]}
+                for target in self._provider.eligible_vas_targets(context.sandbox_id, context.account_id)]  # type: ignore[attr-defined]
         investigation_id = uuid4()
         created_at = datetime.now(UTC)
         source_status = alternate_source_status if statement is None else [{
@@ -683,12 +692,16 @@ class ResolveFacade:
                 raise ResolveError(422, "ACTION_NOT_ALLOWED", "This one-shot package cannot be activated for the current account state",
                                    details={"reason": "BALANCE_TOO_LOW" if target and target.get("balance_minor") is not None
                                             and target["balance_minor"] < target["price_minor"] else "OFFER_INELIGIBLE"})
-            consequences = {
-                "DEACTIVATE_VAS": f"Stop future renewals for {target['label']}; past charges remain under investigation.",
-                "SEND_SETTINGS_INSTRUCTIONS": f"Send setup instructions for {target['label']}; this will not change network service.",
-                "CREATE_REVIEW_TICKET": f"Create a human review request for {target['label']}; no account change is made now.",
-                "ACTIVATE_PACKAGE": _package_terms_text(target),
-            }[action_type]
+            # Package terms need price/data fields that other targets do not have, so
+            # build them only for a package proposal (a dict literal evaluates every value).
+            if action_type == "ACTIVATE_PACKAGE":
+                consequences = _package_terms_text(target)
+            else:
+                consequences = {
+                    "DEACTIVATE_VAS": f"Stop future renewals for {target['label']}; past charges remain under investigation.",
+                    "SEND_SETTINGS_INSTRUCTIONS": f"Send setup instructions for {target['label']}; this will not change network service.",
+                    "CREATE_REVIEW_TICKET": f"Create a human review request for {target['label']}; no account change is made now.",
+                }[action_type]
             package_terms = ({"name": target["label"], "price_minor": target["price_minor"], "currency": "LKR",
                 "data_bytes": target["data_bytes"], "validity_seconds": target["validity_seconds"], "recurring": False}
                 if action_type == "ACTIVATE_PACKAGE" else None)
@@ -922,7 +935,8 @@ class ResolveFacade:
             FOR SHARE OF b,c,s
         """), {"binding": consent.binding_id, "sandbox": context.sandbox_id,
                "account": context.account_id}).mappings().one_or_none()
-        if (binding is None or binding["conversation_id"] != consent.conversation_id
+        # Compare IDs by value: facade results replayed from JSON carry string IDs.
+        if (binding is None or str(binding["conversation_id"]) != str(consent.conversation_id)
                 or binding["voice_session_id"] != consent.voice_session_id
                 or binding["session_id"] != context.session_id or binding["role"] != "CUSTOMER"
                 or binding["account_id"] != binding["session_account_id"]

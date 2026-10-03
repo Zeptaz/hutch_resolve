@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from conftest import ACCOUNT_A, ACCOUNT_D, Harness, customer, details, text
+from conftest import ACCOUNT_A, ACCOUNT_D, ACCOUNT_F, Harness, customer, details, text
 from fakes import FakeModel, example, extraction
 from resolve.conversation.dto import Channel, KnowledgeCard, ReceiptReference, VoiceConsentEvidence
 from resolve.conversation.errors import ResolveError
@@ -176,3 +176,29 @@ def test_conflicting_evidence_still_allows_human_review(hm: Harness) -> None:
     result = hm.send(ctx, hm.turn(conv, text("I want a person")))
     assert next(c for c in result.cards if c.type == "confirmation").data.action_type == "CREATE_REVIEW_TICKET"
     assert hm.facade.escalation_reasons == ["Customer asked for a person to review this case."]
+
+
+def test_follow_up_offer_invalidated_by_the_finished_first_action_is_offered_again(h: Harness) -> None:
+    """F lists VAS stop then review. The review is offered while the VAS stop is still running; when
+    that finishes, Resolve invalidates the review proposal. Accepting it must not dead-end."""
+    ctx = customer(ACCOUNT_F)
+    conv = h.open(ctx)
+    offered = h.send(ctx, h.turn(conv, details("VAS_DISPUTE")))
+    first = next(c for c in offered.cards if c.type == "confirmation").data
+    assert first.action_type == "DEACTIVATE_VAS"
+    accepted = h.send(ctx, h.turn(conv, {"type": "action_decision", "proposal_id": str(first.id),
+                                         "proposal_hash": first.proposal_hash, "decision": "ACCEPT"}))
+    follow_up = next(c for c in accepted.cards if c.type == "confirmation").data
+    assert follow_up.action_type == "CREATE_REVIEW_TICKET"
+
+    h.facade.fail_next["confirm_action"] = ResolveError("PROPOSAL_INVALIDATED")
+    refreshed = h.send(ctx, h.turn(conv, {"type": "action_decision", "proposal_id": str(follow_up.id),
+                                          "proposal_hash": follow_up.proposal_hash, "decision": "ACCEPT"}))
+    again = next(c for c in refreshed.cards if c.type == "confirmation").data
+    assert again.action_type == "CREATE_REVIEW_TICKET" and again.id != follow_up.id
+    assert refreshed.reply_text.startswith("Things changed since that offer was made")
+    assert refreshed.pending_question.code == "CONFIRM_ACTION"
+
+    done = h.send(ctx, h.turn(conv, {"type": "action_decision", "proposal_id": str(again.id),
+                                     "proposal_hash": again.proposal_hash, "decision": "ACCEPT"}))
+    assert done.operation_ids

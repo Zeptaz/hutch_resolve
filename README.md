@@ -25,7 +25,7 @@ python -m pip install -r requirements-dev.txt
 python -m uvicorn backend.resolve.app.main:app --host 127.0.0.1 --port 8080
 ```
 
-The application reads `DATABASE_URL` and `SANDBOX_DATABASE_URL` from `.env`; Resolve uses `hutch_resolve_app` for business state and the separate `hutch_sandbox` role for synthetic writes and configured one-shot fault controls. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0007_conversation_runtime`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003, and revisions 0002-0007 add lifecycle, investigation, proposal/confirmation, review sync, Voice consent fencing and conversation persistence. Opt-in PostgreSQL tests verify action recovery, review sync, text replay, guest upgrade and signed Voice confirmation.
+The application reads `DATABASE_URL` and `SANDBOX_DATABASE_URL` from `.env`; Resolve uses `hutch_resolve_app` for business state and the separate `hutch_sandbox` role for synthetic writes and configured one-shot fault controls. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and the current schema head `0009_package_activation`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003, and revisions 0002-0009 add lifecycle, investigation, proposal/confirmation, review sync, Voice consent fencing, conversation persistence, audit remediation and package activation. Opt-in PostgreSQL tests verify action recovery, review sync, text replay, guest upgrade and signed Voice confirmation.
 
 ## Start the frontend
 
@@ -36,15 +36,33 @@ HTTP logs are compact JSON with request ID, route template, method, status, elap
 
 The database volume is Docker-managed, outside the OneDrive-synced repository. `docker compose down -v` permanently removes local database history.
 
+## Local demo database and tests (macOS/Linux)
+
+- `sh scripts/dev_db.sh reset --demo` recreates a disposable PostgreSQL on `127.0.0.1:55434` (container `hutch-dev-db`, never the shared compose database), migrates it to head, clears the seeded faults and arms one CRM outage. It prints the URLs for `.env`. Restart the backend afterwards.
+- A fresh fixture run arms 13 one-shot faults (late and duplicate postings, VAS write failures, a CRM outage), so the first journeys after a reset are deliberately imperfect. `python scripts/demo_faults.py list` shows them; `clear` gives a predictable happy path; `arm crm-outage` (or `crm-lost-response`, `vas-rejected`, ...) prepares exactly the failure to show.
+- `sh scripts/run_db_tests.sh` runs every opt-in PostgreSQL test file on its own freshly reset database (a separate `hutch-test-db` on port 55435, never the app's database) with the derived fixture runs the tests expect. The default `pytest` run skips all of them, so run this before calling the backend verified.
+- Demo phrasing: "this morning" and "today" resolve to the 2 October fixture day; "yesterday" means 1 October and finds no events.
+
+## HubSpot CRM (optional)
+
+Review tickets can go to a real HubSpot account instead of the mock CRM. Only synthetic case references and summaries are sent; sync is one-way (Resolve to HubSpot).
+
+1. In HubSpot, create a Service Key (Settings, Integrations, Service Keys) with ticket read/write and ticket schema read/write. Put it in `.env` as `HUBSPOT_ACCESS_TOKEN`; never commit or share it.
+2. `python scripts/hubspot_setup.py check --write-env` writes the Hub ID, web domain, pipeline and stage IDs to `.env`; `properties` creates the `resolve_*` ticket fields; `spike --pause` runs a live create/duplicate/note/stage test and archives its tickets.
+3. Set `CRM_PROVIDER=hubspot` and restart. The backend checks the key, stages and properties at startup and logs a warning if anything is missing.
+4. Optional agent link: set `VITE_CRM_NAME=HubSpot` and `VITE_CRM_TICKET_URL=https://<web domain>/contacts/<hub id>/record/0-5/{id}` in `frontend/.env.local`.
+
+Fallback: `CRM_PROVIDER=mock` and a restart restore the built-in mock CRM. Details, limits and verification: [docs/plans/hubspot-crm.md](docs/plans/hubspot-crm.md).
+
 ## Repository map
 
 - `database/migrations/001_sandbox.sql`: synthetic CRM, charging, recharge, product/VAS, usage/quota and service-assurance records.
 - `database/migrations/002_resolve.sql` and `003_scope_constraints.sql`: initial Resolve persistence and cross-run ownership constraints.
 - `database/seed.sql`: fixture version 2 with six deterministic prepaid support cases and provider fault profiles.
 - `backend/resolve/app/`: FastAPI startup, health/readiness, error envelope, session lifecycle, auth context, and account endpoint.
-- `backend/resolve/providers/`: vendor-neutral PostgreSQL adapter and deterministic ledger reconciliation function.
+- `backend/resolve/providers/`: vendor-neutral PostgreSQL adapter and deterministic ledger reconciliation function; `crm.py` (external CRM port) and `hubspot.py` (optional HubSpot adapter).
 - `backend/resolve/migrations/`: Alembic environment, non-destructive baseline adoption, lifecycle schema and case-investigation persistence.
-- `scripts/`: start/stop/reset and fixture UUID generation.
+- `scripts/`: start/stop/reset (PowerShell), fixture UUID generation, `dev_db.sh` and `run_db_tests.sh` (macOS/Linux), `demo_faults.py` (fault control) and `hubspot_setup.py` (HubSpot setup and spike).
 - `docs/mock-environment.md`: relationships, assumptions, failure modes and future provider contracts.
 
 ## Boundaries and security

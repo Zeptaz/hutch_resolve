@@ -150,6 +150,30 @@ Gate 2 (19:30): two clean runs, or ship with the mock and keep HubSpot as propos
 - [ ] `context.md` and this plan updated with verification and commit hash.
 - [ ] Feature freeze 21:00; rotate or delete the Service Key after judging.
 
+## Full audit, 2026-10-03 (after merging `ResolveDev` `46d41ed`)
+
+Method: every opt-in PostgreSQL test file on its own fresh database (`sh scripts/run_db_tests.sh`), the default suite, frontend typecheck/lint/build, and browser runs of scenario A and the HubSpot handoff with the real model and real HubSpot. Fixes are on this branch; items marked "Harry" or "Jayith" need their review before merge.
+
+| # | Severity | Owner | Finding | Fix on this branch | Verified |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Critical | Harry (`d5c881a`) | `propose_action` built a dict literal that always evaluated the package terms, so every non-package proposal (VAS stop, settings, review ticket) raised `KeyError: 'price_minor'` | Package text built only for `ACTIVATE_PACKAGE` | DB suites; browser scenario A |
+| 2 | Critical | Harry (fixture) | Opening balance snapshots were at 2 Oct 08:00, so "this morning"/"today" windows (00:00 start) never reconciled: the headline line could not work | Five opening snapshots moved to 1 Oct 00:00; amounts and sequences unchanged; `check-sandbox.sql` passes | New scenario DB test; browser A reconciles to LKR 420 |
+| 3 | High | Harry (policy) | Scenario A never offered the VAS stop (only `VAS_DISPUTE` could), contrary to release acceptance, the product spec and the conversation tests | Complete + SUFFICIENT balance ledger with a `VAS_CHARGE` lists `DEACTIVATE_VAS` before the review | New scenario DB test; browser A: renewal stop SUCCEEDED |
+| 4 | High | Demo operations | Every reset arms 13 one-shot faults: A's first reads come back partial and the VAS stop fails up to four times. No tool existed to control them | `scripts/demo_faults.py` (list/clear/arm) and `scripts/dev_db.sh reset --demo` | Used for every browser run |
+| 5 | High | Tevin | A follow-up offer made while the previous action ran was invalidated when it finished, so "yes" hit a dead end | `_confirm` re-offers the same action on a fresh proposal | Unit test; browser A |
+| 6 | High | Tevin (Voice) | A retried Voice turn that had produced a new offer returned `IDEMPOTENCY_CONFLICT` (the fingerprint included the bridge-derived presentation ID) | Fingerprint excludes `presentation_response_id` | `test_postgres_runtime` |
+| 7 | Medium | Tevin | If Resolve refused the first offer (target changed), the whole turn failed | Skip to the next eligible action | Conversation DB fault test |
+| 8 | Medium | Harry | Voice binding check compared a UUID with a string ID, answering `NOT_FOUND` | Compare IDs by value | `test_audit_domain_repairs` |
+| 9 | Medium | Tevin (mine) | HubSpot duplicate-note check read only the first 100 notes; no startup check | Paging (20 pages max), startup verification, dead code removed | Unit tests; live check "ready" |
+| 10 | Low | Tevin (mine) | Resolve-offered review reason claimed the evidence needed checking even when it reconciled | Neutral, always-true reason | Browser A |
+| 11 | Process | All | The default suite skips every database test, which is how items 1-8 and the earlier six bugs reached `ResolveDev` | `scripts/run_db_tests.sh` | 14 files, all pass |
+| 13 | Medium | Process | Running the database tests against the app's own database let the app's worker execute test operations; in HubSpot mode it sent three test tickets to HubSpot | `run_db_tests.sh` uses its own container and port (55435) and removes it afterwards | Test tickets archived; rerun on 55435 |
+| 12 | Docs | All | README readiness revision stale (`0007`) and no macOS reset path | README updated; macOS scripts | Reviewed |
+
+Merge resolution: upstream already fixed `case_status`, the `escalation_reason` column (in `0009_package_activation`; our `0009_escalation_reason` was dropped), the readiness revision and the realm header. Still needed from this branch: `turn_claims`, `propose_escalation` filter, confirmation `simulation`, the conversation adapter reason, and items 1-10 above.
+
+Not fixed (reported): Harry finding 12 (a provisional ledger is labelled SUFFICIENT; existing xfail); four frontend lint warnings (Jayith); Playwright suite not run here (browsers not installed); live Voice untested (no Voice service); Sinhala/Tamil wording not rechecked in the browser; HubSpot call chain can outlast the 15 s lease with more than one worker.
+
 ## Verification log
 
 | Date | Task | Verification | Result |
@@ -161,4 +185,5 @@ Gate 2 (19:30): two clean runs, or ship with the mock and keep HubSpot as propos
 | 2026-10-03 | Phase 1 live spike | `scripts/hubspot_setup.py check/properties/spike --keep` against the team HubSpot account; UI check in browser | Gate 1 passed; duplicate create is HTTP 400 (handled); default suite 459 passed, 41 skipped; writer integration 6 passed |
 | 2026-10-03 | Phases 5-6 browser run | Worktree app (`CRM_PROVIDER=hubspot`) on 8080, frontend on 5173, real HubSpot | Customer D to HubSpot ticket, agent start and close mirrored in HubSpot, dashboard link verified; 7 defects patched (table above); default suite 459 passed, 41 skipped; DB suites 15 passed on a fresh database; frontend typecheck/lint pass |
 | 2026-10-03 | Phase 6 natural language and outage | Gemini key loaded (`readyz` model true); browser run on fresh database; realm-header fix; adapter test | Outage then delivery verified; default suite 462 passed, 41 skipped; frontend typecheck/lint pass |
+| 2026-10-03 | Merge `46d41ed` and full audit | `sh scripts/run_db_tests.sh` (14 files), default suite, frontend typecheck/lint/build, browser A with Gemini + HubSpot | All DB files pass; default 457 passed, 44 skipped; 12 findings fixed (audit table) |
 | 2026-10-03 | Phase 0 integration baseline | CRM-related opt-in PostgreSQL files on a fresh database | Blocked by `ResolveDev` schema drift; to be reported to Harry |

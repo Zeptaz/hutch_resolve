@@ -40,8 +40,9 @@ from .errors import HTTP_STATUS, ResolveError
 from .packages import UsageSummary
 from .dto import PackageOfferView
 
-# Reason stored with a review that Resolve offers on its own (conflicting or missing evidence).
-OFFERED_REVIEW_REASON = "Resolve offered a human review because the evidence needs a person to check it."
+# Reason stored with a review that Resolve offers on its own. It must stay true whatever the
+# evidence state, because the same offer follows complete, partial and conflicting findings.
+OFFERED_REVIEW_REASON = "Offered by Resolve so a person can check this case."
 
 _STATUS_FALLBACK = {
     400: "VALIDATION_ERROR",

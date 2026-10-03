@@ -63,3 +63,11 @@ Acceptance: a full A journey produces the same case/action/receipt through text 
 [Audit findings and verification limits](../audits/2026-10-03-resolve.md). AUD-01 deterministic replies for actions/cases/financial outcomes now bypass freeform rewriting; number/sign, outcome polarity and supplied-link regression tests are added. Unit/conversation tests pass, but no real-model semantic qualification has run. For AUD-03, normalized TEXT input is saved and same-ID recovery uses atomic expected-version claims; trusted Voice consent is never reconstructed. Abandoned Voice and legacy claims with no saved payload fail closed and can still block later conversation turns until an authorized reconciliation policy exists. See current aggregate results and PostgreSQL blockers in [`context.md`](../../context.md).
 
 Update this plan and root context.md after each implemented and verified correction, recording commands/results and remaining work.
+
+## 2026-10-03 audit changes (branch `tevin/hubspot-crm`)
+
+- Review proposals go through Resolve's `propose_escalation` with a reason (customer's own, or a neutral Resolve-offer reason); `tests/test_conversation_review_reason.py`.
+- `_propose_first` skips to the next eligible action when Resolve refuses one whose target changed, instead of failing the turn.
+- `_confirm` re-offers an action on a fresh proposal when the earlier offer was invalidated by a finished action (follow-up offers after a VAS stop); `test_follow_up_offer_invalidated_by_the_finished_first_action_is_offered_again`.
+- `turn_fingerprint` excludes the bridge-derived `voice_evidence.presentation_response_id`, so a retried Voice turn replays instead of conflicting.
+- Verification: default suite 457 passed, 44 skipped; conversation DB suites pass on fresh databases; browser scenario A with Gemini.

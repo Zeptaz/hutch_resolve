@@ -123,6 +123,10 @@ def create_app(
         if sandbox_engine is not None and hasattr(active_database, "engine") and resolve_facade is None:
             if active_settings.crm_provider == "hubspot" and active_settings.hubspot is not None:
                 crm = HubSpotCrm(active_settings.hubspot)
+                problems = await asyncio.to_thread(crm.verify)
+                if problems:
+                    logger.warning("HubSpot CRM check failed (%s); review tickets will not reach HubSpot until "
+                                   "this is fixed. Run: python scripts/hubspot_setup.py check", ", ".join(problems))
             logger.info("CRM provider for review tickets: %s", "hubspot" if crm else "mock")
             runner = OperationRunner(active_database.engine, sandbox_engine, crm)
             application.state.operation_runner = runner

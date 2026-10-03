@@ -119,6 +119,8 @@ ReceiptView: id, case_id, revision, issued_at, issue, window, findings, calculat
 
 Human-review request creates a CREATE_REVIEW_TICKET proposal; normal confirmation delivers it. Handoff queues BILLING_REVIEW/TECHNICAL_SUPPORT, with Resolve reference and nullable actual provider ticket ID. Delivery state PENDING/DELIVERED/FAILED/REVIEW_REQUIRED is independent of local review. Conflict still permits review/guidance. VAS deactivation does not close a historic charge dispute.
 
+Scenario A eligibility (proposed on `tevin/hubspot-crm`, pending Harry's review): for BALANCE_RECHARGE, when the charging statement is complete, the evidence is SUFFICIENT and the window contains a VAS_CHARGE posting, each active recurring VAS is eligible for DEACTIVATE_VAS, listed before CREATE_REVIEW_TICKET. It stops future renewals only. Partial, provisional or conflicting evidence never adds it.
+
 ## Dashboard contract
 
 Agent cookie/role/run required. GET queue filters: review_status, complaint_type, evidence_state, delivery_state, search(case UUID or exact synthetic line), cursor, limit. Queue membership is a case with status REVIEW_REQUIRED, an accepted escalation/delivery record, or an existing agent review event; a merely proposed/unconfirmed handoff does not add a case. Sort updated_at DESC then ID DESC. Rows contain case_id,line_alias,complaint_type,evidence_state,review_status,delivery_state,updated_at,version. No analytics/admin scope.
@@ -186,6 +188,8 @@ Typed in-process ports: get_account, get_statement, list_recharges, list_offers/
 - Review sync writes one note per review event tagged `resolve-review:<event_id>` (checked before writing), then sets the pipeline stage (NEW, IN_REVIEW, CLOSED mapped by configuration) and `resolve_review_version`. An older case version than the ticket's is `FAILED` with `STALE_REVIEW_VERSION`. Review notes are agent-internal and HubSpot is an agent tool.
 - Outcome mapping: timeout, connection error, HTTP 5xx or 429 are provider-unavailable (UNKNOWN, retried, no success claimed); 401/403 are `FAILED` with `CRM_AUTH_REJECTED`; other 4xx are `FAILED` with `PROVIDER_REJECTED`; a missing ticket is `FAILED` with `TICKET_NOT_FOUND`.
 - Sync is one-way. Changes made in HubSpot are not read back into Resolve.
+- Startup check (non-fatal): the key, the configured pipeline stages and the `resolve_*` properties (unique `resolve_operation_id`) are verified when the app starts; problems are logged as warnings.
+- The duplicate-note check pages through all associated notes (100 per page, at most 20 pages); a larger history is reported as provider-unavailable rather than risking a duplicate note.
 
 ## Configuration and verification
 

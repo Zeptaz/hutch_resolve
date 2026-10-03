@@ -227,7 +227,10 @@ def test_voice_proposal_presentation_confirmation_and_replay(runtime):
         assert first.status_code == 200, first.text
         response = first.json()
         assert response["response_id"]
-        assert response["proposal"] is None
+        # A's first offer is the VAS renewal stop; after it is accepted, the remaining option
+        # (a human review of the past charge) may be offered next.
+        assert offer.action_type == "DEACTIVATE_VAS"
+        assert response["proposal"] is None or response["proposal"]["action_type"] == "CREATE_REVIEW_TICKET"
         with engine.connect() as connection:
             confirmation = connection.execute(text("""
                 SELECT voice_binding_id,voice_turn_id,voice_presentation_response_id

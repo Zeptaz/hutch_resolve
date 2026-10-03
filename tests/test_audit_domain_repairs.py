@@ -156,7 +156,8 @@ def test_postgres_voice_confirmation_requires_recorded_presentation_and_persists
         current = facade.get_case(context, case["id"])
         proposal = facade.propose_action(context, case_id=case["id"], expected_version=current["version"],
             investigation_id=investigation["id"], action_type="CREATE_REVIEW_TICKET",
-            target_id=eligible["target_id"], request_key=f"voice-domain-proposal-{uuid4()}")
+            target_id=eligible["target_id"], request_key=f"voice-domain-proposal-{uuid4()}",
+            escalation_reason="Voice integration test review.")
         binding_id, voice_session_id, response_id, presentation_turn = uuid4(), str(uuid4()), str(uuid4()), uuid4()
         with engine.begin() as connection:
             connection.execute(text("""
