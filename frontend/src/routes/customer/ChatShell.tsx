@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowDown, Bot, FolderOpen, Package, Phone, SendHorizontal } from 'lucide-react'
+import { ArrowDown, FolderOpen, Package, Phone, SendHorizontal } from 'lucide-react'
 import { newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
@@ -12,13 +12,13 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } 
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useI18n, type Translate } from '@/i18n/context'
-import { formatTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { CasePanel, CasePanelBody, type CasePanelProps } from './CasePanel'
 import { ChatCard, CitationList } from './cards/ChatCards'
 import { ConfirmationCard, type ProposalState } from './cards/ConfirmationCard'
 import { OperationTracker } from './cards/OperationTracker'
 import { QuestionPrompt } from './QuestionPrompt'
+import { BotAvatar, Bubble } from './ChatBubble'
 import { VoiceShell } from './VoiceShell'
 
 // Each language is named in its own script so it is recognisable whatever the current UI language.
@@ -275,13 +275,12 @@ export function ChatShell({ session, onDemoLogin }: {
     !!pending &&
     !!conversation?.messages.some((m) => m.result?.cards.some((c) => c.type === 'confirmation' && c.data.id === pending.id))
 
-  if (voiceOpen && conversation && session.role === 'CUSTOMER') {
-    const returnToChat = () => {
-      setVoiceOpen(false)
-      setCaseRefresh((n) => n + 1)
-      void reload(conversation.id)
-    }
-    return <VoiceShell session={session} conversationId={conversation.id} onClose={returnToChat} onCallEnd={returnToChat} />
+  // The call replaces the message list but keeps the header, language switch and case panel.
+  const inCall = voiceOpen && !!conversation && session.role === 'CUSTOMER'
+  const returnToChat = () => {
+    setVoiceOpen(false)
+    setCaseRefresh((n) => n + 1)
+    if (conversation) void reload(conversation.id)
   }
 
   return (
@@ -289,7 +288,7 @@ export function ChatShell({ session, onDemoLogin }: {
       <header className="flex items-center justify-between gap-3 border-b px-4 py-3">
         <BrandMark subtitle={t('brand.subtitle')} />
         <div className="flex items-center gap-2">
-          {session.role === 'CUSTOMER' && (
+          {session.role === 'CUSTOMER' && !inCall && (
             <Button variant="outline" size="sm" onClick={() => setVoiceOpen(true)} disabled={!conversation || turnOutcomeUncertain}>
               <Phone aria-hidden /> {t('chat.call')}
             </Button>
@@ -350,6 +349,18 @@ export function ChatShell({ session, onDemoLogin }: {
       </header>
 
       <div className="flex min-h-0 flex-1">
+        {inCall && conversation ? (
+          <VoiceShell
+            session={session}
+            conversationId={conversation.id}
+            onClose={returnToChat}
+            onCallEnd={returnToChat}
+            onResult={() => {
+              setCaseRefresh((n) => n + 1)
+              void reload(conversation.id)
+            }}
+          />
+        ) : (
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="relative flex min-h-0 flex-1 flex-col">
             <div ref={scrollRef} onScroll={checkMoreBelow} className="relative flex-1 overflow-y-auto" aria-live="polite">
@@ -481,6 +492,7 @@ export function ChatShell({ session, onDemoLogin }: {
             </div>
           </form>
         </main>
+        )}
 
         <CasePanel {...panelProps} />
       </div>
@@ -546,67 +558,6 @@ function FailedTurnNotice({ failed, onRetry, t }: { failed: FailedTurn; onRetry:
 function Welcome() {
   const { t } = useI18n()
   return <Bubble speaker="ASSISTANT">{t('chat.welcome')}</Bubble>
-}
-
-function Bubble({
-  speaker,
-  time,
-  animate,
-  pending,
-  children,
-}: {
-  speaker: 'USER' | 'ASSISTANT'
-  time?: string
-  /** Rise in from the speaker's corner (new messages only). */
-  animate?: boolean
-  /** The customer's message while it is still being sent. */
-  pending?: boolean
-  children: React.ReactNode
-}) {
-  const { t } = useI18n()
-  const mine = speaker === 'USER'
-  return (
-    <div
-      className={cn(
-        'flex max-w-[85%] gap-2',
-        mine ? 'ml-auto origin-bottom-right flex-row-reverse' : 'mr-auto origin-bottom-left',
-        animate && 'animate-bubble-in',
-      )}
-    >
-      {!mine && <BotAvatar />}
-      <div className={cn('flex flex-col gap-1', mine && 'items-end')}>
-        <span className="sr-only">{mine ? t('chat.youSaid') : t('chat.assistantSaid')}</span>
-        <div
-          className={cn(
-            'rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap transition-opacity',
-            mine ? 'rounded-br-md bg-primary text-primary-foreground' : 'rounded-bl-md bg-muted',
-            pending && 'opacity-80',
-          )}
-        >
-          {children}
-        </div>
-        {pending ? (
-          <span className="text-[11px] text-muted-foreground">{t('chat.sending')}</span>
-        ) : (
-          time && <time className="text-[11px] text-muted-foreground">{formatTime(time)}</time>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function BotAvatar({ thinking }: { thinking?: boolean }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        'mt-1 grid size-7 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground',
-        thinking && 'animate-thinking-ring',
-      )}
-    >
-      <Bot className="size-4" />
-    </span>
-  )
 }
 
 const STILL_WORKING_MS = 3500

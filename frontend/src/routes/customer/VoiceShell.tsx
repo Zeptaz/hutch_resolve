@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { Activity, ArrowLeft, Mic, MicOff, PhoneOff, ShieldCheck, Volume2 } from 'lucide-react'
+import { ArrowLeft, Mic, MicOff, PhoneOff, RefreshCw, Volume2 } from 'lucide-react'
 import { API_MODE, newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
-import type { MessageRequest, OperationView, SessionView } from '@/api/types'
-import { OperationBadge, StatusBadge } from '@/components/StatusBadge'
+import type { Decision, MessageRequest, OperationView, SessionView } from '@/api/types'
+import { StatusBadge, type Tone } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
 import { useI18n } from '@/i18n/context'
-import { formatTime, humanize } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { VoiceCall, type CallState } from '@/voice/call'
 import type { VoiceProposal, VoiceResolveResult } from '@/voice/contracts'
+import { Bubble } from './ChatBubble'
+import { ConfirmationCard } from './cards/ConfirmationCard'
+import { OperationCard } from './cards/OperationTracker'
 
 type Offer = {
   data: VoiceProposal
-  sending: boolean
+  /** The answer being sent, if any. */
+  sending: false | Decision
   error: unknown
   retry: { decision: 'ACCEPT' | 'DECLINE'; body: MessageRequest } | null
 }
@@ -29,13 +33,15 @@ function sameIds(left: string[], right: string[]) {
 }
 
 /** Customer call panel mounted by ChatShell; it shares the chat's session and conversation. */
-export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
+export function VoiceShell({ session, conversationId, onClose, onCallEnd, onResult }: {
   session: SessionView
   conversationId: string
   onClose: () => void
   onCallEnd: () => void
+  /** Resolve answered a spoken turn; the case panel beside the call can refresh. */
+  onResult?: () => void
 }) {
-  const { language } = useI18n()
+  const { language, t } = useI18n()
   const call = useMemo(() => new VoiceCall(conversationId), [conversationId])
   const state = useSyncExternalStore(call.subscribe, call.getState, call.getState)
   const [caption, setCaption] = useState<{ user: string | null; reply: string | null }>({ user: null, reply: null })
@@ -46,6 +52,10 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   const [trackingExhaustedKey, setTrackingExhaustedKey] = useState<string | null>(null)
   const lastPhase = useRef<CallState['phase']>('idle')
   const textDecisionPending = useRef(false)
+  const onResultRef = useRef(onResult)
+  useEffect(() => {
+    onResultRef.current = onResult
+  })
 
   const syncOperations = useCallback(async (additionalIds: string[] = []) => {
     setTrackingExhaustedKey(null)
@@ -78,6 +88,7 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         // operation_status is only a coarse Voice wire hint and does not contain IDs.
         // Resolve's scoped conversation is the source of truth, including older pending work.
         void syncOperations()
+        onResultRef.current?.()
       },
       onFallback: (_responseId, text) => setCaption((previous) => ({ ...previous, reply: text })),
     })
@@ -139,7 +150,7 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
     // A text decision and live Voice turn must not race to claim the same conversation.
     textDecisionPending.current = true
     if (state.phase === 'live' || state.phase === 'connecting' || state.phase === 'requesting') call.stop()
-    setOffer({ ...current, sending: true, error: null })
+    setOffer({ ...current, sending: decision, error: null })
     let body = current.retry?.body
     try {
       if (!body) {
@@ -151,7 +162,7 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         }
       }
       const result = await customerApi.sendMessage(conversationId, body)
-      setCaption({ user: decision === 'ACCEPT' ? 'Yes, go ahead' : 'No, leave it', reply: result.reply_text })
+      setCaption({ user: decision === 'ACCEPT' ? t('confirm.yes') : t('confirm.no'), reply: result.reply_text })
       setOffer(null)
       void syncOperations(result.operation_ids)
       textDecisionPending.current = false
@@ -166,108 +177,134 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
     }
   }
 
-  const proposalStatus = state.proposal?.data.id === offer?.data.id ? state.proposal.status : 'text-only'
+  // Voice tracks the offer it read aloud; any other offer can only be answered by tap.
+  const proposalStatus = state.proposal && state.proposal.data.id === offer?.data.id ? state.proposal.status : 'text-only'
   const byTap = state.phase !== 'live' || proposalStatus === 'text-only' || proposalStatus === 'interrupted'
-  const expired = offer ? Date.parse(offer.data.expires_at) <= Date.now() : false
-  const active = state.phase === 'live'
+  const live = state.phase === 'live'
+  const connecting = state.phase === 'requesting' || state.phase === 'connecting'
   const visibleOperations = operations.filter((item) => watchIds.includes(item.id))
   const operationTrackingExhausted = trackingExhaustedKey === watchIds.join('|')
 
   if (session.role !== 'CUSTOMER') return (
-    <section className="rounded-3xl bg-muted/70 p-6 text-center">
-      <p className="font-medium">Sign in to a demo line before starting a call.</p>
-      <Button variant="outline" className="mt-4" onClick={close}>Back to chat</Button>
-    </section>
+    <main className="flex min-w-0 flex-1 flex-col items-center px-4 py-6">
+      <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-2xl bg-muted/70 p-6 text-center">
+        <p className="font-medium">{t('voice.signInFirst')}</p>
+        <Button variant="outline" onClick={close}><ArrowLeft aria-hidden /> {t('voice.back')}</Button>
+      </div>
+    </main>
   )
 
+  const badge: { tone: Tone; label: string } = live
+    ? state.muted
+      ? { tone: 'warning', label: t('voice.state.muted') }
+      : { tone: 'success', label: t(`voice.state.${state.activity}`) }
+    : connecting
+      ? { tone: 'info', label: t('voice.state.connecting') }
+      : { tone: 'neutral', label: t(state.phase === 'ended' ? 'voice.state.ended' : 'voice.state.idle') }
+  const hint = state.phase === 'live'
+    ? t(state.muted ? 'voice.hint.muted' : `voice.hint.${state.activity}`)
+    : t(`voice.hint.${state.phase}`)
+  const offerHint = proposalStatus === 'reading' ? t('voice.offer.reading')
+    : proposalStatus === 'awaiting' ? t('voice.offer.awaiting') : t('voice.offer.tap')
+
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-5" aria-label="Voice call">
-      <div className="mx-auto flex w-full max-w-xl items-center justify-between">
-        <Button variant="ghost" onClick={close}><ArrowLeft aria-hidden /> Back to chat</Button>
-        <StatusBadge tone={active ? 'success' : state.phase === 'ended' ? 'neutral' : 'info'}>
-          {active ? state.activity : state.phase}
-        </StatusBadge>
-      </div>
-
-      <div className="mx-auto flex w-full max-w-md flex-col items-center gap-5 rounded-3xl bg-muted/70 p-6 text-center">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold">Talk to Resolve</h1>
-          <p className="text-sm text-muted-foreground">Your call continues this chat and uses the same case.</p>
-        </div>
-        {state.phase === 'idle' || state.phase === 'ended' ? (
-          <Button className="size-24 rounded-full text-lg shadow-lg" onClick={() => void call.start()} aria-label="Start voice call">
-            <Mic aria-hidden className="size-8" />
-          </Button>
-        ) : (
-          <div className="grid size-24 place-items-center rounded-full bg-card text-primary shadow-md" aria-hidden>
-            {state.activity === 'speaking' ? <Volume2 className="size-9 animate-pulse" /> : state.muted ? <MicOff className="size-9" /> : <Mic className="size-9" />}
+    <main className="flex min-w-0 flex-1 flex-col" aria-label={t('voice.region')}>
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 py-6">
+          <div className="flex items-center justify-between gap-2">
+            <Button variant="ghost" size="sm" onClick={close}><ArrowLeft aria-hidden /> {t('voice.back')}</Button>
+            <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
           </div>
-        )}
-        <p className="text-xs text-muted-foreground" aria-live="polite">
-          {state.phase === 'requesting' ? 'Requesting a secure call…' : state.phase === 'connecting' ? 'Connecting…' :
-            active ? state.activity === 'listening' ? 'Listening' : state.activity === 'speaking' ? 'Speaking' : 'Thinking' :
-            state.phase === 'ended' ? 'Call ended. Continue by text or call again.' : 'Press the microphone to start.'}
-        </p>
-        {(caption.user || caption.reply) && <div className="w-full space-y-3 text-left" aria-live="polite">
-          {caption.user && <p className="ml-auto w-fit max-w-[90%] rounded-2xl bg-primary px-4 py-2 text-primary-foreground">{caption.user}</p>}
-          {caption.reply && <p className="w-fit max-w-[90%] rounded-2xl bg-card px-4 py-2">{caption.reply}</p>}
-        </div>}
-        {state.error && <p role="alert" className="text-sm text-destructive">
-          {state.error.kind === 'grant' ? describeError(state.error.error) : state.error.kind === 'mic' ?
-            'Microphone unavailable. Check browser permission or continue by text.' :
-            'Voice is unavailable. Continue by text.'}
-        </p>}
-        {active && <div className="flex gap-2">
-          <Button variant="outline" aria-pressed={state.muted} onClick={() => call.setMuted(!state.muted)}>
-            {state.muted ? <MicOff aria-hidden /> : <Mic aria-hidden />}{state.muted ? 'Unmute' : 'Mute'}
-          </Button>
-          <Button variant="destructive" onClick={() => call.stop()}><PhoneOff aria-hidden /> End call</Button>
-        </div>}
+
+          <section className="flex animate-bubble-in flex-col items-center gap-4 rounded-2xl bg-muted/70 px-4 py-7 text-center">
+            <div className="space-y-1">
+              <h1 className="text-xl font-semibold">{t('voice.title')}</h1>
+              <p className="text-sm text-muted-foreground">{t('voice.subtitle')}</p>
+            </div>
+            {state.phase === 'idle' || state.phase === 'ended' ? (
+              <Button className="size-20 rounded-full shadow-md [&_svg:not([class*='size-'])]:size-8" onClick={() => void call.start()} aria-label={t('voice.start')}>
+                <Mic aria-hidden />
+              </Button>
+            ) : (
+              <span
+                aria-hidden
+                className={cn(
+                  'grid size-20 place-items-center rounded-full bg-accent text-accent-foreground',
+                  (connecting || (live && state.activity === 'thinking')) && 'animate-thinking-ring',
+                )}
+              >
+                {live && state.activity === 'speaking' ? <Volume2 className="size-8 animate-pulse" /> : state.muted ? <MicOff className="size-8" /> : <Mic className="size-8" />}
+              </span>
+            )}
+            <p className="text-xs text-muted-foreground" aria-live="polite">{hint}</p>
+            {state.error && (
+              <p role="alert" className="text-sm text-destructive">
+                {state.error.kind === 'grant' ? describeError(state.error.error, t) : t(state.error.kind === 'mic' ? 'voice.err.mic' : 'voice.err.unavailable')}
+              </p>
+            )}
+            {live && (
+              <div className="flex gap-2">
+                <Button variant="outline" aria-pressed={state.muted} onClick={() => call.setMuted(!state.muted)}>
+                  {state.muted ? <MicOff aria-hidden /> : <Mic aria-hidden />}
+                  {t(state.muted ? 'voice.unmute' : 'voice.mute')}
+                </Button>
+                <Button variant="destructive" onClick={() => call.stop()}><PhoneOff aria-hidden /> {t('voice.end')}</Button>
+              </div>
+            )}
+          </section>
+
+          {(caption.user || caption.reply) && (
+            <div className="flex flex-col gap-3" aria-live="polite">
+              {caption.user && <Bubble key={`u:${caption.user}`} speaker="USER" animate>{caption.user}</Bubble>}
+              {caption.reply && <Bubble key={`r:${caption.reply}`} speaker="ASSISTANT" animate>{caption.reply}</Bubble>}
+            </div>
+          )}
+
+          {offer && (
+            <div className="flex animate-bubble-in flex-col gap-2">
+              <ConfirmationCard
+                proposal={offer.data}
+                state={offer.sending ? { kind: 'submitting', decision: offer.sending } : { kind: 'open' }}
+                disabled={!byTap}
+                lockedTo={offer.retry?.decision}
+                onDecide={(decision) => void answerByTap(decision)}
+              />
+              <p className="text-xs text-muted-foreground" aria-live="polite">{offerHint}</p>
+              {offer.error != null && (
+                <p role="alert" className="text-xs text-destructive">
+                  {describeError(offer.error, t)} {t(offer.retry ? 'voice.offer.uncertain' : 'voice.offer.checkChat')}
+                </p>
+              )}
+            </div>
+          )}
+
+          {watchIds.length > 0 && (
+            <div className="flex flex-col gap-3">
+              {visibleOperations.map((op) => (
+                <OperationCard key={op.id} op={op} className="animate-bubble-in" />
+              ))}
+              {visibleOperations.length < watchIds.length && !operationTrackingExhausted && (
+                <p role="status" className="rounded-2xl bg-muted/70 px-4 py-3 text-sm text-muted-foreground">{t('voice.ops.checking')}</p>
+              )}
+              {operationTrackingExhausted && (
+                <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-[1.5px] border-warning/70 bg-muted/70 px-4 py-3 text-sm">
+                  <span>{t('voice.ops.unconfirmed')}</span>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    setTrackingExhaustedKey(null)
+                    setTrackingRetry((attempt) => attempt + 1)
+                  }}><RefreshCw aria-hidden /> {t('op.checkAgain')}</Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {API_MODE === 'mock' && <p className="text-center text-xs text-muted-foreground">
+            Simulation: no microphone audio or real Voice provider is used. Use the buttons below to try a caller turn.
+          </p>}
+          {API_MODE === 'mock' && live && <MockTurnButtons />}
+        </div>
       </div>
-
-      {offer && <div className="mx-auto w-full max-w-md rounded-2xl border bg-card p-5">
-        <h2 className="flex items-center gap-2 font-semibold"><ShieldCheck className="size-5" aria-hidden /> Confirm an action</h2>
-        <dl className="mt-3 space-y-2 text-sm">
-          <div><dt className="text-muted-foreground">Action</dt><dd>{humanize(offer.data.action_type)}</dd></div>
-          <div><dt className="text-muted-foreground">Applies to</dt><dd>{offer.data.target_label}</dd></div>
-          <div><dt className="text-muted-foreground">What it means</dt><dd>{offer.data.consequences}</dd></div>
-        </dl>
-        <p className="mt-3 text-xs text-muted-foreground">Valid until {formatTime(offer.data.expires_at)}</p>
-        <p className="mt-2 text-sm" aria-live="polite">
-          {expired ? 'This offer expired. Ask for a new one.' : proposalStatus === 'reading' ?
-            'The offer is being read aloud.' : proposalStatus === 'awaiting' ?
-            'The offer was read. Say yes or no.' : 'Answer here by text if you want to proceed.'}
-        </p>
-        {byTap && !expired && <div className="mt-3 flex gap-2">
-          <Button disabled={offer.sending || offer.retry?.decision === 'DECLINE'} onClick={() => void answerByTap('ACCEPT')}>Yes, go ahead</Button>
-          <Button variant="outline" disabled={offer.sending || offer.retry?.decision === 'ACCEPT'} onClick={() => void answerByTap('DECLINE')}>No, leave it</Button>
-        </div>}
-        {offer.error && <p role="alert" className="mt-2 text-sm text-destructive">
-          {describeError(offer.error)} {offer.retry ? 'The outcome is uncertain. Retry the same answer to check it safely.' : 'Check the latest chat before trying again.'}
-        </p>}
-      </div>}
-
-      {watchIds.length > 0 && <div className="mx-auto w-full max-w-md space-y-2" aria-label="Action statuses">
-        {visibleOperations.map((item) => <div key={item.id} className="flex items-center gap-3 rounded-2xl border bg-card p-4">
-          <Activity className="size-5" aria-hidden /><span className="flex-1 text-sm">Action status</span>
-          <OperationBadge status={item.status} />
-        </div>)}
-        {visibleOperations.length < watchIds.length && !operationTrackingExhausted &&
-          <p role="status" className="rounded-2xl border bg-card p-4 text-sm">Checking action status…</p>}
-        {operationTrackingExhausted && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card p-4 text-sm">
-          <span>Status is unconfirmed. The action may still be processing.</span>
-          <Button variant="outline" size="sm" onClick={() => {
-            setTrackingExhaustedKey(null)
-            setTrackingRetry((attempt) => attempt + 1)
-          }}>Check again</Button>
-        </div>}
-      </div>}
-
-      {API_MODE === 'mock' && <p className="mx-auto max-w-md text-center text-xs text-muted-foreground">
-        Simulation: no microphone audio or real Voice provider is used. Use the buttons below to try a caller turn.
-      </p>}
-      {API_MODE === 'mock' && active && <MockTurnButtons />}
-    </section>
+    </main>
   )
 }
 

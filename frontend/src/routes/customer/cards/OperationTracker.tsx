@@ -6,7 +6,7 @@ import type { OperationView } from '@/api/types'
 import { OperationBadge } from '@/components/StatusBadge'
 import { operationTone } from '@/components/tones'
 import { Button } from '@/components/ui/button'
-import { hasMessage, useI18n } from '@/i18n/context'
+import { hasMessage, useI18n, type Translate } from '@/i18n/context'
 import { formatTime, humanize } from '@/lib/format'
 import { CardFrame } from '@/components/CardFrame'
 
@@ -65,26 +65,13 @@ export function OperationTracker({
   return (
     <CardFrame
       icon={<Activity />}
-      title={op ? (hasMessage(`op.${op.action_type}`) ? t(`op.${op.action_type}`) : humanize(op.action_type)) : t('op.checking')}
+      title={op ? operationTitle(op, t) : t('op.checking')}
       tone={op ? operationTone[op.status] : undefined}
       aside={op && <OperationBadge status={op.status} />}
     >
       <div aria-live="polite">
         {op ? (
-          <>
-            <p>
-              {op.status === 'SUCCEEDED' && hasMessage(`op.done.${op.action_type}`)
-                ? t(`op.done.${op.action_type}`)
-                : t(`op.${op.status}`)}
-            </p>
-            <p className="mt-1 text-muted-foreground">{op.next_step}</p>
-            {op.outcome.provider_ticket_id && (
-              <p className="mt-2 text-xs">
-                {t('card.ticketNumber')} <span className="font-mono">{op.outcome.provider_ticket_id}</span>
-              </p>
-            )}
-            <p className="mt-2 text-[11px] text-muted-foreground">{t('op.lastUpdated', { time: formatTime(op.updated_at) })}</p>
-          </>
+          <OperationDetails op={op} />
         ) : (
           !error && <p className="text-muted-foreground">{t('op.checkingLatest')}</p>
         )}
@@ -98,5 +85,48 @@ export function OperationTracker({
         </div>
       )}
     </CardFrame>
+  )
+}
+
+function operationTitle(op: OperationView, t: Translate) {
+  return hasMessage(`op.${op.action_type}`) ? t(`op.${op.action_type}`) : humanize(op.action_type)
+}
+
+/** A settled view of one operation, for screens that poll it themselves (the voice call). */
+export function OperationCard({ op, className }: { op: OperationView; className?: string }) {
+  const { t } = useI18n()
+  return (
+    <CardFrame
+      icon={<Activity />}
+      title={operationTitle(op, t)}
+      tone={operationTone[op.status]}
+      aside={<OperationBadge status={op.status} />}
+      className={className}
+    >
+      <div aria-live="polite">
+        <OperationDetails op={op} />
+      </div>
+    </CardFrame>
+  )
+}
+
+/** What happened to an operation and what comes next. */
+function OperationDetails({ op }: { op: OperationView }) {
+  const { t } = useI18n()
+  return (
+    <>
+      <p>
+        {op.status === 'SUCCEEDED' && hasMessage(`op.done.${op.action_type}`)
+          ? t(`op.done.${op.action_type}`)
+          : t(`op.${op.status}`)}
+      </p>
+      <p className="mt-1 text-muted-foreground">{op.next_step}</p>
+      {op.outcome.provider_ticket_id && (
+        <p className="mt-2 text-xs">
+          {t('card.ticketNumber')} <span className="font-mono">{op.outcome.provider_ticket_id}</span>
+        </p>
+      )}
+      <p className="mt-2 text-[11px] text-muted-foreground">{t('op.lastUpdated', { time: formatTime(op.updated_at) })}</p>
+    </>
   )
 }

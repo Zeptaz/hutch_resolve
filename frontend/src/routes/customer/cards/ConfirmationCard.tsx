@@ -15,6 +15,9 @@ export type ProposalState =
   | { kind: 'decided'; decision: Decision }
   | { kind: 'closed' } // no longer the conversation's pending proposal (decided elsewhere, replaced or invalidated)
 
+/** The fields the card shows. Chat passes a ProposalView; a voice call passes Voice's proposal. */
+export type ConfirmableProposal = Pick<ProposalView, 'action_type' | 'target_label' | 'consequences' | 'expires_at' | 'package_terms'>
+
 /**
  * Explicit confirmation for a server proposal. Shows exact target, consequences and expiry.
  * Nothing is preselected or autofocused, and nothing is ever submitted automatically.
@@ -23,11 +26,14 @@ export function ConfirmationCard({
   proposal,
   state,
   disabled = false,
+  lockedTo,
   onDecide,
 }: {
-  proposal: ProposalView
+  proposal: ConfirmableProposal
   state: ProposalState
   disabled?: boolean
+  /** Only this answer can be sent, e.g. while an uncertain answer is being retried. */
+  lockedTo?: Decision
   onDecide: (decision: Decision) => void
 }) {
   const { t } = useI18n()
@@ -89,10 +95,10 @@ export function ConfirmationCard({
 
       {(state.kind === 'open' || state.kind === 'submitting') && !expired && (
         <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={t('confirm.group')}>
-          <Button onClick={() => onDecide('ACCEPT')} disabled={!actionable || disabled}>
+          <Button onClick={() => onDecide('ACCEPT')} disabled={!actionable || disabled || lockedTo === 'DECLINE'}>
             {state.kind === 'submitting' && state.decision === 'ACCEPT' ? t('confirm.sending') : t('confirm.yes')}
           </Button>
-          <Button variant="outline" onClick={() => onDecide('DECLINE')} disabled={!actionable || disabled}>
+          <Button variant="outline" onClick={() => onDecide('DECLINE')} disabled={!actionable || disabled || lockedTo === 'ACCEPT'}>
             {state.kind === 'submitting' && state.decision === 'DECLINE' ? t('confirm.sending') : t('confirm.no')}
           </Button>
         </div>
