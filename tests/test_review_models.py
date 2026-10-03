@@ -33,3 +33,13 @@ def test_every_review_status_has_readable_note_text():
 
     assert set(REVIEW_STATUS_TEXT) == REVIEW_STATUSES
     assert all("_" not in text for text in REVIEW_STATUS_TEXT.values())
+
+
+
+def test_a_sync_job_in_progress_is_shown_as_pending():
+    # The job table has RUNNING while a CRM call is in flight; the API contract does not.
+    from backend.resolve.services.review import public_sync_state
+
+    assert public_sync_state("RUNNING") == "PENDING"
+    assert public_sync_state("SYNCED") == "SYNCED"
+    assert public_sync_state(None) is None
