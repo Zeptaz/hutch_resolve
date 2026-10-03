@@ -7,6 +7,7 @@
 - [x] Fixed recharge/ledger evidence severity merging so a complete recharge lookup cannot upgrade an incomplete ledger result to SUFFICIENT. Removed the former expected-failure marker; the PostgreSQL conversation test now passes.
 - [x] Migration-upgrade path from revision 0010 to head applied successfully. PostgreSQL privilege check confirms `hutch_resolve_app` can SELECT `sandbox.offers` and cannot UPDATE it. Fresh setup/migration/seed also passed across isolated test groups.
 - [x] Final non-database Resolve suite: **443 passed, 39 PostgreSQL-gated skipped** (the gated checks passed separately above). Frontend OpenAPI generation, typecheck and production build pass; mock browser suite **23/23 passed and exited 0**. Voice repository was not changed; its prior test run remains **52 passed**. No live model/microphone call was performed.
+- Resolve implementation commit `a4223df` is pushed and remote-confirmed on `origin/ResolveDev`.
 - [ ] Live configured model/microphone qualification and production release soak remain open. The safe mock end-to-end path is qualified; these live credentials/hardware checks are separate gates.
 
 ### Audit remediation update — 2026-10-03

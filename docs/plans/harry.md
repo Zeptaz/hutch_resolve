@@ -14,6 +14,7 @@ Keep one application process. Suggested module ownership: `backend/resolve/{api,
 - [x] Added migration `0011_turn_recovery` and agent-only, CSRF-protected reconciliation route. It is fail-closed for active leases and related PENDING/RUNNING/UNKNOWN operations, writes an audit event, and makes the same turn terminal. A confirmed integration test verifies no Voice/text replay and permits a fresh turn.
 - [x] Replaced the old expected failure for partial ledger evidence with a passing integration assertion; recharge evidence cannot promote an incomplete ledger to SUFFICIENT.
 - [x] Fresh schema migration and upgrade from `0010_offer_readonly` to head both applied. App-role offer privileges verified read-only. Full Resolve suite: **443 passed, 39 PostgreSQL-gated skipped** in the no-DB run; those 39 gated checks passed separately. API contract/type generation, frontend typecheck/build and mock E2E **23/23** pass; Playwright exits 0.
+- Resolve implementation commit `a4223df` is pushed and remote-confirmed on `origin/ResolveDev`.
 - [ ] Real model/microphone qualification and production soak remain open. Zeptaz Voice was not modified in this phase; previously run Voice tests report **52 passed**.
 
 ## H-01: database and fixture baseline
