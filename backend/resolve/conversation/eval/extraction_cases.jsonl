@@ -55,3 +55,8 @@
 {"id": "pkg-06", "variety": "english", "message": "can you activate a package for me", "expect": {"intent": "PACKAGES"}}
 {"id": "off-01", "variety": "english", "message": "who won the cricket match yesterday?", "expect": {"intent": "OFF_TOPIC"}}
 {"id": "off-02", "variety": "singlish", "message": "mage maths homework ekata udaw karanna", "expect": {"intent": "OFF_TOPIC", "detected_language": "si"}}
+{"id": "vas-01", "variety": "singlish", "message": "Mata VAS charges monadwada kiyanna puluwanda ?", "expect": {"intent": "ACCOUNT_ENQUIRY", "account_topic": "SERVICES", "detected_language": "si"}}
+{"id": "vas-02", "variety": "singlish", "message": "mage VAS charges mokadda", "expect": {"intent": "ACCOUNT_ENQUIRY", "account_topic": "SERVICES", "detected_language": "si"}}
+{"id": "vas-03", "variety": "english", "message": "which value added services am I paying for?", "expect": {"intent": "ACCOUNT_ENQUIRY", "account_topic": "SERVICES"}}
+{"id": "vas-04", "variety": "singlish", "message": "Mata VAS charges gana poddak check karanna puluwan da ?", "expect": {"intent": "NEW_COMPLAINT", "complaint_type": "VAS_DISPUTE", "detected_language": "si"}}
+{"id": "vas-05", "variety": "singlish", "message": "mata thiyena packages monawada", "expect": {"intent": "ACCOUNT_ENQUIRY", "account_topic": "PACKAGES", "detected_language": "si"}}
