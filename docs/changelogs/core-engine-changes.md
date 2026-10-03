@@ -224,8 +224,8 @@ code was kept wherever main had already fixed the same defect. Nothing was pushe
 
 ### CE-012 — Link each HubSpot review ticket to a synthetic customer contact
 
-- Date / status: 2026-10-04 — DONE on branch, verified with a fake HubSpot and PostgreSQL; **live contact
-  linking blocked** until the HubSpot Service Key has contact scopes (see "To finish")
+- Date / status: 2026-10-04 — DONE on branch; verified unit, PostgreSQL and **live** (contact scopes added by
+  Tevin; setup run; see the live line below)
 - Owner: Harry (adapter area, contract approval); built by Tevin
 - Risk: **MEDIUM** — changes which fields leave Resolve (contract updated first) and adds HubSpot calls to the
   handoff. No schema, permission or business-rule change; mock CRM unaffected; contact problems never fail a
@@ -258,7 +258,13 @@ code was kept wherever main had already fixed the same defect. Nothing was pushe
     a key refused on every call (it previously failed only the first call, which is now the contact lookup).
   - Live HubSpot: the current Service Key returns **403 for contacts** (tickets fine). Startup logs
     `CONTACT_CRM_AUTH_REJECTED`; a live probe still created ticket `338549094118` unlinked (archived right
-    after). Live contact creation and linking are **not yet verified**.
+    after).
+  - Live, after Tevin added the contact scopes: `hubspot_setup.py check` → contacts "access OK, properties
+    missing"; `properties` created the five contact properties (`resolve_line_alias` unique); `check` →
+    "ready"; restart showed no contact warning. Browser chat as customer A → review accepted → ticket
+    `338633592538` linked (type 16) to new contact `563434818271` Nimali Perera, SIM-LK-0001, WEST, `si`,
+    `SYNTHETIC_DEMO`, e-mail and phone empty. Second ticket for the same customer reusing the contact is
+    unit-tested, not yet seen live.
 - To finish (whoever has HubSpot admin access): add `crm.objects.contacts.read`, `crm.objects.contacts.write`,
   `crm.schemas.contacts.read`, `crm.schemas.contacts.write` to the Service Key (or create a new key with them
   and replace `HUBSPOT_ACCESS_TOKEN`); run `python scripts/hubspot_setup.py check` (expects "Customer

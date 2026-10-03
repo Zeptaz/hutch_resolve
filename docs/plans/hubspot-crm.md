@@ -232,7 +232,8 @@ Goal: make HubSpot read like a real CRM: every review ticket belongs to a custom
 - [x] Setup: `properties` creates the five contact properties; `check` reports contact readiness; startup logs a separate contact warning.
 - [x] Tests: unit 33 (9 new), PostgreSQL writer 7 (1 new), full DB suite 14/14 files.
 - [x] Live: missing contact scopes handled (ticket `338549094118` delivered unlinked, archived).
-- [ ] Live: add contact scopes to the Service Key, run `check` and `properties`, restart, run one handoff and confirm the contact appears on the ticket in HubSpot.
+- [x] Live: contact scopes added (Tevin), `check` then `properties` (five contact properties created), restart without warning; ticket `338633592538` linked to contact Nimali Perera (SIM-LK-0001), no e-mail or phone.
+- [ ] Live: a second ticket for the same customer re-uses the contact (unit-tested only).
 - [ ] Optional: back-fill contacts for tickets created before CE-012 (not built).
 
 Why the line alias is the key: every fixture reset creates new customer UUIDs; keying on the UUID would create a second "Ruwan" after each reset. In a real operator deployment the ticket would link to the CRM's existing customer by the operator's own customer ID, and Resolve would send no personal fields at all.
