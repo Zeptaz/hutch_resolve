@@ -76,6 +76,7 @@ from .extraction import (
     PROMPT_VERSION,
     SpokenDecision,
     TimeKind,
+    TimeReference,
     default_window,
     resolve_window,
 )
@@ -134,7 +135,36 @@ _DIRECT_BALANCE_QUESTIONS = {
     "show me my account balance",
     "show me my balance",
     "how much balance do i have",
+    "i wanna know my account balance",
+    "i want to know my account balance",
+    "can you tell me what my account balance is",
+    "tell me what my account balance is",
 }
+# Only unmistakable, complete English complaint statements are recovered when
+# extraction is unavailable. These identify a complaint category; they do not
+# infer an amount, time, cause, evidence, consent, or an action outcome.
+_FALLBACK_COMPLAINT_PATTERNS = (
+    (ComplaintType.BALANCE_RECHARGE, re.compile(
+        r"(?:my |the )?(?:reload|recharge|top[ -]?up) (?:didn't|did not|hasn't|has not) "
+        r"(?:arrive|come|show up|credit|go through)"
+    )),
+    (ComplaintType.BALANCE_RECHARGE, re.compile(
+        r"my balance (?:dropped|went down|decreased|is missing|was deducted)"
+    )),
+    (ComplaintType.DATA_DEPLETION, re.compile(
+        r"my data (?:finished|ran out|is running out) (?:too fast|quickly|early)"
+    )),
+    (ComplaintType.CONNECTIVITY, re.compile(
+        r"(?:i have |there is )?no (?:internet|signal|network|connection)"
+    )),
+    (ComplaintType.CONNECTIVITY, re.compile(
+        r"my (?:internet|mobile data|data connection) (?:is not working|doesn't work|is down)"
+    )),
+    (ComplaintType.VAS_DISPUTE, re.compile(
+        r"i (?:was|am|got) charged for (?:a |an )?(?:service|subscription) "
+        r"i (?:didn't|did not) (?:subscribe|ask) for"
+    )),
+)
 _CODE = re.compile(r"[A-Z0-9_]+")
 
 # Pending question codes shared with the frontend.
@@ -169,9 +199,27 @@ log = logging.getLogger(__name__)
 
 
 def _is_direct_balance_question(text: str) -> bool:
+    return _normalized_english(text) in _DIRECT_BALANCE_QUESTIONS
+
+
+def _normalized_english(text: str) -> str:
     normalized = " ".join(text.casefold().strip().split())
     normalized = re.sub(r"^(?:hi|hello|hey)[,!. ]+", "", normalized)
-    return normalized.rstrip(" ?!.") in _DIRECT_BALANCE_QUESTIONS
+    return normalized.rstrip(" ?!.")
+
+
+def _fallback_complaint(text: str) -> Extraction | None:
+    normalized = _normalized_english(text)
+    for complaint_type, pattern in _FALLBACK_COMPLAINT_PATTERNS:
+        if pattern.fullmatch(normalized):
+            return Extraction(
+                intent=Intent.NEW_COMPLAINT, decision=None, action_choice=None,
+                detected_language=Language.EN, script="LATIN", complaint_type=complaint_type,
+                time_reference=TimeReference(kind=TimeKind.NONE, count=None, start_date=None, end_date=None),
+                amount_lkr=None, recharge_reference=None, faq_query=None,
+                summary=text.strip()[:300], ambiguities=[],
+            )
+    return None
 
 
 async def _real_time(ctx: AuthContext) -> datetime:
@@ -268,6 +316,12 @@ class ConversationService:
         if extraction is None:
             if state.candidate is None and state.pending_proposal is None and _is_direct_balance_question(inp.text):
                 return await self._account(ctx, state) if _is_customer(ctx) else _login_required(state)
+            if state.candidate is None and state.pending_proposal is None:
+                recovered = _fallback_complaint(inp.text)
+                if recovered is not None:
+                    if not _is_customer(ctx):
+                        return _login_required(state)
+                    return await self._collect_complaint(ctx, turn, recovered, state, Candidate(), now)
             return self._structured_fallback(ctx, state)
         if extraction.detected_language is not Language.EN or len(inp.text.split()) >= 3:
             # Reply in the language the customer writes; a bare "ok" does not switch back to English.

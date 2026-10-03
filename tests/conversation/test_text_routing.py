@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from conftest import ACCOUNT_A, ACCOUNT_D, Harness, customer, details, guest, text
+from resolve.conversation.dto import Channel
 from fakes import FakeModel, extraction
 from resolve.conversation.model import ModelError
 
@@ -191,6 +192,10 @@ def test_clear_balance_question_uses_scoped_account_after_model_timeout() -> Non
     assert result.cards[0].type == "account" and result.cards[0].data.id == ACCOUNT_A
     assert h.facade.calls["create_case"] == 0
 
+    natural = h.send(ctx, h.turn(conv, text("Hello, can you tell me what my account balance is?")))
+    assert natural.reply_text == result.reply_text
+    assert h.facade.calls["create_case"] == 0
+
     # A short finalized utterance from speech recognition has the same safe
     # read-only meaning; it must not become an invented balance complaint.
     short = h.send(ctx, h.turn(conv, text("my account balance")))
@@ -198,7 +203,7 @@ def test_clear_balance_question_uses_scoped_account_after_model_timeout() -> Non
     assert h.facade.calls["create_case"] == 0
 
 
-def test_balance_complaint_and_how_to_question_do_not_use_account_fallback() -> None:
+def test_balance_complaint_does_not_use_account_fallback() -> None:
     h = Harness(model=FakeModel().on("my balance dropped", ModelError("quota")))
     ctx = customer(ACCOUNT_A)
     conv = h.open(ctx)
@@ -206,9 +211,65 @@ def test_balance_complaint_and_how_to_question_do_not_use_account_fallback() -> 
     complaint = h.send(ctx, h.turn(conv, text("my balance dropped")))
     how_to = h.send(ctx, h.turn(conv, text("How can I check my balance?")))
 
-    assert complaint.pending_question.code == "CHOOSE_COMPLAINT_TYPE"
+    assert complaint.case_id is not None
+    assert h.facade.cases[complaint.case_id].complaint_type == "BALANCE_RECHARGE"
     assert how_to.pending_question.code == "CHOOSE_COMPLAINT_TYPE"
     assert h.facade.calls["get_account"] == 0
+
+
+def test_model_failure_recovers_clear_reload_complaint_for_text_and_voice() -> None:
+    for channel in (Channel.TEXT, Channel.VOICE):
+        model = FakeModel()
+        model.delay = 5
+        h = Harness(model=model, budget=0.02)
+        ctx = customer(ACCOUNT_A, channel=channel)
+        conv = h.open(ctx)
+        result = h.send(ctx, h.turn(conv, text("my reload didn't arrive"), channel=channel))
+
+        assert result.case_id is not None
+        assert "balance or recharge records" in result.reply_text
+        assert h.facade.cases[result.case_id].complaint_type == "BALANCE_RECHARGE"
+        assert h.facade.investigation_requests[0][1].reported_facts.description == "my reload didn't arrive"
+        assert h.facade.calls["confirm_action"] == 0
+
+
+def test_model_failure_recovers_only_unambiguous_complaints() -> None:
+    for message, complaint_type in (
+        ("my data finished too fast", "DATA_DEPLETION"),
+        ("I have no internet", "CONNECTIVITY"),
+        ("I was charged for a service I didn't subscribe for", "VAS_DISPUTE"),
+    ):
+        h = Harness(model=FakeModel().on(message, ModelError("unavailable")))
+        ctx = customer(ACCOUNT_A)
+        conv = h.open(ctx)
+        result = h.send(ctx, h.turn(conv, text(message)))
+        assert result.case_id is not None
+        assert h.facade.cases[result.case_id].complaint_type == complaint_type
+        assert h.facade.calls["confirm_action"] == 0
+
+    for message in ("my reload didn't arrive yesterday", "my reload didn't arrive, refund me", "my data finished too fast after Rs 500"):
+        h = Harness(model=FakeModel().on(message, ModelError("unavailable")))
+        ctx = customer(ACCOUNT_A)
+        conv = h.open(ctx)
+        result = h.send(ctx, h.turn(conv, text(message)))
+        assert result.pending_question.code == "CHOOSE_COMPLAINT_TYPE"
+        assert h.facade.calls["create_case"] == 0
+
+
+def test_complaint_recovery_preserves_guest_and_open_proposal_boundaries() -> None:
+    h = Harness(model=FakeModel().on("my reload didn't arrive", ModelError("unavailable")))
+    ctx = guest()
+    conv = h.open(ctx)
+    assert h.send(ctx, h.turn(conv, text("my reload didn't arrive"))).pending_question.code == "LOGIN_REQUIRED"
+    assert h.facade.calls["create_case"] == 0
+
+    h = Harness(model=FakeModel().on("my reload didn't arrive", ModelError("unavailable")))
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    h.send(ctx, h.turn(conv, details()))
+    result = h.send(ctx, h.turn(conv, text("my reload didn't arrive")))
+    assert result.pending_question.code == "CONFIRM_ACTION"
+    assert h.facade.calls["create_case"] == 1
 
 
 def test_balance_question_fallback_requires_customer_scope() -> None:
