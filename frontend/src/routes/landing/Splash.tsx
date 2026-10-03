@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { LayoutDashboard, MessageCircle, Mic } from 'lucide-react'
+import { LayoutDashboard, MessageCircle, MessageSquareText, Mic } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const SEEN_KEY = 'hutch-resolve.intro-seen'
@@ -49,7 +49,7 @@ export function Splash() {
       role="status"
       aria-label="Loading HUTCH Resolve"
       className={cn(
-        'fixed inset-0 z-50 grid place-items-center bg-background transition-opacity duration-[450ms] ease-out',
+        'fixed inset-0 z-50 grid place-items-center bg-[#f5f2ec] transition-opacity duration-[450ms] ease-out',
         phase === 'leaving' && 'pointer-events-none opacity-0',
       )}
     >
@@ -58,25 +58,25 @@ export function Splash() {
         <div className="relative grid size-20 place-items-center">
           <span className="animate-splash-ring absolute inset-0 rounded-full border-2 border-primary/50" />
           <span className="animate-splash-ring absolute inset-0 rounded-full border-2 border-primary/30 [animation-delay:500ms]" />
-          <span className="animate-pop grid size-16 place-items-center rounded-2xl bg-primary text-2xl font-bold text-primary-foreground shadow-lg">
-            R
+          <span className="animate-pop grid size-16 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
+            <MessageSquareText className="size-8" strokeWidth={2.2} aria-hidden />
           </span>
         </div>
-        <p className="animate-rise-in text-3xl font-bold tracking-tight [--i:4]">
+        <p className="animate-rise-in text-3xl font-medium tracking-[-0.03em] text-[#111114] [--i:4]">
           HUTCH <span className="text-primary">Resolve</span>
         </p>
         <div className="flex items-center gap-3 text-muted-foreground">
           {[MessageCircle, Mic, LayoutDashboard].map((Icon, i) => (
             <span
               key={i}
-              className="animate-pop grid size-9 place-items-center rounded-xl bg-muted"
+              className="animate-pop grid size-9 place-items-center rounded-xl bg-white shadow-sm"
               style={{ animationDelay: `${450 + i * 140}ms` }}
             >
               <Icon className="size-4" aria-hidden />
             </span>
           ))}
         </div>
-        <div className="h-1 w-40 overflow-hidden rounded-full bg-muted">
+        <div className="h-1 w-40 overflow-hidden rounded-full bg-black/[0.07]">
           <div className="animate-splash-bar h-full rounded-full bg-primary" />
         </div>
       </div>

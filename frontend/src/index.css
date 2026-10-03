@@ -246,6 +246,15 @@
   .animate-splash-ring { animation: splash-ring 1.4s ease-out infinite; }
   .animate-splash-bar { animation: splash-bar 1.5s cubic-bezier(0.6, 0, 0.2, 1) both; }
   .animate-float { animation: float 6s ease-in-out infinite; }
+  .animate-thread { animation: thread 26s linear infinite; }
+  .animate-marquee { animation: marquee 32s linear infinite; }
+}
+
+@keyframes thread {
+  to { transform: translateY(-50%); }
+}
+@keyframes marquee {
+  to { transform: translateX(-50%); }
 }
 
 @keyframes splash-ring {
@@ -265,6 +274,8 @@
   .animate-splash-ring,
   .animate-splash-bar,
   .animate-float,
+  .animate-thread,
+  .animate-marquee,
   .animate-bubble-in,
   .animate-typing-dot,
   .animate-thinking-ring,

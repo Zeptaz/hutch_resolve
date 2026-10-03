@@ -5,7 +5,7 @@ test('the intro plays once, then the landing page links to each system', async (
   await page.goto('/')
   await expect(page.getByRole('status', { name: 'Loading HUTCH Resolve' })).toBeVisible()
   await expect(page.getByRole('status', { name: 'Loading HUTCH Resolve' })).toHaveCount(0, { timeout: 5000 })
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('resolved with care')
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('now in your hand')
   for (const name of ['Preview of the customer chat on a phone', 'Preview of a voice call on a phone', 'Preview of the agent dashboard on a computer']) {
     await expect(page.getByRole('img', { name })).toBeVisible()
   }

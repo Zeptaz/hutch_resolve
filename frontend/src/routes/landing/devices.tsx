@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronLeft, FileText, Mic, MicOff, PhoneOff, Search, Send, ShieldCheck, Sparkles } from 'lucide-react'
+import { CheckCircle2, ChevronLeft, FileText, Mic, MicOff, PhoneOff, Search, Send, ShieldCheck, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /*
@@ -7,15 +7,26 @@ import { cn } from '@/lib/utils'
  * nothing here starts a session or calls Resolve.
  */
 
-export function PhoneFrame({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+export function PhoneFrame({
+  label,
+  children,
+  className,
+  width = 'w-[min(17.5rem,82vw)]',
+}: {
+  label: string
+  children: React.ReactNode
+  className?: string
+  /** Tailwind width class. */
+  width?: string
+}) {
   return (
-    <figure role="img" aria-label={label} className={cn('relative mx-auto w-[min(17.5rem,82vw)]', className)}>
+    <figure role="img" aria-label={label} className={cn('relative mx-auto', width, className)}>
       {/* Side buttons */}
       <span aria-hidden className="absolute top-24 -left-[3px] h-8 w-[3px] rounded-l bg-neutral-700" />
       <span aria-hidden className="absolute top-36 -left-[3px] h-12 w-[3px] rounded-l bg-neutral-700" />
       <span aria-hidden className="absolute top-32 -right-[3px] h-16 w-[3px] rounded-r bg-neutral-700" />
       <div className="aspect-[9/19] rounded-[2.75rem] bg-neutral-900 p-2.5 shadow-[0_30px_60px_-20px_rgb(0_0_0/0.35)] ring-1 ring-neutral-700">
-        <div className="relative flex h-full flex-col overflow-hidden rounded-[2.2rem] bg-background">
+        <div className="relative flex h-full flex-col overflow-hidden rounded-[2.2rem] bg-background text-left text-foreground">
           <div aria-hidden className="flex h-9 shrink-0 items-center justify-between px-6 pt-1 text-[10px] font-semibold">
             <span>9:41</span>
             <span className="absolute top-2 left-1/2 h-5 w-20 -translate-x-1/2 rounded-full bg-neutral-900" />
@@ -38,7 +49,7 @@ export function DesktopFrame({ label, children, className }: { label: string; ch
   return (
     <figure role="img" aria-label={label} className={cn('mx-auto w-full max-w-3xl', className)}>
       <div className="rounded-t-2xl bg-neutral-900 p-2 pb-2.5 shadow-[0_30px_60px_-20px_rgb(0_0_0/0.35)] ring-1 ring-neutral-700">
-        <div className="overflow-hidden rounded-lg bg-background">
+        <div className="overflow-hidden rounded-lg bg-background text-left text-foreground">
           <div aria-hidden className="flex items-center gap-3 border-b bg-muted/60 px-3 py-2">
             <span className="flex gap-1.5">
               <span className="size-2.5 rounded-full bg-[#ff5f57]" />
@@ -92,7 +103,7 @@ function MiniHeader({ right }: { right?: React.ReactNode }) {
   )
 }
 
-function Bubble({ mine, children, className }: { mine?: boolean; children: React.ReactNode; className?: string }) {
+export function Bubble({ mine, children, className }: { mine?: boolean; children: React.ReactNode; className?: string }) {
   return (
     <div className={cn('flex max-w-[86%] gap-1.5', mine ? 'ml-auto flex-row-reverse' : 'mr-auto', className)}>
       {!mine && (
@@ -291,5 +302,59 @@ export function DashboardPreview() {
         </div>
       </div>
     </div>
+  )
+}
+
+/** The hero phone: a conversation that scrolls by on its own, like someone reading it. */
+export function HeroScreen() {
+  const thread = (
+    <div className="flex flex-col gap-2.5 pb-2.5">
+      <Bubble>Hi! I can look into balance, data, connection and value-added service issues. What's going on?</Bubble>
+      <Bubble mine>Rs 99 keeps going from my balance every day</Bubble>
+      <Bubble>It's a daily horoscope service that started on 1 Oct. Want me to stop it?</Bubble>
+      <div className="ml-6 rounded-2xl border bg-card p-2.5 shadow-sm">
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold">
+          <ShieldCheck className="size-3.5 text-primary" /> Your confirmation is needed
+        </p>
+        <p className="mt-1 text-[11px] font-medium">Stop a subscription renewing</p>
+        <div className="mt-2 flex gap-1.5">
+          <span className="rounded-md bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground">Yes, go ahead</span>
+          <span className="rounded-md border px-2 py-1 text-[10px] font-medium">No, leave it</span>
+        </div>
+      </div>
+      <Bubble mine>Yes, go ahead</Bubble>
+      <div className="ml-6 flex items-center gap-2 rounded-2xl border bg-card p-2.5 shadow-sm">
+        <CheckCircle2 className="size-4 text-success" />
+        <span className="flex-1 text-[11px] font-medium">Stopping subscription renewal</span>
+        <span className="rounded-full bg-success/12 px-1.5 text-[9px] font-semibold text-success">Succeeded</span>
+      </div>
+      <Bubble>Done. The service won't renew, and no more daily charges will be taken.</Bubble>
+      <Bubble mine>Thank you!</Bubble>
+    </div>
+  )
+  return (
+    <>
+      <MiniHeader
+        right={
+          <span className="flex rounded-full bg-muted p-0.5 text-[9px] font-medium">
+            <span className="rounded-full bg-background px-1.5 py-0.5 shadow-sm">EN</span>
+            <span className="px-1.5 py-0.5 text-muted-foreground">සි</span>
+            <span className="px-1.5 py-0.5 text-muted-foreground">த</span>
+          </span>
+        }
+      />
+      <div aria-hidden className="relative flex-1 overflow-hidden px-3 [mask-image:linear-gradient(to_bottom,transparent,black_8%,black_88%,transparent)]">
+        <div className="animate-thread pt-3">
+          {thread}
+          {thread}
+        </div>
+      </div>
+      <div aria-hidden className="mx-3 mb-5 flex items-center gap-2 rounded-full border bg-card py-1.5 pr-1.5 pl-3">
+        <span className="flex-1 text-[11px] text-muted-foreground">Type your message…</span>
+        <span className="grid size-6 place-items-center rounded-full bg-primary text-primary-foreground">
+          <Send className="size-3" />
+        </span>
+      </div>
+    </>
   )
 }
