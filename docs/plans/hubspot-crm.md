@@ -111,8 +111,8 @@ Gate 1 (13:15): **passed**. All of the above work with a Service Key on a free a
 - [x] Unit (fake HubSpot via `httpx.MockTransport`), `tests/test_hubspot_crm.py`, 20 passed: ticket created with synthetic marker, pipeline and unique operation ID; retry finds the same ticket; create conflict resolves to the existing ticket; timeout/connect/503/429 raise unavailable with nothing created; 401/403/400 terminal; review note tagged and stage moved; replay adds no note; older review refused; other case's ticket refused; missing ticket terminal; token never in repr or errors; config defaults to mock, validates token, API base and provider name.
 - [x] Writer integration (fake HubSpot plus real PostgreSQL sandbox role), `tests/test_hubspot_writer_postgres_integration.py`, opt-in `HUBSPOT_IT_SANDBOX_DATABASE_URL`, 6 passed on the throwaway database: ticket recorded locally and replay makes no HubSpot call, no `sandbox.tickets` row; armed outage raises before any HubSpot call; committed-response-lost recovers one ticket; rejected key recorded FAILED and not retried; review sync with numeric ticket ID recorded under a derived UUID and idempotent; review outage leaves no record. Seeded fault profiles restored afterwards.
 - [ ] Runner-level retry to REVIEW_REQUIRED with no ticket number: covered by existing runner logic; end-to-end check waits for Harry's schema fix.
-- [ ] Integration (disposable PostgreSQL plus fake HubSpot): D handoff to DELIVERED with receipt ticket ID; outage and recovery; worker restart mid-operation; review update reaches SYNCED.
-- [ ] Regression: full suite with `CRM_PROVIDER=mock` matches the Phase 0 baseline.
+- [ ] Integration (disposable PostgreSQL plus fake HubSpot): D handoff to DELIVERED with receipt ticket ID; outage and recovery; worker restart mid-operation; review update reaches SYNCED. Partly covered: writer integration (6) plus browser runs on `tevin/crm-integration` (mock outage then delivery; live HubSpot delivery and sync); no automated end-to-end runner test with fake HubSpot yet.
+- [x] Regression: full suite with `CRM_PROVIDER=mock` on `tevin/crm-integration`: 505 passed, 48 skipped (main + chatbot baseline 473/40; the additions are CRM and chatbot tests). All 14 opt-in PostgreSQL files pass on fresh databases.
 - [ ] Live (opt-in `HUBSPOT_LIVE_TEST=1`): create, duplicate, note, stage, archive on the team account.
 
 ## Phase 5: dashboard and wording (16:30-17:30)
@@ -129,7 +129,7 @@ Gate 1 (13:15): **passed**. All of the above work with a Service Key on a free a
 - [x] Natural language with the Gemini key (`gemini-3.5-flash-lite`): free-text complaint extracted, review offered for missing records; decline then "I want a real person" produced a review with reason "Customer asked for a person to review this case." Demo note: say "this morning" or "2 October"; "yesterday" is read as 1 October against the 2 October fixture.
 - [x] Fixed: chat progress polling failed with `AUTH_REALM_REQUIRED` when one browser holds both customer and agent sessions (the demo setup). `frontend/src/api/client.ts` now always sends `X-Resolve-Realm`; browser-verified. For Jayith's review.
 - [x] Adapter regression test `tests/test_conversation_review_reason.py` (3 passed): Resolve-offered and customer-requested reviews both reach `propose_escalation` with a reason; other actions unchanged.
-- [ ] Fallback drill: `CRM_PROVIDER=mock`, restart, same journey; switch time recorded.
+- [x] Fallback drill on `tevin/crm-integration`: mock journey, then restart with `CRM_PROVIDER=hubspot` on the same database; both delivered. Switch is a restart (seconds); time not formally recorded.
 - [ ] Two clean runs; backup clip recorded.
 
 Gate 2 (19:30): two clean runs, or ship with the mock and keep HubSpot as proposed.
@@ -200,3 +200,24 @@ Not fixed (reported):
 | 2026-10-03 | Remaining checks | Playwright mock suite; browser B/C(si)/F(ta); mock fallback drill; locale checks; finding 12 | Playwright 19/19; default suite 458 passed, 46 skipped; all 14 DB files pass; items 14-19 fixed |
 | 2026-10-03 | Merge `46d41ed` and full audit | `sh scripts/run_db_tests.sh` (14 files), default suite, frontend typecheck/lint/build, browser A with Gemini + HubSpot | All DB files pass; default 457 passed, 44 skipped; 12 findings fixed (audit table) |
 | 2026-10-03 | Phase 0 integration baseline | CRM-related opt-in PostgreSQL files on a fresh database | Blocked by `ResolveDev` schema drift; to be reported to Harry |
+
+## Integration onto main — branch `tevin/crm-integration` (2026-10-03)
+
+Base: `origin/tevin/chatbot-fixes` `4b305ff` (main `4b581b2` + CB-001..003), then `origin/main` `d7dc9da` merged (`3281d02`). This branch's work was ported change by change (`git apply -3` of the net `46d41ed..61d8506` diff for selected files, conflicts resolved by hand), not merged, so main's later fixes are not regressed. Change records: CE-005..CE-011 and CB-004..CB-005.
+
+| CRM-branch change | Decision | Why |
+| --- | --- | --- |
+| `providers/crm.py`, `providers/hubspot.py`, runner/config/main wiring, `.env.example`, contract CRM section, README, scripts, HubSpot tests | Ported (`54a4b58`) | Core of this work. Conflicts: `operations.py` (kept main's retired-run fence, also checked before the HubSpot call), `main.py` imports, README readiness line (kept main's `0011`). |
+| Dashboard "Open in HubSpot" link | Ported (`54a4b58`) | For Jayith's review (CE-008). |
+| Conversation: re-offer, skip refused offer, no unprompted review when reconciled, no decided-action loop, Voice fingerprint, SI/TA button text | Ported (`ddf619d`) | Not on main (CB-004). |
+| Chat input race, 24 SI/TA labels | Ported (`2d0c8ce`) | Not on main; kept alongside main's new sign-in string (CE-009). |
+| `eff54ce` (later on the remote CRM branch): sync RUNNING shown as PENDING | Cherry-picked (`b4c0dc3`) | HubSpot-only 500 on the dashboard (CE-006). |
+| `resolve_adapter.py` review reason via `propose_escalation` | Not ported | Main's facade gives Resolve-offered reviews a default reason. Main's own customer-request path then failed (CE-007), fixed in the chatbot by CB-005 (`2d34967`). |
+| Facade: proposal KeyError, provisional ledger, escalation investigation filter; `turn_claims`; confirmation `simulation`; migration `0009_escalation_reason` | Not ported | Already fixed on main (differently where noted). |
+| Facade scenario A VAS offer + VAS-first sort; `seed.sql` snapshots at 1 Oct 00:00; Voice binding string compare | Not ported | Harry's policy/fixture decisions, not needed for the CRM path (CE-011). |
+| Test tweaks passing an explicit escalation reason; `test_postgres_runtime` A expectation; `test_scenario_actions_postgres_integration.py` | Not ported | Reason is optional on main; the others depend on the un-ported scenario A change. |
+| Remote `c82d78c` (voice call screen), `1550d79` (dropdowns) | Not ported | Unrelated to CRM (Jayith). |
+
+`scripts/dev_db.sh` needed two fixes for main: make every `database/*.sh` executable in the temporary copy (main added `99-ready.sh`) and wait for its `.hutch_initialized` marker. `run_db_tests.sh` now also runs the turn-reconciliation test.
+
+Verification on this branch: see the CE-005 entry and `context.md` (unit, PostgreSQL, browser mock CRM, live HubSpot ticket `338730627792`). Test tickets on the team HubSpot account from this run: `338730627792` (kept; archive with `python scripts/hubspot_setup.py archive 338730627792` when done).

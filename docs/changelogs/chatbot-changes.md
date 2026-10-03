@@ -4,7 +4,7 @@ Changes to the conversation module only: `backend/resolve/conversation/**` and i
 Anything that touches Resolve services, providers, migrations, shared DTOs/contracts, the Voice
 bridge or the frontend goes in [core-engine-changes.md](core-engine-changes.md) instead.
 
-Branch: `tevin/chatbot-fixes` (from `main` @ `4b581b2`).
+Branch: `tevin/chatbot-fixes` (from `main` @ `4b581b2`) for CB-001..003; `tevin/crm-integration` for CB-004..005.
 
 ## Risk levels
 
@@ -157,3 +157,54 @@ English card + buttons, English source in storage, and Voice/outcomes excluded.
   a spoken yes to the charge check now starts the look-up instead of being treated as offer consent — safer).
 - Commit: `73677a4` (branch `tevin/chatbot-fixes`, pushed and remote-confirmed).
 - Core dependency: CE-004 (price per subscription).
+
+---
+
+## CRM integration — branch `tevin/crm-integration` (2026-10-03)
+
+From `tevin/chatbot-fixes` `4b305ff` + `main` `d7dc9da`; conversation fixes ported from `tevin/hubspot-crm`.
+Engine/frontend/tooling parts of the same work are CE-005..CE-011 in [core-engine-changes.md](core-engine-changes.md).
+
+### CB-004 — Offer re-try, no review loop, no unprompted review on reconciled answers, Voice replay
+
+- Date / status: 2026-10-03 — DONE on branch, verified, committed `ddf619d` (ported from `tevin/hubspot-crm`
+  `3120d4e`/`61d8506`, audit findings 5, 6, 7, 16, 17, 19)
+- Risk: **HIGH** — touches the confirmation flow (a fresh proposal after PROPOSAL_INVALIDATED) and turn
+  idempotency (Voice fingerprint). Needs Harry's review before merge. Small code size (~70 lines).
+- Files: `backend/resolve/conversation/{service.py,identity.py,locales/si.json,locales/ta.json}`,
+  `tests/conversation/{test_decisions_and_handoff.py,test_resolve_integration.py}`.
+- What changed:
+  - Accepting an offer that the case invalidated meanwhile (an earlier action finished) re-offers the same
+    action on a fresh proposal; the customer confirms again; nothing runs on the stale proposal.
+  - If Resolve refuses the first offer (STALE_VERSION / ACTION_NOT_ALLOWED / PROPOSAL_INVALIDATED), the next
+    eligible action is offered instead of failing the turn.
+  - No unprompted human review when every finding is `LEDGER_RECONCILED`/`QUOTA_RECONCILED`; still available
+    on request; a pending payment (E) still offers it.
+  - The action just accepted or declined is never re-offered as the "next" option (decline-review loop).
+  - Voice turn fingerprint ignores `presentation_response_id`, so a retried Voice turn that produced a new
+    offer is no longer `IDEMPOTENCY_CONFLICT`.
+  - SI/TA package hint names the translated button.
+- Not ported: the CRM branch's adapter change (Resolve-offered reviews via `propose_escalation` with a fixed
+  reason) — main's facade now supplies a default reason; `test_postgres_runtime` expectation tied to the
+  un-ported scenario A VAS offer (CE-011).
+- Verification: unit (default suite) **505 passed, 48 skipped**; PostgreSQL disposable: conversation runtime
+  6 passed, real-facade conversation 22 passed incl. the new reconciled-vs-pending test; browser: decline of
+  the offered review on A did not loop.
+- Core dependency: none.
+
+### CB-005 — "I want a real person" after a case returned a 500
+
+- Date / status: 2026-10-03 — DONE on branch, verified, committed `2d34967`
+- Risk: **HIGH** by the table above — it changes which facade method the chat calls for a customer-requested
+  review (`propose_action` with `escalation_reason` instead of `propose_escalation`). The payload is the same
+  case, latest investigation, Resolve-listed review target and the customer's reason; Resolve still validates
+  eligibility/version and stores the reason. Needs Harry's review. Small code size (one adapter method).
+- Files: `backend/resolve/conversation/resolve_adapter.py`, `tests/test_conversation_review_reason.py`,
+  `tests/conversation/test_resolve_integration.py`.
+- Root cause: CE-007 — main's `propose_escalation` parses the request key as a UUID and writes the dialogue
+  state; the chat's command key is deterministic and not a UUID. Found in the browser during the CRM test.
+- Verification: unit 4 passed (reason passed through; no proposal when Resolve listed no review); PostgreSQL
+  real-facade regression fails on main's adapter and passes with the fix; browser on the live HubSpot stack:
+  decline → "Actually I want a real person…" → review offered with "Reason: Customer asked for a person to
+  review this case." → accepted → HubSpot ticket created and synced.
+- Core dependency: CE-007 (proper engine fix).
