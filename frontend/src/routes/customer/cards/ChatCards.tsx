@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useState } from 'react'
-import { Calculator, CheckCircle2, Clock, Download, ExternalLink, FileText, ListOrdered, Search, Ticket, UserRound } from 'lucide-react'
+import { Calculator, CheckCircle2, Clock, Download, ExternalLink, FileText, ListOrdered, Package, Search, Ticket, UserRound } from 'lucide-react'
 import { customerApi } from '@/api/endpoints'
 import { describeError } from '@/api/errors'
 import type { Card, CardOf, Citation } from '@/api/types'
@@ -15,7 +15,12 @@ import { cn } from '@/lib/utils'
 import { downloadJson } from '@/lib/download'
 
 /** Card renderers for TurnResult.cards. Fixed variants only — model output is never rendered as HTML. */
-export function ChatCard({ card, renderConfirmation }: { card: Card; renderConfirmation: (c: CardOf<'confirmation'>) => ReactNode }) {
+export function ChatCard({ card, renderConfirmation, onPackageSelect, packageSelectionDisabled = false }: {
+  card: Card
+  renderConfirmation: (c: CardOf<'confirmation'>) => ReactNode
+  onPackageSelect: (offerId: string, offerName: string) => void
+  packageSelectionDisabled?: boolean
+}) {
   switch (card.type) {
     case 'account':
       return <AccountCard data={card.data} />
@@ -31,9 +36,54 @@ export function ChatCard({ card, renderConfirmation }: { card: Card; renderConfi
       return <TicketCard data={card.data} />
     case 'receipt':
       return <ReceiptCard data={card.data} />
+    case 'package_catalogue':
+      return <PackageCatalogueCard data={card} disabled={packageSelectionDisabled} onSelect={onPackageSelect} />
     default:
       return null
   }
+}
+
+function PackageCatalogueCard({ data, disabled, onSelect }: {
+  data: CardOf<'package_catalogue'>
+  disabled: boolean
+  onSelect: (offerId: string, offerName: string) => void
+}) {
+  const { t } = useI18n()
+  return (
+    <CardFrame icon={<Package />} title={t('package.catalogue')}>
+      <p className="mb-3 text-xs text-muted-foreground">{t('package.addOnNote')}</p>
+      <ul className="flex flex-col gap-3">
+        {data.offers.map((offer) => (
+          <li key={offer.id} className="rounded-xl border bg-background p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="font-semibold">{offer.name}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {formatGb(offer.data_bytes)} · {formatValidity(offer.validity_seconds, t)} · {offer.recurring ? t('package.recurring') : t('package.noRenewal')}
+                </p>
+              </div>
+              <p className="font-mono font-medium">{formatLkr(offer.price_minor)}</p>
+            </div>
+            {offer.recommended && (
+              <p className="mt-2 text-xs text-primary">{t('package.recommended')}{offer.recommendation_reason ? ` · ${offer.recommendation_reason}` : ''}</p>
+            )}
+            {!offer.can_purchase && <p className="mt-2 text-xs text-muted-foreground">{t('package.unavailable')}</p>}
+            <Button className="mt-3" size="sm" variant="outline" disabled={disabled || !offer.can_purchase} onClick={() => onSelect(offer.id, offer.name)}>
+              {t('package.select')}
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </CardFrame>
+  )
+}
+
+function formatValidity(seconds: number, t: Translate) {
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  if (days > 0 && hours > 0) return t('package.validityDaysHours', { days, hours })
+  if (days > 0) return t('package.validityDays', { days })
+  return t('package.validityHours', { hours: Math.max(1, hours) })
 }
 
 function AccountCard({ data }: { data: CardOf<'account'>['data'] }) {

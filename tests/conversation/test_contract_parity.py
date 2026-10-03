@@ -17,7 +17,9 @@ SCHEMAS = OPENAPI["components"]["schemas"]
 MIRRORS: dict[str, type[BaseModel]] = {
     name: getattr(dto, name)
     for name in [
-        "TextInput", "CategoryInput", "DetailsInput", "DecisionInput", "CaseSelectionInput", "ReportedFacts",
+        "TextInput", "CategoryInput", "DetailsInput", "DecisionInput", "CaseSelectionInput", "PackageQueryInput",
+        "PackageSelectionInput", "PackageTerms", "PackageOfferView", "PackageCatalogueEntry", "PackageCatalogueCard",
+        "ReportedFacts",
         "MessageRequest", "PendingQuestion", "Citation", "TurnResult", "AccountView", "Balance",
         "SubscriptionSummary", "SourceStatus", "Finding", "Calculation", "CalculationTerm", "EvidenceItem",
         "EligibleAction", "InvestigationRequest", "InvestigationResult", "CaseView", "ReceiptReference",
@@ -28,9 +30,8 @@ MIRRORS: dict[str, type[BaseModel]] = {
     ]
 }
 ENUMS = ["Language", "ComplaintType", "Decision", "ActionType", "EvidenceState", "OperationStatus", "ReviewStatus", "DeliveryState"]
-# Prototype-only values proposed to Harry/Jayith (docs/plans/tevin.md, CP-1); remove once the contract adopts them.
-PROPOSED_EXTENSIONS = {"ActionType": {"ACTIVATE_PACKAGE"}}
-PROPOSED_VALUES = set().union(*PROPOSED_EXTENSIONS.values())
+PROPOSED_EXTENSIONS: dict[str, set[str]] = {}
+PROPOSED_VALUES: set[str] = set()
 
 
 @pytest.mark.parametrize("name", sorted(MIRRORS))
@@ -39,9 +40,7 @@ def test_fields_and_required_match_openapi(name: str) -> None:
     model = MIRRORS[name]
     assert set(model.model_fields) == set(schema["properties"]), name
     required = {field for field, info in model.model_fields.items() if info.is_required()}
-    # Card discriminators default to their only allowed value; they are still always serialized.
-    defaulted_discriminators = {"type"} - required if "type" in model.model_fields else set()
-    assert required | defaulted_discriminators == set(schema.get("required", [])), name
+    assert required == set(schema.get("required", [])), name
     assert model.model_config.get("extra") == "forbid"
 
 
@@ -93,12 +92,6 @@ def test_property_enum_values_match_openapi(name: str) -> None:
 def test_enums_match_openapi(name: str) -> None:
     proposed = PROPOSED_EXTENSIONS.get(name, set())
     assert {member.value for member in getattr(dto, name)} - proposed == set(SCHEMAS[name]["enum"])
-
-
-@pytest.mark.parametrize("name", sorted(PROPOSED_EXTENSIONS))
-def test_proposed_extensions_are_not_yet_in_the_contract(name: str) -> None:
-    # Fails once the contract adopts them: then drop the allowance above.
-    assert not PROPOSED_EXTENSIONS[name] & set(SCHEMAS[name]["enum"])
 
 
 @pytest.mark.parametrize(

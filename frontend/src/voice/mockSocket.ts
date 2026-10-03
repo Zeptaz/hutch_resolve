@@ -67,6 +67,7 @@ class MockVoiceSocket implements VoiceSocket {
       const proposal: VoiceProposal | null = p ? {
         id: p.id, proposal_hash: p.proposal_hash, action_type: p.action_type,
         target_label: p.target_label, consequences: p.consequences, expires_at: p.expires_at,
+        package_terms: p.package_terms,
       } : null
       const id = newId()
       this.reply = { id, proposal, complete: false, played: false }

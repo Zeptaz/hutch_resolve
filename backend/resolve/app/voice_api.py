@@ -181,6 +181,7 @@ def _voice_response(result: Any) -> dict[str, Any]:
                 "target_label": proposal.get("target_label", ""),
                 "consequences": proposal.get("consequences", ""),
                 "expires_at": proposal.get("expires_at"),
+                "package_terms": proposal.get("package_terms"),
             }
     data = {
         "response_id": str(result.get("response_id") or result.get("message_id") or uuid4()),
@@ -442,8 +443,9 @@ def _claim_voice_grant(engine, context: AuthContext, conversation_id: UUID, orig
     """Serialize one session's grant claims and persist local binding before network I/O."""
     with engine.begin() as connection:
         connection.execute(text("""
-            UPDATE resolve.voice_grant_requests SET encrypted_grant=NULL
-            WHERE grant_expires_at<=:now AND encrypted_grant IS NOT NULL
+            UPDATE resolve.voice_grant_requests
+            SET encrypted_grant=NULL,state='EXPIRED',updated_at=:now
+            WHERE grant_expires_at<=:now AND encrypted_grant IS NOT NULL AND state='SUCCEEDED'
         """), {"now": now})
         session = connection.execute(text("""
             SELECT id FROM resolve.sessions WHERE id=:session AND sandbox_id=:sandbox
@@ -542,7 +544,7 @@ def build_voice_router() -> APIRouter:
                     return grant
                 except Exception as exc:
                     raise ResolveError(503, "GRANT_OUTCOME_UNKNOWN", "Voice grant replay is unavailable; request a new call", True) from exc
-            code = "VOICE_GRANT_EXPIRED" if claimed["state"] == "SUCCEEDED" else "VOICE_GRANT_OUTCOME_UNKNOWN"
+            code = "VOICE_GRANT_EXPIRED" if claimed["state"] in {"SUCCEEDED", "EXPIRED"} else "VOICE_GRANT_OUTCOME_UNKNOWN"
             raise ResolveError(409, code, "This Voice request cannot safely create another grant; start a new call", True)
         grant_request_id = claimed["id"]
         binding_id = claimed["binding_id"]

@@ -94,6 +94,7 @@ class MockSandboxWriter:
             "DEACTIVATE_VAS": ("vas", "deactivate"),
             "SEND_SETTINGS_INSTRUCTIONS": ("messaging", "send_settings"),
             "CREATE_REVIEW_TICKET": ("crm", "create_ticket"),
+            "ACTIVATE_PACKAGE": ("package", "activate"),
         }[action_type]
         with self._engine.connect() as connection:
             existing = connection.execute(text("SELECT request_hash,status,result FROM sandbox.provider_operations WHERE sandbox_id=:sandbox AND provider=:provider AND idempotency_key=:key"),
@@ -163,6 +164,93 @@ class MockSandboxWriter:
                          "category": category, "queue": queue, "packet": json.dumps(packet)})
                     status, actual_status = "SUCCEEDED", "OPEN"
                     result = {"code": "REVIEW_TICKET_CREATED", "message": "A synthetic human review ticket was created.", "actual_target_status": actual_status, "provider_ticket_id": str(ticket_id)}
+                elif action_type == "ACTIVATE_PACKAGE":
+                    account = connection.execute(text("""
+                        SELECT a.id,r.simulation_clock FROM sandbox.accounts a
+                        JOIN sandbox.sandbox_runs r ON r.id=a.sandbox_id
+                        WHERE a.sandbox_id=:sandbox AND a.id=:account AND a.status='ACTIVE'
+                          AND r.run_status='ACTIVE' FOR UPDATE OF a
+                    """), {"sandbox": sandbox_id, "account": account_id}).mappings().one_or_none()
+                    offer = connection.execute(text("""
+                        SELECT id,name,price_minor,currency,quota_bytes,validity_seconds,recurring,version
+                        FROM sandbox.offers WHERE sandbox_id=:sandbox AND id=:offer
+                          AND offer_kind='PACKAGE' AND available_for_purchase=true
+                          AND recurring=false FOR SHARE
+                    """), {"sandbox": sandbox_id, "offer": target_id}).mappings().one_or_none()
+                    balance = connection.execute(text("""
+                        SELECT id,amount_minor,last_posting_seq FROM sandbox.balance_snapshots
+                        WHERE sandbox_id=:sandbox AND account_id=:account AND wallet_kind='MAIN'
+                        ORDER BY as_of DESC,last_posting_seq DESC,id DESC LIMIT 1 FOR UPDATE
+                    """), {"sandbox": sandbox_id, "account": account_id}).mappings().one_or_none()
+                    duplicate = connection.execute(text("""
+                        SELECT 1 FROM sandbox.subscriptions
+                        WHERE sandbox_id=:sandbox AND account_id=:account AND offer_id=:offer
+                          AND status='ACTIVE' AND expires_at>:now LIMIT 1
+                    """), {"sandbox": sandbox_id, "account": account_id, "offer": target_id,
+                          "now": account["simulation_clock"] if account else datetime.now(UTC)}).scalar_one_or_none()
+                    if (account is None or offer is None or offer["version"] != target_version
+                            or balance is None or balance["amount_minor"] < offer["price_minor"] or duplicate):
+                        status = "FAILED"
+                        code = "DUPLICATE_ACTIVE_OFFER" if duplicate else "STALE_OR_INELIGIBLE_TARGET"
+                        result = {"code": code, "message": "The package could not be activated for the current account state.",
+                                  "actual_target_status": None, "provider_ticket_id": None}
+                    else:
+                        now_sim = account["simulation_clock"]
+                        subscription_id = uuid5(NAMESPACE_URL, f"{operation_id}:subscription")
+                        charge_id = uuid5(NAMESPACE_URL, f"{operation_id}:charge")
+                        bucket_id = uuid5(NAMESPACE_URL, f"{operation_id}:quota-bucket")
+                        quota_entry_id = uuid5(NAMESPACE_URL, f"{operation_id}:quota-grant")
+                        event_id = uuid5(NAMESPACE_URL, f"{operation_id}:subscription-event")
+                        posting_seq = connection.execute(text("""
+                            SELECT coalesce(max(posting_seq),0)+1 FROM sandbox.money_entries
+                            WHERE sandbox_id=:sandbox AND account_id=:account AND wallet_kind='MAIN'
+                        """), {"sandbox": sandbox_id, "account": account_id}).scalar_one()
+                        connection.execute(text("""
+                            INSERT INTO sandbox.money_entries(id,sandbox_id,account_id,wallet_kind,posting_seq,
+                              amount_minor,currency,kind,occurred_at,posted_at,reference)
+                            VALUES (:id,:sandbox,:account,'MAIN',:seq,:amount,:currency,'PACKAGE_PURCHASE',:occurred,:posted,:reference)
+                        """), {"id": charge_id, "sandbox": sandbox_id, "account": account_id,
+                            "seq": posting_seq, "amount": -offer["price_minor"], "currency": offer["currency"],
+                            "occurred": now_sim, "posted": datetime.now(UTC), "reference": f"resolve-package:{operation_id}"})
+                        connection.execute(text("""
+                            INSERT INTO sandbox.balance_snapshots(id,sandbox_id,account_id,wallet_kind,amount_minor,currency,as_of,last_posting_seq)
+                            VALUES (:id,:sandbox,:account,'MAIN',:amount,:currency,:as_of,:seq)
+                        """), {"id": uuid5(NAMESPACE_URL, f"{operation_id}:balance"), "sandbox": sandbox_id,
+                            "account": account_id, "amount": balance["amount_minor"] - offer["price_minor"],
+                            "currency": offer["currency"], "as_of": now_sim, "seq": posting_seq})
+                        expires_at = now_sim + timedelta(seconds=offer["validity_seconds"])
+                        connection.execute(text("""
+                            INSERT INTO sandbox.subscriptions(id,sandbox_id,account_id,offer_id,status,starts_at,
+                              expires_at,renew_enabled,next_renewal_at,activation_evidence_ref,version)
+                            VALUES (:id,:sandbox,:account,:offer,'ACTIVE',:starts,:expires,false,NULL,:evidence,1)
+                        """), {"id": subscription_id, "sandbox": sandbox_id, "account": account_id,
+                            "offer": target_id, "starts": now_sim, "expires": expires_at,
+                            "evidence": f"resolve:{case_id}:{operation_id}"})
+                        connection.execute(text("""
+                            INSERT INTO sandbox.subscription_events(id,sandbox_id,subscription_id,event_type,charge_entry_id,effective_at,recorded_at)
+                            VALUES (:id,:sandbox,:subscription,'ACTIVATED',:charge,:effective,:recorded)
+                        """), {"id": event_id, "sandbox": sandbox_id, "subscription": subscription_id,
+                            "charge": charge_id, "effective": now_sim, "recorded": datetime.now(UTC)})
+                        connection.execute(text("""
+                            INSERT INTO sandbox.quota_buckets(id,sandbox_id,account_id,subscription_id,bucket_kind,valid_from,valid_to)
+                            VALUES (:id,:sandbox,:account,:subscription,'PACKAGE',:starts,:expires)
+                        """), {"id": bucket_id, "sandbox": sandbox_id, "account": account_id,
+                            "subscription": subscription_id, "starts": now_sim, "expires": expires_at})
+                        connection.execute(text("""
+                            INSERT INTO sandbox.quota_entries(id,sandbox_id,bucket_id,sequence,delta_bytes,entry_kind,occurred_at,recorded_at)
+                            VALUES (:id,:sandbox,:bucket,1,:bytes,'GRANT',:occurred,:recorded)
+                        """), {"id": quota_entry_id, "sandbox": sandbox_id, "bucket": bucket_id,
+                            "bytes": offer["quota_bytes"], "occurred": now_sim, "recorded": datetime.now(UTC)})
+                        connection.execute(text("""
+                            INSERT INTO sandbox.quota_snapshots(id,sandbox_id,bucket_id,remaining_bytes,as_of,last_quota_seq)
+                            VALUES (:id,:sandbox,:bucket,:bytes,:as_of,1)
+                        """), {"id": uuid5(NAMESPACE_URL, f"{operation_id}:quota-snapshot"), "sandbox": sandbox_id,
+                            "bucket": bucket_id, "bytes": offer["quota_bytes"], "as_of": now_sim})
+                        status, actual_status = "SUCCEEDED", "ACTIVE"
+                        result = {"code": "PACKAGE_ACTIVATED", "message": "The synthetic one-shot package was activated and verified.",
+                            "actual_target_status": actual_status, "provider_ticket_id": None,
+                            "subscription_id": str(subscription_id), "price_minor": offer["price_minor"],
+                            "data_bytes": offer["quota_bytes"], "expires_at": expires_at.isoformat()}
                 else:
                     status, actual_status = "SUCCEEDED", "INSTRUCTIONS_PREPARED"
                     result = {"code": "SETTINGS_INSTRUCTIONS_PREPARED", "message": "Synthetic setup instructions are available to the customer.", "actual_target_status": actual_status, "provider_ticket_id": None}

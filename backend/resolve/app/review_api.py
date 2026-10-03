@@ -20,7 +20,7 @@ class StrictModel(BaseModel):
 class CaseQueueRow(StrictModel):
     case_id: UUID
     line_alias: str
-    complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE"]
+    complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE", "PACKAGE_ACTIVATION"]
     evidence_state: Literal["SUFFICIENT", "PARTIAL", "CONFLICTING"] | None
     review_status: Literal["NEW", "IN_REVIEW", "CLOSED"]
     delivery_state: Literal["PENDING", "DELIVERED", "FAILED", "REVIEW_REQUIRED"] | None
@@ -66,7 +66,7 @@ class AgentMessageView(StrictModel):
 
 class AgentCaseSummary(StrictModel):
     id: UUID
-    complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE"]
+    complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE", "PACKAGE_ACTIVATION"]
     status: str
 
 
@@ -133,7 +133,7 @@ def build_review_router() -> APIRouter:
     @router.get("/cases", response_model=CaseQueue, tags=["Agent"])
     def list_cases(request: Request,
                    review_status: Literal["NEW", "IN_REVIEW", "CLOSED"] | None = None,
-                   complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE"] | None = None,
+                   complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE", "PACKAGE_ACTIVATION"] | None = None,
                    evidence_state: Literal["SUFFICIENT", "PARTIAL", "CONFLICTING"] | None = None,
                    delivery_state: Literal["PENDING", "DELIVERED", "FAILED", "REVIEW_REQUIRED"] | None = None,
                    search: str | None = Query(default=None, max_length=128),

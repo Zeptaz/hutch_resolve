@@ -166,15 +166,21 @@ function handleTurn(state: MockState, session: SessionView, conv: ConversationVi
     reply = { ...plain('Okay, we are now looking at that case.'), case_id: input.case_id }
   } else if (input.type === 'complaint_details') {
     reply = investigate(state, conv)
+  } else if (input.type === 'package_query') {
+    reply = packageCatalogue()
+  } else if (input.type === 'package_selection') {
+    reply = selectMockPackage(state, conv, input.offer_id)
   } else if (input.type === 'category_selection') {
     reply =
       input.complaint_type === 'BALANCE_RECHARGE'
         ? ask('COMPLAINT_DETAILS', 'When did this happen, and how much did you recharge?', ['complaint_details', 'text'])
         : plain('Mock: only the balance-after-recharge journey (fixture A) is scripted. Try “Balance or recharge”.')
-  } else if (/balance|recharge|lkr|charge|money/i.test(input.text)) {
+  } else if (input.type === 'text' && /balance|recharge|lkr|charge|money/i.test(input.text)) {
     reply = investigate(state, conv)
-  } else {
+  } else if (input.type === 'text') {
     reply = ask('COMPLAINT_CATEGORY', 'Which of these best describes the problem?', ['category_selection', 'text'])
+  } else {
+    reply = plain('Please choose one of the available options.')
   }
 
   return ok(record(conv, body, reply))
@@ -224,6 +230,76 @@ function describeInput(input: TurnInput, conv: ConversationView): string {
       return `Switch to case ${conv.cases.find((c) => c.id === input.case_id) ? labelFor(conv.cases.find((c) => c.id === input.case_id)!.complaint_type) : ''}`.trim()
     case 'action_decision':
       return input.decision === 'ACCEPT' ? 'Yes, go ahead.' : 'No, don’t make that change.'
+    case 'package_query':
+      return 'Show data packages'
+    case 'package_selection':
+      return 'Choose a data package'
+  }
+}
+
+const MOCK_PACKAGE_OFFERS = [
+  { id: 'c6c4d9b1-9a1b-42be-a55f-000000000001', name: 'Daily 1 GB', price_minor: 9900, currency: 'LKR' as const, data_bytes: 1_000_000_000, validity_seconds: 86400, recurring: false as const, recommended: false, can_purchase: true, recommendation_reason: null },
+  { id: 'c6c4d9b1-9a1b-42be-a55f-000000000002', name: 'Monthly 6 GB', price_minor: 49900, currency: 'LKR' as const, data_bytes: 6_000_000_000, validity_seconds: 30 * 86400, recurring: false as const, recommended: true, can_purchase: true, recommendation_reason: 'Based on the synthetic usage history for this demo line.' },
+  { id: 'c6c4d9b1-9a1b-42be-a55f-000000000003', name: 'Monthly 12 GB', price_minor: 89900, currency: 'LKR' as const, data_bytes: 12_000_000_000, validity_seconds: 30 * 86400, recurring: false as const, recommended: false, can_purchase: false, recommendation_reason: null },
+]
+
+function packageCatalogue(): TurnReply {
+  return {
+    ...plain('Here are the synthetic data packages available for this demo line.'),
+    cards: [{ type: 'package_catalogue', offers: structuredClone(MOCK_PACKAGE_OFFERS) }],
+  }
+}
+
+function selectMockPackage(state: MockState, conv: ConversationView, offerId: string): TurnReply {
+  const offer = MOCK_PACKAGE_OFFERS.find((entry) => entry.id === offerId)
+  if (!offer || !offer.can_purchase) return plain('That package is not available for purchase. Please choose another offer.')
+  const base = example<CaseView>('case')
+  const caseView: CaseView = {
+    ...base,
+    id: crypto.randomUUID(),
+    conversation_id: conv.id,
+    complaint_type: 'PACKAGE_ACTIVATION',
+    status: 'AWAITING_CUSTOMER',
+    investigation: null,
+    operation_ids: [],
+    receipt: null,
+  }
+  const investigation = example<InvestigationResult>('a_sufficient')
+  investigation.case_id = caseView.id
+  investigation.complaint_type = 'PACKAGE_ACTIVATION'
+  caseView.investigation = investigation
+  state.cases[caseView.id] = caseView
+  conv.active_case_id = caseView.id
+  if (!conv.cases.some((item) => item.id === caseView.id)) {
+    conv.cases.push({ id: caseView.id, complaint_type: caseView.complaint_type, status: caseView.status })
+  }
+  const proposal: ProposalView = {
+    ...example<ProposalView>('proposal'),
+    id: crypto.randomUUID(),
+    case_id: caseView.id,
+    investigation_id: investigation.id,
+    action_type: 'ACTIVATE_PACKAGE',
+    target_id: offer.id,
+    target_version: null,
+    target_label: offer.name,
+    consequences: `One-time add-on: ${offer.name}. Existing packages remain active; no automatic renewal.`,
+    proposal_hash: randomHash(),
+    expires_at: new Date(Date.now() + PROPOSAL_TTL_MS).toISOString(),
+    package_terms: {
+      name: offer.name,
+      price_minor: offer.price_minor,
+      currency: offer.currency,
+      data_bytes: offer.data_bytes,
+      validity_seconds: offer.validity_seconds,
+      recurring: offer.recurring,
+    },
+  }
+  state.proposals[proposal.id] = proposal
+  conv.pending_proposal = proposal
+  return {
+    ...plain(`I can prepare ${offer.name} for confirmation. Nothing has been activated yet.`),
+    case_id: caseView.id,
+    cards: [{ type: 'confirmation', data: proposal }],
   }
 }
 
@@ -353,7 +429,9 @@ function decide(
       ...plain(
         isTicket
           ? 'Thanks — I have asked for a human review. You can track it below.'
-          : 'Thanks — I have asked the system to stop the subscription renewing. I will confirm once it is done.',
+          : p.action_type === 'ACTIVATE_PACKAGE'
+            ? 'Thanks — I have submitted the package activation. I will confirm when the system reports the result.'
+            : 'Thanks — I have asked the system to stop the subscription renewing. I will confirm once it is done.',
       ),
       case_id: p.case_id,
       cards,
@@ -377,6 +455,9 @@ function advanceOperation(state: MockState, entry: { op: OperationView; createdM
   if (op.action_type === 'CREATE_REVIEW_TICKET') {
     op.outcome = { code: 'TICKET_CREATED', message: 'Review ticket created.', actual_target_status: null, provider_ticket_id: `SIM-TKT-${op.id.slice(0, 6)}` }
     op.next_step = 'A reviewer will look at your case. You will be contacted through your usual channel.'
+  } else if (op.action_type === 'ACTIVATE_PACKAGE') {
+    op.outcome = { code: 'PACKAGE_ACTIVATED', message: 'Package activation confirmed.', actual_target_status: 'ACTIVE', provider_ticket_id: null }
+    op.next_step = 'Your add-on package is active. It will not renew automatically.'
   } else {
     op.outcome = { code: 'DEACTIVATED', message: 'Subscription renewal stopped.', actual_target_status: 'INACTIVE', provider_ticket_id: null }
     op.next_step = 'The subscription will not renew. Past charges are not refunded by this action.'

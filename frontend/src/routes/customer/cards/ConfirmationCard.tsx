@@ -5,6 +5,7 @@ import { StatusBadge, type Tone } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
 import { hasMessage, useI18n, type Translate } from '@/i18n/context'
 import { formatTime, humanize } from '@/lib/format'
+import { formatGb, formatLkr } from '@/lib/format'
 import { CardFrame } from '@/components/CardFrame'
 
 
@@ -67,6 +68,16 @@ export function ConfirmationCard({
         </div>
       </dl>
 
+      {proposal.action_type === 'ACTIVATE_PACKAGE' && proposal.package_terms && (
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 border-t pt-3">
+          <div><dt className="text-xs text-muted-foreground">{t('package.name')}</dt><dd>{proposal.package_terms.name}</dd></div>
+          <div><dt className="text-xs text-muted-foreground">{t('package.price')}</dt><dd className="font-mono">{formatLkr(proposal.package_terms.price_minor)}</dd></div>
+          <div><dt className="text-xs text-muted-foreground">{t('package.data')}</dt><dd>{formatGb(proposal.package_terms.data_bytes)}</dd></div>
+          <div><dt className="text-xs text-muted-foreground">{t('package.validity')}</dt><dd>{formatValidity(proposal.package_terms.validity_seconds, t)}</dd></div>
+          <div className="col-span-2"><dd className="text-xs text-muted-foreground">{proposal.package_terms.recurring ? t('package.recurring') : t('package.noRenewal')}</dd></div>
+        </dl>
+      )}
+
       {(state.kind === 'open' || state.kind === 'submitting') && (
         <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
           <Timer aria-hidden className="size-3.5" />
@@ -89,6 +100,14 @@ export function ConfirmationCard({
       <p className="mt-3 text-[11px] text-muted-foreground">{t('confirm.simNote')}</p>
     </CardFrame>
   )
+}
+
+function formatValidity(seconds: number, t: Translate) {
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  if (days > 0 && hours > 0) return t('package.validityDaysHours', { days, hours })
+  if (days > 0) return t('package.validityDays', { days })
+  return t('package.validityHours', { hours: Math.max(1, hours) })
 }
 
 function stateBadge(t: Translate, state: ProposalState, expired: boolean): { tone: Tone; label: string } {

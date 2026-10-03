@@ -15,17 +15,25 @@ def render(run_id: UUID, source: str, *, retire_active: bool = False) -> str:
     for value in values - {str(RUN)}:
         mapping[value] = str(uuid5(run_id, value))
     rendered = PATTERN.sub(lambda match: mapping[match.group()], source)
-    if not retire_active:
-        return rendered
     if "BEGIN;\n" not in rendered or not rendered.rstrip().endswith("COMMIT;"):
         raise ValueError("Seed SQL must contain one outer transaction")
-    retirement = f"""
+    retirement = ""
+    if retire_active:
+        retirement = f"""
 UPDATE resolve.voice_bindings SET revoked_at=now() WHERE revoked_at IS NULL;
 UPDATE resolve.sessions SET revoked_at=now() WHERE revoked_at IS NULL;
 UPDATE sandbox.sandbox_runs SET run_status='RETIRED',retired_at=now()
 WHERE run_status='ACTIVE' AND id<>'{run_id}';
 """
-    return rendered.replace("BEGIN;\n", "BEGIN;\n" + retirement, 1)
+    if retirement:
+        rendered = rendered.replace("BEGIN;\n", "BEGIN;\n" + retirement, 1)
+    package_ids = ",".join(
+        f"'{uuid5(run_id, f'30000000-0000-0000-0000-00000000000{suffix}')}'"
+        for suffix in range(5, 9)
+    )
+    # The package fixture predates the catalogue flag. Scope the allowlist to
+    # this generated run and its deterministic fixture IDs.
+    return rendered + f"\nBEGIN;\nUPDATE sandbox.offers SET available_for_purchase=true\nWHERE sandbox_id='{run_id}' AND id IN ({package_ids})\n  AND offer_kind='PACKAGE' AND recurring=false;\nCOMMIT;\n"
 
 
 def main() -> None:

@@ -6,7 +6,7 @@ import secrets
 import unicodedata
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from sqlalchemy import Engine, text
 
@@ -51,6 +51,20 @@ def _fingerprint(value: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _package_terms_text(target: dict[str, Any]) -> str:
+    price = target["price_minor"]
+    data_bytes = target["data_bytes"]
+    validity = target["validity_seconds"]
+    data_gb = f"{data_bytes // 1_000_000_000}.{data_bytes % 1_000_000_000:09d}".rstrip("0")
+    if data_gb.endswith("."):
+        data_gb = data_gb[:-1]
+    duration = (f"{validity // 86400} days" if validity % 86400 == 0
+                else f"{validity} seconds")
+    return (f"Buy {target['label']} for LKR {price // 100}.{price % 100:02d}. "
+            f"It adds {data_gb} GB for {duration}, debits the MAIN balance once, "
+            "keeps existing packages, and does not renew automatically.")
+
+
 def _validated_reported_facts(value: dict[str, Any] | None) -> dict[str, Any]:
     facts = value or {}
     if not isinstance(facts, dict):
@@ -80,11 +94,13 @@ class ResolveFacade:
 
     def __init__(self, engine: Engine, provider: BalanceProvider | AccountProvider | None = None,
                  *, cursor_secret: bytes | None = None,
-                 action_execution_available: bool = True) -> None:
+                 action_execution_available: bool = True,
+                 package_activation_enabled: bool = False) -> None:
         self._engine = engine
         self._provider = provider or PostgresSandboxProvider(engine)
         self._review = AgentReviewService(engine, self._provider, cursor_secret or secrets.token_bytes(32))
         self._action_execution_available = action_execution_available
+        self._package_activation_enabled = package_activation_enabled
 
     def list_agent_cases(self, context: AuthContext, **kwargs: Any) -> dict[str, Any]:
         return self._review.list_cases(context, **kwargs)
@@ -604,8 +620,10 @@ class ResolveFacade:
                        request_key: str, escalation_reason: str | None = None) -> dict[str, Any]:
         if context.role != "CUSTOMER" or not context.account_id or not context.sandbox_id:
             raise ResolveError(403, "ROLE_FORBIDDEN", "A customer session is required to propose an action")
-        if action_type not in {"DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"}:
+        if action_type not in {"DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET", "ACTIVATE_PACKAGE"}:
             raise ResolveError(422, "ACTION_NOT_ALLOWED", "This action is not supported")
+        if action_type == "ACTIVATE_PACKAGE":
+            raise ResolveError(422, "ACTION_NOT_ALLOWED", "Package activation requires a Resolve catalogue selection")
         if not request_key or len(request_key) > 200:
             raise ResolveError(422, "VALIDATION_ERROR", "A stable Idempotency-Key is required")
         if action_type == "CREATE_REVIEW_TICKET":
@@ -657,18 +675,30 @@ class ResolveFacade:
             target = self._provider.get_action_target(context.sandbox_id, context.account_id, action_type, target_id)  # type: ignore[attr-defined]
             if target is None or (action_type == "DEACTIVATE_VAS" and (target["status"] != "ACTIVE" or not target["renew_enabled"] or not target["recurring"])):
                 raise ResolveError(409, "STALE_VERSION", "Action target is no longer eligible")
+            if action_type == "ACTIVATE_PACKAGE" and (
+                    not target.get("available_for_purchase") or target.get("recurring")
+                    or target.get("already_active")
+                    or target.get("balance_minor") is None
+                    or target["balance_minor"] < target["price_minor"]):
+                raise ResolveError(422, "ACTION_NOT_ALLOWED", "This one-shot package cannot be activated for the current account state",
+                                   details={"reason": "BALANCE_TOO_LOW" if target and target.get("balance_minor") is not None
+                                            and target["balance_minor"] < target["price_minor"] else "OFFER_INELIGIBLE"})
             consequences = {
                 "DEACTIVATE_VAS": f"Stop future renewals for {target['label']}; past charges remain under investigation.",
                 "SEND_SETTINGS_INSTRUCTIONS": f"Send setup instructions for {target['label']}; this will not change network service.",
                 "CREATE_REVIEW_TICKET": f"Create a human review request for {target['label']}; no account change is made now.",
+                "ACTIVATE_PACKAGE": _package_terms_text(target),
             }[action_type]
+            package_terms = ({"name": target["label"], "price_minor": target["price_minor"], "currency": "LKR",
+                "data_bytes": target["data_bytes"], "validity_seconds": target["validity_seconds"], "recurring": False}
+                if action_type == "ACTIVATE_PACKAGE" else None)
             if escalation_reason:
                 consequences = f"{consequences} Reason: {escalation_reason}"
             proposal_id, now = uuid4(), datetime.now(UTC)
             proposal_hash = _fingerprint({"id": str(proposal_id), "case_id": str(case_id), "investigation_id": str(investigation_id),
                 "revision": latest["revision"], "session_id": str(context.session_id), "action_type": action_type,
                 "target_id": str(target_id), "target_version": target["version"], "case_version": expected_version,
-                "consequences": consequences})
+                "consequences": consequences, "package_terms": package_terms})
             row = {"id": proposal_id, "case_id": case_id, "investigation_id": investigation_id,
                    "action_type": action_type, "target_id": target_id, "target_version": target["version"],
                    "target_label": target["label"], "consequences": consequences, "proposal_hash": proposal_hash,
@@ -678,7 +708,7 @@ class ResolveFacade:
                  sandbox_id,actor_session_id,evidence_revision,case_version,request_key,request_hash,escalation_reason)
                 VALUES (:id,:case_id,:investigation_id,:action_type,:target_id,:target_version,:target_label,CAST(:consequences AS jsonb),
                  :proposal_hash,:expires_at,:sandbox_id,:session_id,:revision,:case_version,:request_key,:request_hash,:escalation_reason)"""),
-                {**row, "target_label": target["label"], "consequences": json.dumps({"text": consequences}), "sandbox_id": context.sandbox_id,
+                {**row, "target_label": target["label"], "consequences": json.dumps({"text": consequences, **({"package_terms": package_terms} if package_terms else {})}), "sandbox_id": context.sandbox_id,
                  "session_id": context.session_id, "revision": latest["revision"], "case_version": expected_version,
                  "request_key": request_key, "request_hash": request_hash, "escalation_reason": escalation_reason})
             connection.execute(text("INSERT INTO resolve.audit_events(id,session_id,case_id,event_type,details,created_at) VALUES (:id,:session_id,:case_id,'ACTION_PROPOSED',CAST(:details AS jsonb),:now)"),
@@ -712,6 +742,150 @@ class ResolveFacade:
             investigation_id=investigation_id, action_type="CREATE_REVIEW_TICKET", target_id=target_id,
             request_key=request_key, escalation_reason=reason)
 
+    def list_package_offers(self, context: AuthContext) -> list[dict[str, Any]]:
+        if context.role != "CUSTOMER" or not context.account_id or not context.sandbox_id:
+            raise ResolveError(403, "ROLE_FORBIDDEN", "A customer account session is required")
+        if not self._package_activation_enabled:
+            raise ResolveError(503, "ACTION_EXECUTION_UNAVAILABLE", "Package activation is not enabled", True)
+        try:
+            rows = self._provider.list_package_offers(context.sandbox_id)  # type: ignore[attr-defined]
+            balance = self._provider.get_account(context.sandbox_id, context.account_id)  # type: ignore[attr-defined]
+        except Exception as exc:
+            raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Package catalogue is temporarily unavailable", True) from exc
+        if balance is None:
+            raise ResolveError(404, "RESOURCE_NOT_FOUND", "Account was not found")
+        main = next((entry for entry in balance.get("balances", []) if entry.get("wallet") == "MAIN"), None)
+        amount = main.get("amount_minor") if main else None
+        result = []
+        for row in rows:
+            target = self._provider.get_package_activation_target(context.sandbox_id, context.account_id, row["id"])  # type: ignore[attr-defined]
+            result.append({"id": row["id"], "name": row["name"], "price_minor": row["price_minor"],
+                 "currency": row["currency"].strip(), "data_bytes": row["data_bytes"],
+                 "validity_seconds": row["validity_seconds"], "recurring": False,
+                 "simulation": True, "balance_minor": amount,
+                 "can_purchase": bool(target and target.get("available_for_purchase")
+                     and not target.get("already_active") and not target.get("recurring")
+                     and amount is not None and amount >= row["price_minor"])})
+        return result
+
+    def get_package_usage(self, context: AuthContext) -> dict[str, Any]:
+        if context.role != "CUSTOMER" or not context.account_id or not context.sandbox_id:
+            raise ResolveError(403, "ROLE_FORBIDDEN", "A customer account session is required")
+        if not self._package_activation_enabled:
+            raise ResolveError(503, "ACTION_EXECUTION_UNAVAILABLE", "Package activation is not enabled", True)
+        result = self._provider.get_package_usage(context.sandbox_id, context.account_id)  # type: ignore[attr-defined]
+        if result is None:
+            raise ResolveError(404, "RESOURCE_NOT_FOUND", "Account was not found")
+        return result
+
+    def propose_package_activation(self, context: AuthContext, conversation_id: UUID,
+                                   offer_id: UUID, command_key: str) -> dict[str, Any]:
+        """Create a scoped package-purchase case, immutable evidence and ordinary proposal."""
+        if context.role != "CUSTOMER" or not context.account_id or not context.sandbox_id:
+            raise ResolveError(403, "ROLE_FORBIDDEN", "A customer account session is required")
+        if not self._package_activation_enabled:
+            raise ResolveError(503, "ACTION_EXECUTION_UNAVAILABLE", "Package activation is not enabled", True)
+        if not command_key or len(command_key) > 200:
+            raise ResolveError(422, "VALIDATION_ERROR", "A stable command key is required")
+        connection = self._engine.connect()
+        now = datetime.now(UTC)
+        case_turn_id = uuid5(NAMESPACE_URL, f"package-turn:{command_key}")
+        case_id = uuid5(NAMESPACE_URL, f"package-case:{context.sandbox_id}:{context.session_id}:{conversation_id}:{command_key}")
+        investigation_id = uuid5(NAMESPACE_URL, f"package-investigation:{case_id}")
+        try:
+            with connection.begin():
+                scoped = connection.execute(text("""
+                    SELECT c.id,c.version,r.simulation_clock
+                    FROM resolve.conversations c JOIN sandbox.sandbox_runs r ON r.id=c.sandbox_id
+                    WHERE c.id=:conversation AND c.sandbox_id=:sandbox AND c.session_id=:session
+                      AND r.run_status='ACTIVE' AND c.expires_at>:now
+                    FOR UPDATE OF c
+                """), {"conversation": conversation_id, "sandbox": context.sandbox_id,
+                      "session": context.session_id, "now": now}).mappings().one_or_none()
+                if scoped is None:
+                    raise ResolveError(404, "RESOURCE_NOT_FOUND", "Conversation was not found")
+                prior = connection.execute(text("""
+                    SELECT p.* FROM resolve.action_proposals p
+                    WHERE p.case_id=:case AND p.request_key=:key
+                """), {"case": case_id, "key": command_key}).mappings().one_or_none()
+                if prior is not None:
+                    if prior["request_hash"] != _fingerprint({"conversation_id": str(conversation_id), "offer_id": str(offer_id)}):
+                        raise ResolveError(409, "IDEMPOTENCY_CONFLICT", "Package selection was retried with another offer")
+                    return self._proposal_view(prior)
+                target = self._provider.get_package_activation_target(context.sandbox_id, context.account_id, offer_id)  # type: ignore[attr-defined]
+                if target is None or not target["available_for_purchase"] or target["recurring"]:
+                    raise ResolveError(422, "ACTION_NOT_ALLOWED", "That package is not available for activation")
+                if target["already_active"]:
+                    raise ResolveError(409, "ACTION_NOT_ALLOWED", "That package is already active on this account",
+                                       details={"reason": "DUPLICATE_ACTIVE_OFFER"})
+                if target["balance_minor"] is None or target["balance_minor"] < target["price_minor"]:
+                    raise ResolveError(422, "ACTION_NOT_ALLOWED", "The MAIN balance is too low for this package",
+                                       details={"reason": "BALANCE_TOO_LOW"})
+                evidence = [{"id": str(uuid5(NAMESPACE_URL, f"{case_id}:offer")), "source": "PACKAGE_CATALOGUE",
+                    "source_record_id": str(offer_id), "source_version": target["source_version"],
+                    "observed_at": scoped["simulation_clock"].isoformat(), "value": target["price_minor"],
+                    "unit": "LKR_MINOR", "payload": {"name": target["label"], "price_minor": target["price_minor"],
+                        "currency": target["currency"].strip(), "data_bytes": target["data_bytes"],
+                        "validity_seconds": target["validity_seconds"], "recurring": target["recurring"]}},
+                    {"id": str(uuid5(NAMESPACE_URL, f"{case_id}:balance")), "source": "MAIN_BALANCE",
+                    "source_record_id": str(context.account_id), "source_version": target["source_version"],
+                    "observed_at": scoped["simulation_clock"].isoformat(), "value": target["balance_minor"],
+                    "unit": "LKR_MINOR", "payload": {"wallet": "MAIN", "amount_minor": target["balance_minor"]}}]
+                terms = {"name": target["label"], "price_minor": target["price_minor"], "currency": "LKR",
+                         "data_bytes": target["data_bytes"], "validity_seconds": target["validity_seconds"], "recurring": False}
+                proposal_id = uuid5(NAMESPACE_URL, f"package-proposal:{command_key}")
+                finding = [{"code": "PACKAGE_ELIGIBLE", "text": "The selected synthetic one-shot package is available and the current MAIN balance covers its price.",
+                            "evidence_ids": [e["id"] for e in evidence]}]
+                connection.execute(text("""
+                    INSERT INTO resolve.cases(id,sandbox_id,conversation_id,account_id,complaint_type,
+                      window_start,window_end,status,version,created_at,origin_turn_id,origin_request_hash,reported_facts,updated_at)
+                    VALUES (:id,:sandbox,:conversation,:account,'PACKAGE_ACTIVATION',:start,:end,'OPEN',1,:now,
+                      :turn,:fingerprint,CAST(:facts AS jsonb),:now)
+                    ON CONFLICT (id) DO NOTHING
+                """), {"id": case_id, "sandbox": context.sandbox_id, "conversation": conversation_id,
+                    "account": context.account_id, "start": scoped["simulation_clock"] - timedelta(days=30),
+                    "end": scoped["simulation_clock"], "now": now, "turn": case_turn_id,
+                    "fingerprint": _fingerprint({"conversation_id": str(conversation_id), "offer_id": str(offer_id)}),
+                    "facts": json.dumps({"offer_id": str(offer_id), "package_terms": terms})})
+                connection.execute(text("""
+                    INSERT INTO resolve.investigations(id,case_id,revision,evidence_state,finding,evidence,created_at,
+                      calculations,source_status,missing,conflicts,eligible_actions,review_reasons,window_start,window_end)
+                    VALUES (:id,:case,1,'SUFFICIENT',CAST(:finding AS jsonb),CAST(:evidence AS jsonb),:now,
+                      '[]'::jsonb,'[]'::jsonb,'{}','{}',CAST(:eligible AS jsonb),'{}',:start,:end)
+                    ON CONFLICT (id) DO NOTHING
+                """), {"id": investigation_id, "case": case_id, "finding": json.dumps(finding),
+                    "evidence": json.dumps(evidence), "eligible": json.dumps([{"action_type": "ACTIVATE_PACKAGE", "target_id": str(offer_id),
+                                                                                 "target_label": target["label"]}]),
+                    "now": now, "start": scoped["simulation_clock"] - timedelta(days=30), "end": scoped["simulation_clock"]})
+                consequences = _package_terms_text(target)
+                proposal_hash = _fingerprint({"id": str(proposal_id), "case_id": str(case_id), "investigation_id": str(investigation_id),
+                    "revision": 1, "session_id": str(context.session_id), "action_type": "ACTIVATE_PACKAGE",
+                    "target_id": str(offer_id), "target_version": target["version"], "case_version": 1,
+                    "consequences": consequences, "package_terms": terms})
+                connection.execute(text("""
+                    INSERT INTO resolve.action_proposals(id,case_id,investigation_id,action_type,target_id,target_version,
+                      target_label,consequences,proposal_hash,expires_at,sandbox_id,actor_session_id,evidence_revision,
+                      case_version,request_key,request_hash)
+                    VALUES (:id,:case,:investigation,'ACTIVATE_PACKAGE',:offer,:version,:label,
+                      CAST(:consequences AS jsonb),:hash,:expires,:sandbox,:session,1,1,:key,:request_hash)
+                """), {"id": proposal_id, "case": case_id,
+                    "investigation": investigation_id, "offer": offer_id, "version": target["version"],
+                    "label": target["label"], "consequences": json.dumps({"text": consequences, "package_terms": terms}),
+                    "hash": proposal_hash, "expires": now + timedelta(minutes=5), "sandbox": context.sandbox_id,
+                    "session": context.session_id, "key": command_key,
+                    "request_hash": _fingerprint({"conversation_id": str(conversation_id), "offer_id": str(offer_id)})})
+                connection.execute(text("""
+                    INSERT INTO resolve.audit_events(id,session_id,case_id,event_type,details,created_at)
+                    VALUES (:id,:session,:case,'PACKAGE_ACTIVATION_PROPOSED',CAST(:details AS jsonb),:now)
+                """), {"id": uuid5(NAMESPACE_URL, f"package-proposal-audit:{command_key}"),
+                    "session": context.session_id, "case": case_id,
+                    "details": json.dumps({"action_type": "ACTIVATE_PACKAGE", "offer_id": str(offer_id)}), "now": now})
+                saved = connection.execute(text("SELECT * FROM resolve.action_proposals WHERE id=:id"),
+                    {"id": proposal_id}).mappings().one()
+                return self._proposal_view(saved)
+        finally:
+            connection.close()
+
     @staticmethod
     def _proposal_view(row: Any, target_label: str | None = None) -> dict[str, Any]:
         consequences = row["consequences"]
@@ -719,6 +893,7 @@ class ResolveFacade:
                 "action_type": row["action_type"], "target_id": row["target_id"], "target_version": row["target_version"],
                 "target_label": target_label or row["target_label"],
                 "consequences": consequences.get("text", "Review the proposed action before confirming."),
+                "package_terms": consequences.get("package_terms"),
                 "proposal_hash": row["proposal_hash"], "expires_at": row["expires_at"], "simulation": True}
 
     @staticmethod
@@ -831,6 +1006,9 @@ class ResolveFacade:
                    "session": context.session_id}).mappings().one_or_none()
             if proposal is None:
                 raise ResolveError(404, "RESOURCE_NOT_FOUND", "Proposal was not found")
+            if proposal["action_type"] == "ACTIVATE_PACKAGE" and not self._package_activation_enabled:
+                raise ResolveError(503, "ACTION_EXECUTION_UNAVAILABLE",
+                    "Package activation is temporarily unavailable; no action was accepted", True)
             if voice_consent is not None:
                 self._check_voice_consent(connection, context, consent=voice_consent,
                     proposal=proposal, proposal_id=proposal_id, proposal_hash=proposal_hash,
@@ -857,9 +1035,45 @@ class ResolveFacade:
                 raise ResolveError(409, "ACTION_ALREADY_CONFIRMED", "This proposal already has an accepted operation")
             if proposal["invalidated_at"] or proposal["expires_at"] <= now or proposal["case_version"] != locked_case["version"]:
                 raise ResolveError(409, "STALE_VERSION", "Proposal expired or case changed; request a fresh proposal")
+            if proposal["action_type"] == "ACTIVATE_PACKAGE" and decision == "ACCEPT":
+                # Serialize account package purchases across browser sessions so two
+                # simultaneously accepted proposals cannot both pass eligibility.
+                connection.execute(text("""
+                    SELECT pg_advisory_xact_lock(
+                      hashtext(CAST(:sandbox AS text)), hashtext(CAST(:account AS text)))
+                """), {"sandbox": context.sandbox_id, "account": context.account_id}).scalar_one()
+                active_account = connection.execute(text("""
+                    SELECT id FROM sandbox.accounts
+                    WHERE sandbox_id=:sandbox AND id=:account AND status='ACTIVE'
+                """), {"sandbox": context.sandbox_id, "account": context.account_id}).scalar_one_or_none()
+                if active_account is None:
+                    raise ResolveError(422, "ACTION_NOT_ALLOWED", "The account is not active for package activation")
+                pending = connection.execute(text("""
+                    SELECT o.id FROM resolve.operations o
+                    JOIN resolve.action_proposals p ON p.id=o.proposal_id AND p.case_id=o.case_id
+                    JOIN resolve.cases c ON c.id=o.case_id
+                    WHERE c.sandbox_id=:sandbox AND c.account_id=:account
+                      AND p.action_type='ACTIVATE_PACKAGE' AND p.target_id=:offer
+                      AND o.status IN ('PENDING','RUNNING','UNKNOWN') AND p.id<>:proposal
+                    LIMIT 1
+                """), {"sandbox": context.sandbox_id, "account": context.account_id,
+                      "offer": proposal["target_id"], "proposal": proposal_id}).scalar_one_or_none()
+                if pending is not None:
+                    raise ResolveError(409, "ACTION_ALREADY_CONFIRMED",
+                        "An activation for this package is already being processed")
             target = self._provider.get_action_target(context.sandbox_id, context.account_id, proposal["action_type"], proposal["target_id"])  # type: ignore[attr-defined]
             if target is None or target["version"] != proposal["target_version"]:
                 raise ResolveError(409, "STALE_VERSION", "Action target changed; request a fresh proposal")
+            if proposal["action_type"] == "ACTIVATE_PACKAGE" and decision == "ACCEPT":
+                stored_terms = (proposal["consequences"] or {}).get("package_terms")
+                current_terms = {"name": target["label"], "price_minor": target["price_minor"],
+                    "currency": target["currency"].strip(), "data_bytes": target["data_bytes"],
+                    "validity_seconds": target["validity_seconds"], "recurring": target["recurring"]}
+                if (not target.get("available_for_purchase") or target.get("recurring")
+                        or target.get("already_active") or target.get("balance_minor") is None
+                        or target["balance_minor"] < target["price_minor"] or stored_terms != current_terms):
+                    raise ResolveError(409, "PROPOSAL_INVALIDATED",
+                        "Package eligibility or terms changed; review the current catalogue before confirming")
             confirmation_id = uuid4()
             connection.execute(text("""INSERT INTO resolve.confirmations
                 (id,sandbox_id,case_id,proposal_id,proposal_hash,actor_session_id,source_channel,

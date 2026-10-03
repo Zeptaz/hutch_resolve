@@ -37,6 +37,7 @@ class Settings:
     voice_grant_encryption_key: bytes | None = None
     crm_provider: str = "mock"
     hubspot: HubSpotConfig | None = None
+    package_activation_enabled: bool = False
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -68,6 +69,9 @@ class Settings:
         voice_grant_encryption_key = grant_key_text.encode("utf-8") if grant_key_text else None
         if voice_grant_encryption_key is not None and len(voice_grant_encryption_key) != 32:
             raise RuntimeError("VOICE_GRANT_ENCRYPTION_KEY must contain exactly 32 bytes")
+        package_flag = os.getenv("RESOLVE_PACKAGE_ACTIVATION_ENABLED", "false").strip().lower()
+        if package_flag not in {"true", "false"}:
+            raise RuntimeError("RESOLVE_PACKAGE_ACTIVATION_ENABLED must be true or false")
         trusted_proxy_ips = frozenset(value.strip() for value in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if value.strip())
         import ipaddress
         try:
@@ -157,4 +161,5 @@ class Settings:
             voice_grant_encryption_key=voice_grant_encryption_key,
             crm_provider=crm_provider,
             hubspot=hubspot,
+            package_activation_enabled=package_flag == "true",
         )

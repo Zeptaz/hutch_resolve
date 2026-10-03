@@ -5,7 +5,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Header, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 from .auth import ResolveError, authenticated_context_any_role, authenticated_customer_mutation
 
@@ -14,10 +14,19 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class PackageTerms(StrictModel):
+    name: str = Field(min_length=1, max_length=120)
+    price_minor: StrictInt = Field(ge=0, le=9_007_199_254_740_991)
+    currency: Literal["LKR"]
+    data_bytes: StrictInt = Field(gt=0, le=9_007_199_254_740_991)
+    validity_seconds: StrictInt = Field(gt=0, le=9_007_199_254_740_991)
+    recurring: Literal[False]
+
+
 class ProposalRequest(StrictModel):
     expected_version: int = Field(ge=1)
     investigation_id: UUID
-    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"]
+    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET", "ACTIVATE_PACKAGE"]
     target_id: UUID
 
 
@@ -25,14 +34,21 @@ class ProposalView(StrictModel):
     id: UUID
     case_id: UUID
     investigation_id: UUID
-    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"]
+    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET", "ACTIVATE_PACKAGE"]
     target_id: UUID
     target_version: int
     target_label: str
     consequences: str
+    package_terms: PackageTerms | None = None
     proposal_hash: str
     expires_at: datetime
     simulation: Literal[True]
+
+    @model_validator(mode="after")
+    def package_terms_match_action(self):
+        if (self.action_type == "ACTIVATE_PACKAGE") != (self.package_terms is not None):
+            raise ValueError("ACTIVATE_PACKAGE requires package_terms")
+        return self
 
 
 class ConfirmationRequest(StrictModel):
@@ -71,7 +87,7 @@ class OperationView(StrictModel):
     id: UUID
     case_id: UUID
     proposal_id: UUID
-    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"]
+    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET", "ACTIVATE_PACKAGE"]
     status: Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "UNKNOWN", "REVIEW_REQUIRED"]
     created_at: datetime
     updated_at: datetime

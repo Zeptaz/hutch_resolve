@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowDown, Bot, FolderOpen, Phone, SendHorizontal } from 'lucide-react'
+import { ArrowDown, Bot, FolderOpen, Package, Phone, SendHorizontal } from 'lucide-react'
 import { newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
@@ -242,6 +242,10 @@ export function ChatShell({ session, onDemoLogin }: {
     if (local) return local
     return conversation?.pending_proposal?.id === p.id ? { kind: 'open' } : { kind: 'closed' }
   }
+
+  const browsePackages = () => answer({ type: 'package_query' }, t('package.browse'))
+  const selectPackage = (offerId: string, offerName: string) =>
+    answer({ type: 'package_selection', offer_id: offerId }, `${t('package.select')}: ${offerName}`)
   const turnOutcomeUncertain = failed !== null && hasUncertainOutcome(failed.error)
 
   const renderProposal = (p: ProposalView) => (
@@ -380,7 +384,12 @@ export function ChatShell({ session, onDemoLogin }: {
                             <div className="flex max-w-xl flex-col gap-2 sm:ml-9">
                               {result.cards.map((card, i) => (
                                 <div key={`${m.id}-${i}`} {...enter(i)}>
-                                  <ChatCard card={card} renderConfirmation={(c) => renderProposal(c.data)} />
+                                  <ChatCard
+                                    card={card}
+                                    renderConfirmation={(c) => renderProposal(c.data)}
+                                    onPackageSelect={selectPackage}
+                                    packageSelectionDisabled={sending || turnOutcomeUncertain}
+                                  />
                                 </div>
                               ))}
                               {result.operation_ids.map((id) => (
@@ -463,6 +472,11 @@ export function ChatShell({ session, onDemoLogin }: {
               />
               <Button type="submit" size="icon-lg" aria-label={t('chat.send')} disabled={!conversation || sending || turnOutcomeUncertain || !draft.trim()}>
                 <SendHorizontal aria-hidden />
+              </Button>
+            </div>
+            <div className="mx-auto mt-2 flex w-full max-w-2xl justify-end">
+              <Button type="button" variant="ghost" size="sm" onClick={browsePackages} disabled={!conversation || sending || turnOutcomeUncertain || session.role !== 'CUSTOMER'}>
+                <Package aria-hidden /> {t('package.browse')}
               </Button>
             </div>
           </form>

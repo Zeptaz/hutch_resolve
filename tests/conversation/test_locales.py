@@ -24,7 +24,7 @@ def test_draft_has_same_keys_and_placeholders_as_english(language: Language) -> 
     sections = locale["sections"]
     assert set(sections) == set(t.ENGLISH)
     for section, english in t.ENGLISH.items():
-        expected = set(english) - (t.NOT_LOCALIZED if section == "strings" else set())
+        expected = set(english) - (t.NOT_LOCALIZED if section in {"strings", "complaint_labels"} else set())
         assert set(sections[section]) == expected, (language, section)
         for key, value in sections[section].items():
             assert placeholders(value) == placeholders(english[key]), (language, section, key)

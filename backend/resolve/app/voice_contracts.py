@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 
 class StrictModel(BaseModel):
@@ -43,13 +43,29 @@ class VoiceTurnRequest(StrictModel):
     presented_proposal_hash: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+class VoicePackageTerms(StrictModel):
+    name: str = Field(min_length=1, max_length=120)
+    price_minor: StrictInt = Field(ge=0, le=9_007_199_254_740_991)
+    currency: Literal["LKR"]
+    data_bytes: StrictInt = Field(gt=0, le=9_007_199_254_740_991)
+    validity_seconds: StrictInt = Field(gt=0, le=9_007_199_254_740_991)
+    recurring: Literal[False]
+
+
 class VoiceProposal(StrictModel):
     id: str
     proposal_hash: str
-    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"]
+    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET", "ACTIVATE_PACKAGE"]
     target_label: str
     consequences: str
     expires_at: str
+    package_terms: VoicePackageTerms | None = None
+
+    @model_validator(mode="after")
+    def package_terms_match_action(self):
+        if (self.action_type == "ACTIVATE_PACKAGE") != (self.package_terms is not None):
+            raise ValueError("ACTIVATE_PACKAGE requires package_terms")
+        return self
 
 
 class VoiceTurnResponse(StrictModel):

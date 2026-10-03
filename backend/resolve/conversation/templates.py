@@ -72,6 +72,7 @@ _EN: dict[str, str] = {
     "off_topic": "I can only help with your HUTCH prepaid line: balance, reloads, data, packages, connection and services. What can I help you with?",
     "packages_login": "Please sign in so I can look at your data use and suggest a package. You can still ask me how packages work.",
     "packages_unavailable": "I couldn't load the packages right now. Please try again in a moment.",
+    "package_selection_unavailable": "That offer is no longer available or cannot be activated for this line. Please review the current offers and try again.",
     "package_best_fit": "In the {period} you used {used} of data. The best fit is {name}: {data} for {validity}, {price}.",
     "package_alternatives": "Other options: {options}.",
     "package_offer_hint": "Tap 'Yes, go ahead' on the offer to activate it, or tell me which other package you'd like.",
@@ -93,6 +94,7 @@ _COMPLAINT_LABELS_EN: dict[ComplaintType, str] = {
     ComplaintType.DATA_DEPLETION: "data",
     ComplaintType.CONNECTIVITY: "connection",
     ComplaintType.VAS_DISPUTE: "service charge",
+    ComplaintType.PACKAGE_ACTIVATION: "package purchase",
 }
 
 # Faithful wording per operation state: pending is never described as done.
@@ -151,7 +153,7 @@ ENGLISH: dict[str, dict[str, str]] = {
     "case_status": _CASE_STATUS_EN,
 }
 # Sent to Resolve as case data, not shown as a reply: always English.
-NOT_LOCALIZED = frozenset({"default_escalation_reason"})
+NOT_LOCALIZED = frozenset({"default_escalation_reason", "package_selection_unavailable", "PACKAGE_ACTIVATION"})
 LOCALES_DIR = Path(__file__).with_name("locales")
 REVIEWED = "REVIEWED"
 
