@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { useNow } from './time'
-import { Calculator, Database, Download, FileCheck2, History, ListChecks, MessagesSquare, Search, Ticket, UserRound } from 'lucide-react'
+import { Calculator, Database, Download, ExternalLink, FileCheck2, History, ListChecks, MessagesSquare, Search, Ticket, UserRound } from 'lucide-react'
 import type { AgentCaseDetail, Calculation, InvestigationResult, ProposalView, ReceiptView, SourceStatus } from '@/api/types'
 import { CardFrame } from '@/components/CardFrame'
 import { DeliveryBadge, OperationBadge, StatusBadge } from '@/components/StatusBadge'
@@ -22,7 +22,16 @@ const SYNC_TONE: Record<string, Tone> = {
   REVIEW_REQUIRED: 'danger',
 }
 
-const TAB_IDS = ['evidence', 'actions', 'conversation', 'receipts', 'history'] as const
+// Optional link to the external ticket, e.g. HubSpot. The template's {id} is the provider ticket ID.
+const CRM_NAME = import.meta.env.VITE_CRM_NAME?.trim() ?? ''
+const CRM_TICKET_URL = import.meta.env.VITE_CRM_TICKET_URL?.trim() ?? ''
+
+function crmTicketUrl(ticketId: string): string | undefined {
+  if (!CRM_TICKET_URL.startsWith('https://') || !CRM_TICKET_URL.includes('{id}')) return undefined
+  return CRM_TICKET_URL.replace('{id}', encodeURIComponent(ticketId))
+}
+
+const TAB_IDS =['evidence', 'actions', 'conversation', 'receipts', 'history'] as const
 type TabId = (typeof TAB_IDS)[number]
 
 export function CaseTabs({ detail }: { detail: AgentCaseDetail }) {
@@ -364,12 +373,27 @@ function ActionsTab({ detail }: { detail: AgentCaseDetail }) {
                 </dd>
               </div>
               <div className="col-span-2 flex flex-col sm:col-span-3">
-                <dt className="text-xs text-muted-foreground">Ticket ID</dt>
-                <dd className="font-mono text-sm break-all">{h.provider_ticket_id ?? 'Not assigned yet. The ticket system has not confirmed it.'}</dd>
+                <dt className="text-xs text-muted-foreground">{CRM_NAME ? `${CRM_NAME} ticket ID` : 'Ticket ID'}</dt>
+                <dd className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="font-mono text-sm break-all">{h.provider_ticket_id ?? 'Not assigned yet. The ticket system has not confirmed it.'}</span>
+                  {h.delivery_state === 'DELIVERED' && h.provider_ticket_id && crmTicketUrl(h.provider_ticket_id) && (
+                    <a
+                      href={crmTicketUrl(h.provider_ticket_id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
+                    >
+                      Open in {CRM_NAME || 'the ticket system'}
+                      <ExternalLink className="size-3.5" aria-hidden />
+                    </a>
+                  )}
+                </dd>
               </div>
             </dl>
             <p className="text-xs text-muted-foreground">
-              Your notes and status are copied to this ticket. The ticket's own status is set by the ticket team, not from here.
+              {CRM_NAME
+                ? `Your notes are added to this ${CRM_NAME} ticket and your review status moves it through its pipeline. Changes made in ${CRM_NAME} are not copied back here.`
+                : "Your notes and status are copied to this ticket. The ticket's own status is set by the ticket team, not from here."}
             </p>
           </div>
         ) : (
