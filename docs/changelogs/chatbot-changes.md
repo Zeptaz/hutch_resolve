@@ -4,7 +4,7 @@ Changes to the conversation module only: `backend/resolve/conversation/**` and i
 Anything that touches Resolve services, providers, migrations, shared DTOs/contracts, the Voice
 bridge or the frontend goes in [core-engine-changes.md](core-engine-changes.md) instead.
 
-Branch: `tevin/chatbot-fixes` (from `main` @ `4b581b2`).
+Branch: `tevin/chatbot-fixes` (from `main` @ `4b581b2`). CB-001..CB-003 merged into `main` on 2026-10-04 as `0375c4b`.
 
 ## Risk levels
 
