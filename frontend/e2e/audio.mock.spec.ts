@@ -1,5 +1,39 @@
 import { expect, test } from '@playwright/test'
 
+test('caller can interrupt a playing reply and keep sending microphone audio', async ({ page }) => {
+  await page.goto('/')
+  const result = await page.evaluate(async () => {
+    const { VoiceCall } = await import('/src/voice/call.ts')
+    const call = new VoiceCall('synthetic-conversation') as unknown as Record<string, any>
+    const sent: (string | ArrayBuffer)[] = []
+    let flushed = 0
+    const audio = {
+      onFrame: (_pcm: ArrayBuffer, _level: number) => {},
+      flush: () => { flushed++ },
+      close: () => {},
+      micLevel: 0,
+      speakerLevel: 0,
+    }
+    call.audio = audio
+    call.socket = { readyState: WebSocket.OPEN, send: (value: string | ArrayBuffer) => sent.push(value) }
+    call.state = { ...call.state, phase: 'live', activity: 'speaking' }
+    call.reply = { id: 'reply-1' }
+    call.handleFrame(new ArrayBuffer(3200), 0.03)
+    call.handleFrame(new ArrayBuffer(3200), 0.03)
+    for (let i = 0; i < 7; i++) call.handleFrame(new ArrayBuffer(3200), 0)
+    const controls = sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item))
+    return { flushed, controls, audioFrames: sent.filter((item) => item instanceof ArrayBuffer).length,
+      currentReply: call.reply, activity: call.state.activity }
+  })
+  expect(result).toEqual({
+    flushed: 1,
+    controls: [{ type: 'input_activity_start', segment_id: 1 }, { type: 'input_activity_end', segment_id: 1 }],
+    audioFrames: 9,
+    currentReply: null,
+    activity: 'listening',
+  })
+})
+
 test('expired grant retries rotate the key while unknown outcomes retain it', async ({ page }) => {
   await page.goto('/')
   const result = await page.evaluate(async () => {

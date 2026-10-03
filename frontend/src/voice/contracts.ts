@@ -5,7 +5,7 @@ type Schemas = components['schemas']
 export type VoiceSessionGrant = Schemas['VoiceSessionGrant']
 export type VoiceProposal = Schemas['Proposal']
 
-/** Browser wire messages from the external Zeptaz Voice v2 runtime. */
+/** Browser wire messages from the external Zeptaz Voice v3 runtime. */
 export type VoiceResolveResult = {
   type: 'resolve_result'
   response_id: string

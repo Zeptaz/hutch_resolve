@@ -85,3 +85,7 @@ The repeated generic chat/call prompt came from six-second extraction timeouts i
 ### Faster voice playback — 2026-10-04
 
 The customer call UI now sends `input_audio_end` after seven 100 ms quiet frames. It displays Resolve's canonical reply while streaming Live PCM immediately, removes the browser speech-synthesis fallback and no longer sends proposal-presentation acknowledgements. Proposal choices remain visible buttons only. Typecheck/build and mock browser suite **24/24** pass. Physical microphone/speaker and live model latency/meaning checks remain open; J-03/J-04 are not yet complete.
+
+### Voice v3 caller interruption checkpoint — 2026-10-04
+
+The current call UI offers `zeptaz-hutch-v3`, sends an increasing activity segment ID after two speech frames and ends it after seven quiet frames, keeps sending microphone PCM during replies, and flushes queued playback on new caller speech. `input_audio_end` now marks a mute/pause. A mock browser test exercises interruption while PCM keeps flowing; the complete mock browser suite **25/25**, typecheck and lint pass. Real browser microphone/speaker interruption and native-language checks remain open, so J-03/J-04 are not marked complete.

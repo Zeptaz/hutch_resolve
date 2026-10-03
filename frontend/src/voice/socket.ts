@@ -1,7 +1,7 @@
 import { API_MODE } from '@/api/client'
 import type { VoiceSessionGrant } from './contracts'
 
-export const VOICE_PROTOCOL = 'zeptaz-hutch-v2'
+export const VOICE_PROTOCOL = 'zeptaz-hutch-v3'
 
 /** The part of WebSocket the call uses, so the mock can stand in for it. */
 export type VoiceSocket = {
@@ -17,7 +17,7 @@ export type VoiceSocket = {
 
 /**
  * Connect straight to Voice with the single-use grant from Resolve. The grant travels as a WebSocket
- * subprotocol, never in the URL, and Voice answers with only `zeptaz-hutch-v2`.
+ * subprotocol, never in the URL, and Voice answers with `zeptaz-hutch-v3`.
  */
 export async function openVoiceSocket(grant: VoiceSessionGrant): Promise<VoiceSocket> {
   if (API_MODE === 'mock') return (await import('./mockSocket')).openMockSocket(grant.websocket_url)

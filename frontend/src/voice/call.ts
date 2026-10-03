@@ -94,7 +94,7 @@ class MockAudio implements AudioPort {
 }
 
 /**
- * One customer voice call: mic -> Voice WebSocket -> speaker, following protocol zeptaz-hutch-v2.
+ * One customer voice call: mic -> Voice WebSocket -> speaker, following protocol zeptaz-hutch-v3.
  *
  * Rules (docs/hutch-resolve-contract.md):
  * - Send playback_complete only after a reply's audio has fully drained.
@@ -115,8 +115,10 @@ export class VoiceCall {
   private grantRequestKey: string | null = null
   private greetingPlaying = false
   private heardSpeech = false
+  private speechFrames = 0
   private quietFrames = 0
-  private inputClosed = false
+  private segmentId = 0
+  private micStreaming = false
 
   private handlers: CallHandlers = {}
 
@@ -141,6 +143,41 @@ export class VoiceCall {
     return { mic: this.state.muted ? 0 : (this.audio?.micLevel ?? 0), speaker: this.audio?.speakerLevel ?? 0 }
   }
 
+  private handleFrame(pcm: ArrayBuffer, level: number) {
+    const micActive = !this.greetingPlaying && !this.state.muted && level >= 0.012
+    if (micActive !== this.state.micActive) this.set({ micActive })
+    if (this.state.phase !== 'live' || this.state.muted || this.greetingPlaying ||
+        this.socket?.readyState !== WebSocket.OPEN) return
+    if (micActive) {
+      this.speechFrames++
+      this.quietFrames = 0
+      if (!this.heardSpeech && this.speechFrames >= 2) {
+        this.heardSpeech = true
+        this.segmentId++
+        this.send({ type: 'input_activity_start', segment_id: this.segmentId })
+        if (this.reply) {
+          this.audio?.flush()
+          this.reply = null
+          this.awaitingPlaybackAck = null
+          window.clearTimeout(this.playbackRetryTimer)
+          this.set({ activity: 'listening' })
+        }
+      }
+    } else if (this.heardSpeech) {
+      this.quietFrames++
+    } else {
+      this.speechFrames = 0
+    }
+    this.socket.send(pcm)
+    this.micStreaming = true
+    if (this.heardSpeech && this.quietFrames >= 7) {
+      this.send({ type: 'input_activity_end', segment_id: this.segmentId })
+      this.heardSpeech = false
+      this.speechFrames = 0
+      this.quietFrames = 0
+    }
+  }
+
   private set(patch: Partial<CallState>) {
     this.state = { ...this.state, ...patch }
     this.listeners.forEach((fn) => fn())
@@ -156,25 +193,7 @@ export class VoiceCall {
       return this.fail({ kind: 'mic', mic: 'unsupported' })
     }
     const audio = this.audio
-    audio.onFrame = (pcm, level) => {
-      const micActive = !this.inputClosed && !this.greetingPlaying && !this.state.muted && level >= 0.012
-      if (micActive !== this.state.micActive) this.set({ micActive })
-      if (this.state.phase !== 'live' || this.state.muted || this.greetingPlaying || this.inputClosed ||
-          this.socket?.readyState !== WebSocket.OPEN) return
-      if (micActive) {
-        this.heardSpeech = true
-        this.quietFrames = 0
-      } else if (this.heardSpeech) {
-        this.quietFrames++
-      }
-      if (!this.inputClosed) this.socket.send(pcm)
-      if (this.heardSpeech && this.quietFrames >= 7) {
-        this.send({ type: 'input_audio_end' })
-        this.heardSpeech = false
-        this.quietFrames = 0
-        this.inputClosed = true
-      }
-    }
+    audio.onFrame = (pcm, level) => this.handleFrame(pcm, level)
     audio.onDrained = (id) => this.drained(id)
     audio.onPlayingChange = (playing) => {
       if (this.state.phase !== 'live') return
@@ -255,6 +274,13 @@ export class VoiceCall {
   }
 
   setMuted(muted: boolean) {
+    if (muted && !this.state.muted && this.micStreaming) {
+      this.send({ type: 'input_audio_end' })
+      this.micStreaming = false
+      this.heardSpeech = false
+      this.speechFrames = 0
+      this.quietFrames = 0
+    }
     this.set({ muted })
   }
 
@@ -338,13 +364,12 @@ export class VoiceCall {
           this.set({ proposal: { ...p, status: 'interrupted' } })
         }
         this.reply = null
-        this.inputClosed = false
         this.set({ activity: 'listening' })
         break
       }
       case 'error':
         if (msg.code === 'voice_session_ending' || msg.code.startsWith('invalid_')) break // informational
-        if (msg.code === 'resolve_tool_failed' || msg.code === 'speech_unavailable') this.inputClosed = false
+        if (msg.code === 'speech_unavailable') this.set({ activity: 'listening' })
         this.set({ error: { kind: 'voice', code: msg.code } })
         break
       case 'ended':
@@ -356,7 +381,6 @@ export class VoiceCall {
   /** The reply's audio has fully played: report it, and nothing else. */
   private drained(id: string) {
     if (this.reply?.id !== id || this.state.phase !== 'live') return
-    this.inputClosed = false
     this.awaitingPlaybackAck = id
     this.playbackAttempts = 1
     this.send({ type: 'playback_complete', response_id: id })
@@ -417,7 +441,9 @@ export class VoiceCall {
     window.clearTimeout(this.playbackRetryTimer)
     this.playbackAttempts = 0
     this.heardSpeech = false
+    this.speechFrames = 0
     this.quietFrames = 0
-    this.inputClosed = false
+    this.segmentId = 0
+    this.micStreaming = false
   }
 }
