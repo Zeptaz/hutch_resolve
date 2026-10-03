@@ -25,3 +25,15 @@ test('journey A: evidence, explicit accept, success and a receipt', async ({ pag
   await expect(page.getByText('Succeeded').first()).toBeVisible({ timeout: 20_000 })
   await expect(accept).toHaveCount(0)
 })
+
+test('a signed-in customer can open the call panel before any proposal', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByRole('textbox').last()).toBeEnabled()
+  await page.waitForLoadState('networkidle')
+  await mockControl(page, 'continueAsDemoLine')
+  await page.reload()
+
+  await page.getByRole('button', { name: 'Call', exact: true }).click()
+  await expect(page.getByText('Talk to Resolve')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Start voice call' })).toBeVisible()
+})

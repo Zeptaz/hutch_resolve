@@ -61,3 +61,7 @@ Logout failures now preserve the recoverable agent session. Review updates persi
 ### Main branch merge verification — 2026-10-03
 
 The integrated frontend from `ResolveDev` is now on `main`, including the voice/call UI, dashboard, and browser scenarios. On the merged tree, typecheck and production build pass and the mock browser suite exits cleanly with **23/23 passed**. Live chat/call qualification with the real Resolve and Voice services remains open.
+
+### Local browser verification — 2026-10-03
+
+Against live Resolve/Voice and isolated PostgreSQL, customer sign-in, structured A evidence/confirmation/receipt, package browse/selection, agent D review and visible Voice unavailable/text continuation were exercised. The Call panel's absent-proposal render and unavailable-provider feedback were fixed. Frontend typecheck/build pass and mock browser suite exits **24/24 passed**; the recovery test now waits for chat initialization before simulating outage. A real microphone/provider call, broader accessibility review and release recording remain open. See root `context.md` for backend and database checks.

@@ -90,10 +90,11 @@ def test_voice_binding_and_signed_turn_persist_and_replay_on_postgres():
 
         with TestClient(app) as client:
             client.cookies.set("resolve_customer_session", credential)
+            first_grant_key = str(uuid4())
             session_response = client.post(
                 f"/api/v1/conversations/{conversation['id']}/voice-sessions", json={},
                 headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, credential),
-                         "Idempotency-Key": str(uuid4())},
+                         "Idempotency-Key": first_grant_key},
             )
             assert session_response.status_code == 201, session_response.text
             grant = session_response.json()
@@ -118,6 +119,37 @@ def test_voice_binding_and_signed_turn_persist_and_replay_on_postgres():
             assert replay.json() == first.json()
             assert len(service.calls) == 1
             assert service.calls[0][0].channel == "VOICE"
+
+            # Expiring an issued grant must clear both protected fields before
+            # the next call can be provisioned; the old key stays terminal.
+            with engine.begin() as connection:
+                connection.execute(text("""
+                    UPDATE resolve.voice_grant_requests
+                    SET grant_expires_at=:expired
+                    WHERE binding_id=:binding_id
+                """), {"expired": datetime.now(UTC) - timedelta(seconds=1),
+                      "binding_id": binding_id})
+            next_grant = client.post(
+                f"/api/v1/conversations/{conversation['id']}/voice-sessions", json={},
+                headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, credential),
+                         "Idempotency-Key": str(uuid4())},
+            )
+            assert next_grant.status_code == 201, next_grant.text
+            expired_replay = client.post(
+                f"/api/v1/conversations/{conversation['id']}/voice-sessions", json={},
+                headers={"Origin": ORIGIN, "X-CSRF-Token": _csrf_token(APP_SECRET, credential),
+                         "Idempotency-Key": first_grant_key},
+            )
+            assert expired_replay.status_code == 409
+            assert expired_replay.json()["error"]["code"] == "VOICE_GRANT_EXPIRED"
+            with engine.connect() as connection:
+                expired_row = connection.execute(text("""
+                    SELECT state,encrypted_grant,grant_expires_at
+                    FROM resolve.voice_grant_requests WHERE binding_id=:binding_id
+                """), {"binding_id": binding_id}).mappings().one()
+                assert expired_row["state"] == "EXPIRED"
+                assert expired_row["encrypted_grant"] is None
+                assert expired_row["grant_expires_at"] is None
 
         with engine.connect() as connection:
             assert connection.execute(text("SELECT count(*) FROM resolve.voice_bindings WHERE id=:id"),

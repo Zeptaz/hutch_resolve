@@ -136,6 +136,23 @@ def details(complaint="BALANCE_RECHARGE", **facts):
             "window_end": SIM_END.isoformat(), "reported_facts": facts}
 
 
+@pytest.mark.skipif(not (DB_URL and SANDBOX_URL), reason="needs an isolated migrated Resolve database")
+def test_real_package_catalogue_projects_resolve_metadata(harry_real) -> None:
+    from backend.resolve.services.facade import ResolveFacade
+
+    facade, store = harry_real
+    package_facade = ResolveFacade(
+        facade._engine, cursor_secret=b"package-conversation-integration-secret",
+        action_execution_available=True, package_activation_enabled=True,
+    )
+    ctx, conv, repo, service, _ = journey((package_facade, store), ACCOUNT_A)
+    result = send(service, repo, ctx, conv, {"type": "package_query"})
+    catalogue = next(card for card in result.cards if card.type == "package_catalogue")
+    assert catalogue.offers
+    assert all(not offer.recommended for offer in catalogue.offers)
+    assert all(offer.currency == "LKR" for offer in catalogue.offers)
+
+
 def test_a_reconciles_from_real_ledger_and_accept_persists_pending_operation(harry) -> None:
     ctx, conv, repo, service, adapter = journey(harry, ACCOUNT_A)
     result = send(service, repo, ctx, conv, details(amount_minor=100000))

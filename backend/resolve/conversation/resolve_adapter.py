@@ -101,6 +101,12 @@ class ResolveFacadeAdapter:
     def _plain(value: Any) -> Any:
         return asdict(value) if is_dataclass(value) else value
 
+    @staticmethod
+    def _package_fields(model: type, value: dict[str, Any]) -> dict[str, Any]:
+        # Resolve retains balance and source metadata for its own decisions;
+        # the conversation port receives only its declared presentation fields.
+        return {name: value[name] for name in model.model_fields if name in value}
+
     # --- ports.ResolveFacade --------------------------------------------------
 
     async def get_account(self, ctx: AuthContext) -> AccountView:
@@ -108,10 +114,11 @@ class ResolveFacadeAdapter:
 
     async def list_package_offers(self, ctx: AuthContext) -> list[PackageOfferView]:
         rows = await self._call(self._facade.list_package_offers, self._context(ctx))
-        return [PackageOfferView.model_validate(row) for row in rows]
+        return [PackageOfferView.model_validate(self._package_fields(PackageOfferView, row)) for row in rows]
 
     async def get_package_usage(self, ctx: AuthContext) -> UsageSummary:
-        return UsageSummary.model_validate(await self._call(self._facade.get_package_usage, self._context(ctx)))
+        row = await self._call(self._facade.get_package_usage, self._context(ctx))
+        return UsageSummary.model_validate(self._package_fields(UsageSummary, row))
 
     async def propose_package_activation(self, ctx: AuthContext, conversation_id: UUID,
                                          offer_id: UUID, command_key: str) -> ProposalView:

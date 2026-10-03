@@ -85,9 +85,9 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   }, [call, syncOperations])
 
   useEffect(() => {
-    if (state.phase === 'ended' && lastPhase.current !== 'ended' && !textDecisionPending.current) onCallEnd()
+    if (state.phase === 'ended' && lastPhase.current !== 'ended' && !textDecisionPending.current && !state.error) onCallEnd()
     lastPhase.current = state.phase
-  }, [state.phase, onCallEnd])
+  }, [state.phase, state.error, onCallEnd])
 
   useEffect(() => {
     if (!watchIds.length) return
@@ -166,7 +166,8 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
     }
   }
 
-  const proposalStatus = state.proposal?.data.id === offer?.data.id ? state.proposal.status : 'text-only'
+  const proposalStatus = state.proposal && offer && state.proposal.data.id === offer.data.id
+    ? state.proposal.status : 'text-only'
   const byTap = state.phase !== 'live' || proposalStatus === 'text-only' || proposalStatus === 'interrupted'
   const expired = offer ? Date.parse(offer.data.expires_at) <= Date.now() : false
   const active = state.phase === 'live'

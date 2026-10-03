@@ -8,6 +8,7 @@ test('uncertain customer turn stays locked and retry reuses it without duplicate
   await mockControl(page, 'continueAsDemoLine')
   await page.reload()
   await expect(page.getByRole('textbox').last()).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Browse data packages' })).toBeEnabled()
 
   await mockControl(page, 'setOutage', true)
   const input = page.getByRole('textbox').last()

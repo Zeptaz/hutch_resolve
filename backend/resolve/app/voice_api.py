@@ -444,7 +444,7 @@ def _claim_voice_grant(engine, context: AuthContext, conversation_id: UUID, orig
     with engine.begin() as connection:
         connection.execute(text("""
             UPDATE resolve.voice_grant_requests
-            SET encrypted_grant=NULL,state='EXPIRED',updated_at=:now
+            SET encrypted_grant=NULL,grant_expires_at=NULL,state='EXPIRED',updated_at=:now
             WHERE grant_expires_at<=:now AND encrypted_grant IS NOT NULL AND state='SUCCEEDED'
         """), {"now": now})
         session = connection.execute(text("""

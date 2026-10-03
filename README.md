@@ -25,7 +25,7 @@ python -m pip install -r requirements-dev.txt
 python -m uvicorn backend.resolve.app.main:app --host 127.0.0.1 --port 8080
 ```
 
-The application reads `DATABASE_URL` and `SANDBOX_DATABASE_URL` from `.env`; Resolve uses `hutch_resolve_app` for business state and the separate `hutch_sandbox` role for synthetic writes and configured one-shot fault controls. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0007_conversation_runtime`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003, and revisions 0002-0007 add lifecycle, investigation, proposal/confirmation, review sync, Voice consent fencing and conversation persistence. Opt-in PostgreSQL tests verify action recovery, review sync, text replay, guest upgrade and signed Voice confirmation.
+The application reads `DATABASE_URL` and `SANDBOX_DATABASE_URL` from `.env`; Resolve uses `hutch_resolve_app` for business state and the separate `hutch_sandbox` role for synthetic writes and configured one-shot fault controls. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0011_turn_recovery`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003, and revisions 0002-0011 add lifecycle, investigation, proposal/confirmation, review sync, Voice consent fencing, conversation persistence and turn recovery. Opt-in PostgreSQL tests verify action recovery, review sync, text replay, guest upgrade and signed Voice confirmation.
 
 ## Start the frontend
 

@@ -67,3 +67,7 @@ Update this plan and root context.md after each implemented and verified correct
 ### 2026-10-03 grounded response follow-up
 
 Resolve conversation answers now reject outcome claims unsupported by the available grounded facts, preventing the freeform response path from inventing a customer outcome. Focused conversation answer tests passed (**40 passed**); the aggregate Resolve suite is **439 passed, 36 PostgreSQL-gated skipped**. No real-model semantic qualification has run, so model answer quality and native-language phrasing remain open.
+
+### Local full-stack conversation verification — 2026-10-03
+
+The real Resolve-backed package query initially failed strict presentation DTO validation because Resolve-only usage/offer metadata leaked into the chatbot adapter. The adapter now projects only declared presentation fields; a real facade/disposable PostgreSQL regression passes. Live structured browser/API paths exercised A/B/C/D/E/F, package selection, action status and receipts. The model capability was unavailable because no live model key was configured; free-text fallback requested structured complaint entry. Real-model semantic, native-language and physical Voice qualifications remain open. See root `context.md` for aggregate checks.
