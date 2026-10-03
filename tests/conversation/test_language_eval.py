@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 
 from resolve.conversation.dto import ComplaintType, Language
-from resolve.conversation.extraction import Extraction, Intent, SpokenDecision, TimeKind
+from resolve.conversation.extraction import AccountTopic, Extraction, Intent, SpokenDecision, TimeKind
 from resolve.conversation.try_extract import load_cases, score
 
 ALLOWED = {
@@ -14,6 +14,7 @@ ALLOWED = {
     "decision": {d.value for d in SpokenDecision} | {None},
     "detected_language": {l.value for l in Language},
     "time_kind": {k.value for k in TimeKind},
+    "account_topic": {a.value for a in AccountTopic},
 }
 
 

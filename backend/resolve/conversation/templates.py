@@ -1,9 +1,13 @@
 """Deterministic reply templates.
 
-English is authoritative and lives here. Sinhala and Tamil live in
-`locales/{si,ta}.json` and are used **only** when the file's status is
+English is authoritative and lives here. Other languages live in
+`locales/<locale>.json` and are used **only** when the file's status is
 `REVIEWED` by a fluent reviewer (T-04); otherwise replies fall back to English.
 The plan forbids claiming native-language support that was not demonstrated.
+
+A locale is the language plus how the customer writes it: `si` and `ta` are the
+native scripts, `si-Latn` is romanized Sinhala ("Singlish") as typed in chat.
+Every function taking `language` accepts a `Language` or a locale code.
 """
 
 from __future__ import annotations
@@ -60,6 +64,16 @@ _EN: dict[str, str] = {
     "account_balance": "Your {wallet} balance is {amount} (as of {as_of}).",
     "account_no_balance": "I couldn't find a balance for your account right now.",
     "account_incomplete": "Some account information may not be up to date.",
+    # Each value is a posted ledger line quoted from Resolve's calculation, e.g. "-LKR 60.00".
+    "vas_charge_lines": "Value-added service charges posted in these records: {amounts}.",
+    "account_services": "Value-added services on your line: {services}.",
+    "account_no_services": "You have no value-added services on your line right now.",
+    "service_renews": "{name} ({status}, renews automatically)",
+    "service_no_renewal": "{name} ({status}, does not renew)",
+    "offer_charge_check": "I can't see each service's price here. Shall I check your charge records to see exactly what you were charged?",
+    "account_packages": "Packages on your line: {packages}.",
+    "account_no_packages": "You have no packages on your line right now.",
+    "package_item_data": "{name} ({status}, {data} data left)",
     "accepted_review": "Your case is queued for review (request ID {reference}). {status} I'll only give you a ticket number once one has actually been issued.",
     "ticket_issued": "Ticket number: {ticket}.",
     "synthetic_policy": "This is a demo policy for the simulation, not an official HUTCH rule:",
@@ -156,46 +170,66 @@ ENGLISH: dict[str, dict[str, str]] = {
 NOT_LOCALIZED = frozenset({"default_escalation_reason", "package_selection_unavailable", "PACKAGE_ACTIVATION"})
 LOCALES_DIR = Path(__file__).with_name("locales")
 REVIEWED = "REVIEWED"
+Locale = str  # "en", "si", "ta", "si-Latn"; Language members are valid locale codes
+_LATIN_SCRIPTS = frozenset({"LATIN", "MIXED"})
+
+
+def locale_for(language: Language, script: str | None = None) -> Locale:
+    """Locale for replies: romanized when the customer types their language in Latin letters.
+
+    Without a reviewed romanized file the reply falls back to English, never to the native
+    script the customer did not use.
+    """
+    language = Language(language)
+    if language is not Language.EN and script is not None and str(script) in _LATIN_SCRIPTS:
+        return f"{language.value}-Latn"
+    return language
 
 
 @lru_cache(maxsize=None)
-def load_locale(language: Language) -> dict:
+def load_locale(language: Language | Locale) -> dict:
     """The raw locale file (any status); empty for English or a missing file."""
-    path = LOCALES_DIR / f"{language.value}.json"
-    if language is Language.EN or not path.exists():
+    code = str(language)
+    path = LOCALES_DIR / f"{code}.json"
+    if code == Language.EN or not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def active_sections(language: Language) -> dict[str, dict[str, str]]:
+def active_sections(language: Language | Locale) -> dict[str, dict[str, str]]:
     locale = load_locale(language)
     return locale.get("sections", {}) if locale.get("status") == REVIEWED else {}
 
 
-def _get(section: str, key: str, language: Language) -> str:
+def locale_active(language: Language | Locale) -> bool:
+    """True when replies for this locale come from a fluent-reviewed file."""
+    return bool(active_sections(language))
+
+
+def _get(section: str, key: str, language: Language | Locale) -> str:
     localized = active_sections(language).get(section, {})
     if key in localized and not (section == "strings" and key in NOT_LOCALIZED):
         return localized[key]
     return ENGLISH[section][key]
 
 
-def text(key: str, language: Language, **values: object) -> str:
+def text(key: str, language: Language | Locale, **values: object) -> str:
     return _get("strings", key, language).format(**values)
 
 
-def action_label(action: ActionType, language: Language) -> str:
+def action_label(action: ActionType, language: Language | Locale) -> str:
     return _get("action_labels", action.value, language)
 
 
-def complaint_label(complaint: ComplaintType, language: Language) -> str:
+def complaint_label(complaint: ComplaintType, language: Language | Locale) -> str:
     return _get("complaint_labels", complaint.value, language)
 
 
-def operation_status_text(status: OperationStatus, language: Language) -> str:
+def operation_status_text(status: OperationStatus, language: Language | Locale) -> str:
     return _get("operation_status", status.value, language)
 
 
-def handoff_text(handoff: Handoff, language: Language) -> str:
+def handoff_text(handoff: Handoff, language: Language | Locale) -> str:
     """Delivery state, plus a ticket number only when the provider actually issued one."""
     parts = [_get("delivery", handoff.delivery_state.value, language)]
     if handoff.provider_ticket_id:
@@ -203,7 +237,7 @@ def handoff_text(handoff: Handoff, language: Language) -> str:
     return " ".join(parts)
 
 
-def case_status_label(status: str, language: Language = Language.EN) -> str:
+def case_status_label(status: str, language: Language | Locale = Language.EN) -> str:
     if status in ENGLISH["case_status"]:
         return _get("case_status", status, language)
     return status.lower().replace("_", " ")
@@ -231,6 +265,6 @@ def format_window(start: datetime, end: datetime) -> str:
     return f"{s.day} {s:%b} {s:%H:%M} to {e.day} {e:%b} {e:%H:%M}"
 
 
-def missing_label(code: str, language: Language) -> str:
+def missing_label(code: str, language: Language | Locale) -> str:
     """Plain words for a missing-evidence code; never shows a raw code to the customer."""
     return _get("missing_labels", code if code in ENGLISH["missing_labels"] else "unknown", language)

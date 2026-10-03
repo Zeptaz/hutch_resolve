@@ -74,10 +74,12 @@ def test_singlish_message_gets_singlish_style_reply_without_language_picker() ->
     ctx = customer(ACCOUNT_E)
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, text("Mage reload eka watila na"), language="en"))  # UI still says English
-    assert "LKR 500" in result.reply_text and not result.reply_text.startswith("[si] ")
-    assert model.sources == []  # findings and handoff wording remain deterministic
+    # Text-chat findings and offers are rewritten into the customer's style (CB-001); facts survive.
+    assert result.reply_text.startswith("[si] ") and "LKR 500" in result.reply_text
+    assert model.styles == ["romanized Sinhala (Singlish), the way people in Sri Lanka text each other"]
     assert h.state(conv).language == "si" and h.state(conv).script == "LATIN"
-    assert not any(r.purpose == "REPLY_REWRITE" for r in h.telemetry.records)
+    assert [r.outcome for r in h.telemetry.records if r.purpose == "REPLY_REWRITE"] == ["OK"]
+    assert any(c.type == "confirmation" for c in result.cards)  # the English card stays authoritative
 
 
 def test_language_sticks_for_button_clicks() -> None:
@@ -90,17 +92,78 @@ def test_language_sticks_for_button_clicks() -> None:
     decided = h.send(ctx, h.turn(conv, {"type": "action_decision", "proposal_id": str(card.id),
                                          "proposal_hash": card.proposal_hash, "decision": "DECLINE"}, language="en"))
     assert "Nothing on your account was changed" in decided.reply_text
-    assert model.sources == []
+    # Only the findings/offer turn was rewritten; the decline is an outcome and stays deterministic.
+    assert len(model.sources) == 1 and not decided.reply_text.startswith("[si]")
 
 
-def test_financial_case_reply_never_uses_freeform_rewrite() -> None:
+def test_financial_case_rewrite_that_changes_an_amount_is_rejected() -> None:
     h, model = harness(lambda english: english.replace("420", "520"))
     h.model.on("mage balance eka adu wela", SINGLISH)
     ctx = customer(ACCOUNT_A)
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela")))
     assert "reconcile to LKR 420" in result.reply_text and "520" not in result.reply_text
-    assert model.sources == []  # financial case text never enters freeform rewriting
+    assert len(model.sources) == 1  # the rewrite was attempted...
+    assert [r.outcome for r in h.telemetry.records if r.purpose == "REPLY_REWRITE"] == ["FACT_CHECK"]  # ...and refused
+    assert h.repo.source_texts == {}
+
+
+def test_case_rewrite_that_drops_the_target_label_is_rejected() -> None:
+    h, _ = harness(lambda english: english.replace("Synthetic video alerts", "e service eka"))
+    h.model.on("mage balance eka adu wela", SINGLISH)
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela")))
+    assert "Synthetic video alerts" in result.reply_text and not result.reply_text.startswith("[si]")
+    assert [r.outcome for r in h.telemetry.records if r.purpose == "REPLY_REWRITE"] == ["FACT_CHECK"]
+
+
+def test_case_rewrite_that_drops_the_question_is_rejected() -> None:
+    h, _ = harness(lambda english: f"[si] {english}".replace("?", "."))
+    h.model.on("mage balance eka adu wela", SINGLISH)
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela")))
+    assert result.reply_text.endswith("Shall I go ahead?") and not result.reply_text.startswith("[si]")
+
+
+def test_case_rewrite_is_told_which_labels_to_keep() -> None:
+    seen = []
+
+    class Spy(RewriteModel):
+        async def generate_json(self, *, system, prompt, schema):
+            seen.append(json.loads(prompt)["keep_exact"])
+            return await super().generate_json(system=system, prompt=prompt, schema=schema)
+
+    h = Harness(model=FakeModel())
+    h.service._rewriter = ReplyRewriter(Spy())
+    h.model.on("mage balance eka adu wela", SINGLISH)
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    h.send(ctx, h.turn(conv, text("mage balance eka adu wela")))
+    assert seen == [["Synthetic video alerts"]]
+
+
+def test_voice_case_reply_is_never_rewritten() -> None:
+    from resolve.conversation.dto import Channel
+
+    h, model = harness()
+    h.model.on("mage balance eka adu wela", SINGLISH)
+    ctx = customer(ACCOUNT_A, Channel.VOICE)
+    conv = h.open(ctx)
+    result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela"), channel=Channel.VOICE))
+    assert "reconcile to LKR 420" in result.reply_text and model.sources == []
+    assert "\n" not in result.reply_text  # spoken as one continuous reply
+
+
+def test_text_case_reply_is_split_into_paragraphs() -> None:
+    h = Harness(model=FakeModel())
+    h.model.on("my balance dropped after recharge", extraction(complaint_type="BALANCE_RECHARGE"))
+    ctx = customer(ACCOUNT_A)
+    conv = h.open(ctx)
+    result = h.send(ctx, h.turn(conv, text("my balance dropped after recharge")))
+    paragraphs = result.reply_text.split("\n\n")
+    assert len(paragraphs) >= 2 and paragraphs[-1].startswith("I can ") and paragraphs[-1].endswith("?")
 
 
 def test_rewriter_outage_keeps_english() -> None:
@@ -138,7 +201,7 @@ def test_tamil_script_targets_tamil_script() -> None:
     ctx = customer(ACCOUNT_A)
     conv = h.open(ctx)
     h.send(ctx, h.turn(conv, text("என் பேலன்ஸ் குறைந்துவிட்டது")))
-    assert model.styles == []  # this response contains case findings
+    assert model.styles == ["Tamil in Tamil script"]
 
 
 def test_english_original_is_kept_with_the_rewritten_reply() -> None:
@@ -147,9 +210,9 @@ def test_english_original_is_kept_with_the_rewritten_reply() -> None:
     ctx = customer(ACCOUNT_A)
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela")))
-    assert not result.reply_text.startswith("[si] ")
-    assert h.repo.source_texts == {}
-    assert model.sources == []
+    assert result.reply_text.startswith("[si] ")
+    assert list(h.repo.source_texts.values()) == model.sources  # English original saved with the message
+    assert result.reply_text == f"[si] {model.sources[0]}"
 
 
 def test_reviewed_faq_text_is_never_machine_rewritten() -> None:
