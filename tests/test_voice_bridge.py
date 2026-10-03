@@ -97,7 +97,7 @@ class MemoryConnection:
     def execute(self, statement, params=None):
         sql = str(statement).lower()
         params = params or {}
-        if "update resolve.voice_grant_requests set encrypted_grant=null" in sql:
+        if "update resolve.voice_grant_requests" in sql and "state='expired'" in sql:
             return Result()
         if "from resolve.sessions where id=:session" in sql:
             return Result(params["session"] if params["session"] == SESSION_ID else None)

@@ -37,6 +37,8 @@ from .dto import (
     VoiceConsentEvidence,
 )
 from .errors import HTTP_STATUS, ResolveError
+from .packages import UsageSummary
+from .dto import PackageOfferView
 
 _STATUS_FALLBACK = {
     400: "VALIDATION_ERROR",
@@ -103,6 +105,19 @@ class ResolveFacadeAdapter:
 
     async def get_account(self, ctx: AuthContext) -> AccountView:
         return AccountView.model_validate(self._plain(await self._call(self._facade.get_account, self._context(ctx))))
+
+    async def list_package_offers(self, ctx: AuthContext) -> list[PackageOfferView]:
+        rows = await self._call(self._facade.list_package_offers, self._context(ctx))
+        return [PackageOfferView.model_validate(row) for row in rows]
+
+    async def get_package_usage(self, ctx: AuthContext) -> UsageSummary:
+        return UsageSummary.model_validate(await self._call(self._facade.get_package_usage, self._context(ctx)))
+
+    async def propose_package_activation(self, ctx: AuthContext, conversation_id: UUID,
+                                         offer_id: UUID, command_key: str) -> ProposalView:
+        result = await self._call(self._facade.propose_package_activation, self._context(ctx),
+            conversation_id, offer_id, command_key)
+        return ProposalView.model_validate(result)
 
     async def create_case(
         self,

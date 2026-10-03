@@ -1,4 +1,4 @@
-"""Pydantic mirrors of the shared contract v1.0.0 (docs/contracts/openapi.json).
+"""Pydantic mirrors of the shared contract v1.1.0 (docs/contracts/openapi.json).
 
 Provisional: Harry owns the canonical shared DTOs. Until `resolve.contracts`
 exists, the conversation module uses these mirrors; tests check field-level
@@ -13,9 +13,9 @@ from enum import StrEnum
 from typing import Annotated, Any, Literal, Union
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_serializer
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_serializer, model_validator
 
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.1.0"
 MAX_SAFE_INT = 9007199254740991
 MAX_TEXT_CHARS = 4000
 
@@ -40,6 +40,7 @@ class ComplaintType(StrEnum):
     DATA_DEPLETION = "DATA_DEPLETION"
     CONNECTIVITY = "CONNECTIVITY"
     VAS_DISPUTE = "VAS_DISPUTE"
+    PACKAGE_ACTIVATION = "PACKAGE_ACTIVATION"
 
 
 class Decision(StrEnum):
@@ -51,12 +52,11 @@ class ActionType(StrEnum):
     DEACTIVATE_VAS = "DEACTIVATE_VAS"
     SEND_SETTINGS_INSTRUCTIONS = "SEND_SETTINGS_INSTRUCTIONS"
     CREATE_REVIEW_TICKET = "CREATE_REVIEW_TICKET"
-    # PROPOSED, not in contract v1.0.0 (docs/plans/tevin.md, contract proposal CP-1). Only produced when a
-    # PackagePort is configured, which today is the dev backend's dummy mode (packages.py).
     ACTIVATE_PACKAGE = "ACTIVATE_PACKAGE"
 
 
-CONTRACT_ACTION_TYPES = (ActionType.DEACTIVATE_VAS, ActionType.SEND_SETTINGS_INSTRUCTIONS, ActionType.CREATE_REVIEW_TICKET)
+CONTRACT_ACTION_TYPES = (ActionType.DEACTIVATE_VAS, ActionType.SEND_SETTINGS_INSTRUCTIONS, ActionType.CREATE_REVIEW_TICKET,
+                         ActionType.ACTIVATE_PACKAGE)
 
 
 class EvidenceState(StrEnum):
@@ -87,7 +87,8 @@ class DeliveryState(StrEnum):
     REVIEW_REQUIRED = "REVIEW_REQUIRED"
 
 
-InputType = Literal["text", "category_selection", "complaint_details", "action_decision", "case_selection"]
+InputType = Literal["text", "category_selection", "complaint_details", "action_decision", "case_selection",
+                    "package_query", "package_selection"]
 
 
 # --- Turn input ---------------------------------------------------------------
@@ -136,8 +137,17 @@ class CaseSelectionInput(Strict):
     case_id: UUID
 
 
+class PackageQueryInput(Strict):
+    type: Literal["package_query"]
+
+
+class PackageSelectionInput(Strict):
+    type: Literal["package_selection"]
+    offer_id: UUID
+
+
 TurnInput = Annotated[
-    Union[TextInput, CategoryInput, DetailsInput, DecisionInput, CaseSelectionInput],
+    Union[TextInput, CategoryInput, DetailsInput, DecisionInput, CaseSelectionInput, PackageQueryInput, PackageSelectionInput],
     Field(discriminator="type"),
 ]
 
@@ -290,6 +300,15 @@ class ProposalRequest(Strict):
     target_id: UUID
 
 
+class PackageTerms(Strict):
+    name: str
+    price_minor: NonNegSafeInt
+    currency: Literal["LKR"]
+    data_bytes: Annotated[int, Field(gt=0, le=MAX_SAFE_INT)]
+    validity_seconds: Annotated[int, Field(gt=0, le=MAX_SAFE_INT)]
+    recurring: Literal[False]
+
+
 class ProposalView(Strict):
     id: UUID
     case_id: UUID
@@ -301,7 +320,21 @@ class ProposalView(Strict):
     consequences: str
     proposal_hash: Sha256Hex
     expires_at: AwareDatetime
+    package_terms: PackageTerms | None = None
     simulation: Literal[True]
+
+    @model_validator(mode="after")
+    def _package_terms_match_action(self):
+        if (self.action_type is ActionType.ACTIVATE_PACKAGE) != (self.package_terms is not None):
+            raise ValueError("ACTIVATE_PACKAGE requires package_terms, and other actions must omit them")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_package_terms(self, handler):
+        result = handler(self)
+        if self.package_terms is None:
+            result.pop("package_terms", None)
+        return result
 
 
 class ConfirmationRequest(Strict):
@@ -478,8 +511,39 @@ class ReceiptCard(Strict):
     data: ReceiptCardData
 
 
+class PackageOfferView(Strict):
+    id: UUID
+    name: str
+    price_minor: NonNegSafeInt
+    currency: Literal["LKR"]
+    data_bytes: Annotated[int, Field(gt=0, le=MAX_SAFE_INT)]
+    validity_seconds: Annotated[int, Field(gt=0, le=MAX_SAFE_INT)]
+    recurring: Literal[False]
+    can_purchase: bool
+    simulation: Literal[True]
+
+
+class PackageCatalogueEntry(Strict):
+    id: UUID
+    name: str
+    price_minor: NonNegSafeInt
+    currency: Literal["LKR"]
+    data_bytes: Annotated[int, Field(gt=0, le=MAX_SAFE_INT)]
+    validity_seconds: Annotated[int, Field(gt=0, le=MAX_SAFE_INT)]
+    recurring: Literal[False]
+    recommended: bool
+    can_purchase: bool
+    recommendation_reason: str | None
+
+
+class PackageCatalogueCard(Strict):
+    type: Literal["package_catalogue"] = "package_catalogue"
+    offers: list[PackageCatalogueEntry]
+
+
 Card = Annotated[
-    Union[AccountCard, TimelineCard, CalculationCard, FindingCard, ConfirmationCard, TicketCard, ReceiptCard],
+    Union[AccountCard, TimelineCard, CalculationCard, FindingCard, ConfirmationCard, TicketCard, ReceiptCard,
+          PackageCatalogueCard],
     Field(discriminator="type"),
 ]
 

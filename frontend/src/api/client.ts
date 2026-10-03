@@ -20,11 +20,13 @@ export type RawResponse = { status: number; body: unknown }
 
 type Transport = (realm: Realm, method: Method, path: string, opts: RequestOptions) => Promise<RawResponse>
 
-const liveTransport: Transport = async (_realm, method, path, opts) => {
-  const headers: Record<string, string> = { Accept: 'application/json' }
+const liveTransport: Transport = async (realm, method, path, opts) => {
+  // Resolve uses one origin for customer and agent APIs, so every request must
+  // carry the selected realm explicitly (the realm also selects the CSRF token).
+  const headers: Record<string, string> = { Accept: 'application/json', 'X-Resolve-Realm': realm }
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
   if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey
-  const csrf = method === 'GET' ? null : csrfTokens[_realm]
+  const csrf = method === 'GET' ? null : csrfTokens[realm]
   if (csrf) headers['X-CSRF-Token'] = csrf
 
   let res: Response

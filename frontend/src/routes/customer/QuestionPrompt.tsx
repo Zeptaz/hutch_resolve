@@ -9,9 +9,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { useI18n } from '@/i18n/context'
 import { CardFrame } from '@/components/CardFrame'
 
-const COMPLAINTS: ComplaintType[] = ['BALANCE_RECHARGE', 'DATA_DEPLETION', 'CONNECTIVITY', 'VAS_DISPUTE']
+type CustomerComplaint = Exclude<ComplaintType, 'PACKAGE_ACTIVATION'>
+const COMPLAINTS: CustomerComplaint[] = ['BALANCE_RECHARGE', 'DATA_DEPLETION', 'CONNECTIVITY', 'VAS_DISPUTE']
 
-const COMPLAINT_ICON: Record<ComplaintType, React.ReactNode> = {
+const COMPLAINT_ICON: Record<CustomerComplaint, React.ReactNode> = {
   BALANCE_RECHARGE: <Wallet />,
   DATA_DEPLETION: <Smartphone />,
   CONNECTIVITY: <Signal />,
@@ -36,7 +37,7 @@ export function QuestionPrompt({
   const { t } = useI18n()
   const allowed = question.allowed_input_types
   if (allowed.includes('complaint_details')) {
-    const initial = defaultComplaint ?? 'BALANCE_RECHARGE'
+    const initial = defaultComplaint && defaultComplaint !== 'PACKAGE_ACTIVATION' ? defaultComplaint : 'BALANCE_RECHARGE'
     return <DetailsForm key={initial} initialType={initial} disabled={disabled} onAnswer={onAnswer} />
   }
   if (allowed.includes('category_selection')) {
@@ -72,12 +73,12 @@ function DetailsForm({
   disabled,
   onAnswer,
 }: {
-  initialType: ComplaintType
+  initialType: CustomerComplaint
   disabled: boolean
   onAnswer: (input: TurnInput, label: string) => void
 }) {
   const { t } = useI18n()
-  const [type, setType] = useState<ComplaintType>(initialType)
+  const [type, setType] = useState<CustomerComplaint>(initialType)
   const [from, setFrom] = useState(() => toLocalInput(new Date(Date.now() - 6 * 3600 * 1000)))
   const [to, setTo] = useState(() => toLocalInput(new Date()))
   const [amount, setAmount] = useState('')
@@ -91,7 +92,7 @@ function DetailsForm({
     const end = new Date(to)
     if (!(start < end)) return setError(t('q.err.order'))
     if (end.getTime() - start.getTime() > MAX_WINDOW_DAYS * 86400 * 1000) return setError(t('q.err.window', { days: MAX_WINDOW_DAYS }))
-    const facts: ReportedFacts = {}
+    const facts: ReportedFacts = { amount_minor: null, recharge_reference: null, subscription_id: null, description: null }
     if (amount.trim()) {
       const lkr = Number(amount)
       if (!Number.isFinite(lkr) || lkr <= 0) return setError(t('q.err.amount'))
@@ -111,7 +112,7 @@ function DetailsForm({
       <form onSubmit={submit} className="flex flex-col gap-3 [&_input]:bg-card [&_textarea]:bg-card [&_[data-slot=select-trigger]]:bg-card">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="q-type">{t('q.about')}</Label>
-          <Select value={type} onValueChange={(v) => setType(v as ComplaintType)}>
+          <Select value={type} onValueChange={(v) => setType(v as CustomerComplaint)}>
             <SelectTrigger id="q-type" className="w-full">
               <SelectValue />
             </SelectTrigger>

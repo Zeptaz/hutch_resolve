@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "notice": "Synthetic proposed contract examples; not runtime responses. Tokens/hashes are placeholders except the computed receipt digest. Repeated IDs illustrate replay, not separate executable seed records.",
   "examples": {
     "customer_session": {
@@ -1951,6 +1951,25 @@
         "type": "proposal_presented",
         "proposal_id": "90000000-0000-4000-8000-000000000005",
         "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "package_query_input": {
+      "schema": "PackageQueryInput",
+      "value": {"type": "package_query"}
+    },
+    "package_selection_input": {
+      "schema": "PackageSelectionInput",
+      "value": {"type": "package_selection", "offer_id": "30000000-0000-0000-0000-000000000005"}
+    },
+    "package_terms": {
+      "schema": "PackageTerms",
+      "value": {
+        "name": "Synthetic 1 GB one-day add-on",
+        "price_minor": 4900,
+        "currency": "LKR",
+        "data_bytes": 1000000000,
+        "validity_seconds": 86400,
+        "recurring": false
       }
     }
   }

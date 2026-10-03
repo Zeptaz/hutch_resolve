@@ -16,7 +16,7 @@ class StrictModel(BaseModel):
 
 class InvestigationRequest(StrictModel):
     expected_version: int = Field(ge=1)
-    complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE"]
+    complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE", "PACKAGE_ACTIVATION"]
     window_start: datetime
     window_end: datetime
     reported_facts: dict[str, Any]
@@ -69,7 +69,7 @@ class SourceStatusView(StrictModel):
 
 
 class EligibleActionView(StrictModel):
-    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"]
+    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET", "ACTIVATE_PACKAGE"]
     target_id: UUID
     target_label: str
 
@@ -78,7 +78,7 @@ class InvestigationView(StrictModel):
     id: UUID
     case_id: UUID
     revision: int = Field(ge=1)
-    complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE"]
+    complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE", "PACKAGE_ACTIVATION"]
     window_start: datetime
     window_end: datetime
     evidence_state: Literal["SUFFICIENT", "PARTIAL", "CONFLICTING"]
@@ -103,7 +103,7 @@ class CaseView(StrictModel):
     id: UUID
     conversation_id: UUID
     account_id: UUID
-    complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE"]
+    complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE", "PACKAGE_ACTIVATION"]
     status: Literal["OPEN", "AWAITING_CUSTOMER", "ACTION_PENDING", "REVIEW_REQUIRED", "RESOLVED"]
     review_status: Literal["NEW", "IN_REVIEW", "CLOSED"]
     version: int = Field(ge=1)
@@ -124,7 +124,7 @@ class ReceiptEvidenceReference(StrictModel):
 
 class ReceiptActionView(StrictModel):
     proposal_id: UUID
-    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET"]
+    action_type: Literal["DEACTIVATE_VAS", "SEND_SETTINGS_INSTRUCTIONS", "CREATE_REVIEW_TICKET", "ACTIVATE_PACKAGE"]
     requested: bool
     decision: Literal["ACCEPT", "DECLINE"] | None
     operation_id: UUID | None

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, create_engine, text
 
-EXPECTED_SCHEMA_REVISION = "0007_conversation_runtime"
+EXPECTED_SCHEMA_REVISION = "0009_package_activation"
 
 
 class Database:

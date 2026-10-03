@@ -45,10 +45,9 @@ from fastapi import FastAPI, Request, Response  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse  # noqa: E402
 
 import conftest  # noqa: E402  (fixture account IDs and clock)
-from fakes import FakeConversationRepository, FakePackagePort, FakeResolveFacade, RecordingTelemetry  # noqa: E402
+from fakes import FakeConversationRepository, FakeResolveFacade, RecordingTelemetry  # noqa: E402
 from resolve.conversation import ConversationService, opening_question  # noqa: E402
 from resolve.conversation.rewrite import ReplyRewriter  # noqa: E402
-from resolve.conversation.agent import PackageAgent  # noqa: E402
 from resolve.conversation.answer import GroundedAnswerer  # noqa: E402
 from resolve.conversation.dto import (  # noqa: E402
     AuthContext,
@@ -288,15 +287,11 @@ async def simulation_now(ctx: AuthContext) -> datetime:
 rewriter = ReplyRewriter(client) if client and os.environ.get("DEV_REPLY_REWRITE", "1") != "0" else None
 # Dev only: the free tier is currently slower than the 6 s contract budget; production keeps 6 s.
 extract_budget = float(os.environ.get("DEV_EXTRACT_BUDGET", "6"))
-# Package prototype (packages.py, agent.py): dummy mode only; Harry's facade has no package service yet.
-packages = FakePackagePort(dummy) if MODE == "dummy" and os.environ.get("DEV_PACKAGES", "1") != "0" else None
 service = ConversationService(facade, repo, SeedKnowledgeRepository(),
                               Extractor(client, budget_seconds=extract_budget) if client else None,
                               simulation_now, telemetry, rewriter,
                               {Channel.TEXT: max(15.0, extract_budget * 2 + 3)},
-                              answerer=GroundedAnswerer(client, budget_seconds=extract_budget) if client else None,
-                              packages=packages,
-                              package_agent=PackageAgent(client, step_budget_seconds=extract_budget) if client and packages else None)
+                              answerer=GroundedAnswerer(client, budget_seconds=extract_budget) if client else None)
 sessions: dict[str, tuple[AuthContext, str]] = {}
 COOKIE = "resolve_customer_session"
 
@@ -542,7 +537,7 @@ def _simulate_dummy_completion(operation_id: UUID) -> None:
     operation = dummy.operations[operation_id]
     if operation.status is not OperationStatus.PENDING or real_now() - operation.created_at < DUMMY_SIMULATED_SUCCESS_AFTER:
         return
-    if operation.case_id in dummy.package_requests:  # package prototype: debit the price, add the package
+    if operation.action_type.value == "ACTIVATE_PACKAGE":  # test-only Resolve facade simulation
         dummy.complete_activation(operation_id, real_now())
         return
     outcome = operation.outcome.model_copy(update={"code": "SIMULATED", "message": "Simulated by the dev backend."})

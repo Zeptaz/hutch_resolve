@@ -40,7 +40,7 @@ def test_readiness_requires_a_successful_database_probe():
     assert response.status_code == 200
     assert response.json() == {
         "status": "ready",
-        "capabilities": {"text": False, "actions": False, "voice": False, "model": False},
+        "capabilities": {"text": False, "actions": False, "voice": False, "model": False, "package_activation": False},
     }
     assert probe.closed
 
@@ -56,7 +56,7 @@ def test_readiness_reports_database_exceptions_without_leaking_details():
     assert response.status_code == 503
     assert response.json() == {
         "status": "unavailable",
-        "capabilities": {"text": False, "actions": False, "voice": False, "model": False},
+        "capabilities": {"text": False, "actions": False, "voice": False, "model": False, "package_activation": False},
     }
     assert "database-password" not in response.text
 
@@ -104,7 +104,7 @@ def test_readiness_exposes_degraded_optional_capabilities():
     assert response.status_code == 200
     assert response.json() == {
         "status": "ready",
-        "capabilities": {"text": True, "actions": False, "voice": True, "model": False},
+        "capabilities": {"text": True, "actions": False, "voice": True, "model": False, "package_activation": False},
     }
 
 

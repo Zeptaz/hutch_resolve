@@ -31,6 +31,7 @@ from .dto import (
     KnowledgeCard,
     Language,
     OperationView,
+    PackageOfferView,
     PendingQuestion,
     ProposalRequest,
     ProposalView,
@@ -39,12 +40,21 @@ from .dto import (
     VoiceConsentEvidence,
 )
 from .state import DialogueState
+from .packages import UsageSummary
 
 
 class ResolveFacade(Protocol):
     """Harry's business services. Raises ResolveError with contract codes."""
 
     async def get_account(self, ctx: AuthContext) -> AccountView: ...
+
+    async def list_package_offers(self, ctx: AuthContext) -> list[PackageOfferView]: ...
+
+    async def get_package_usage(self, ctx: AuthContext) -> UsageSummary: ...
+
+    async def propose_package_activation(
+        self, ctx: AuthContext, conversation_id: UUID, offer_id: UUID, command_key: str
+    ) -> ProposalView: ...
 
     async def create_case(
         self,

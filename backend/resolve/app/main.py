@@ -92,7 +92,9 @@ def create_app(
         application.state.account_provider = provider
         application.state.resolve_facade = resolve_facade or (
             ResolveFacade(active_database.engine, provider, cursor_secret=active_settings.app_secret_key,
-                          action_execution_available=sandbox_engine is not None)
+                          action_execution_available=sandbox_engine is not None,
+                          package_activation_enabled=(active_settings.package_activation_enabled
+                                                       and sandbox_engine is not None))
             if hasattr(active_database, "engine") else None
         )
         active_voice_client = voice_client
@@ -113,8 +115,6 @@ def create_app(
                 PostgresModelTelemetry(engine),
                 ReplyRewriter(model) if model else None,
                 answerer=GroundedAnswerer(model) if model else None,
-                # Package activation remains a prototype outside Resolve's contract.
-                packages=None, package_agent=None,
             )
         application.state.conversation_service = active_conversation_service
         application.state.operation_runner = None
@@ -222,7 +222,8 @@ def create_app(
         if not ready:
             return JSONResponse(status_code=503, content={
                 "status": "unavailable",
-                "capabilities": {"text": False, "actions": False, "voice": False, "model": False},
+                "capabilities": {"text": False, "actions": False, "voice": False, "model": False,
+                                 "package_activation": False},
             })
         return {
             "status": "ready",
@@ -231,6 +232,8 @@ def create_app(
                 "actions": request.app.state.action_execution_available,
                 "voice": request.app.state.voice_client is not None,
                 "model": request.app.state.model_available,
+                "package_activation": (request.app.state.action_execution_available
+                    and request.app.state.settings.package_activation_enabled),
             },
         }
 

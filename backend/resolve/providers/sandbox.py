@@ -241,6 +241,103 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
             "simulation": True,
         }
 
+    def list_package_offers(self, sandbox_id: UUID) -> list[dict[str, Any]]:
+        """Read the explicitly enabled one-shot synthetic catalogue."""
+        with self._engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT o.id,o.name,o.price_minor,o.currency,o.quota_bytes AS data_bytes,
+                       o.validity_seconds,o.recurring,o.version
+                FROM sandbox.offers o JOIN sandbox.sandbox_runs r ON r.id=o.sandbox_id
+                WHERE o.sandbox_id=:sandbox AND o.offer_kind='PACKAGE'
+                  AND o.available_for_purchase AND o.recurring=false
+                  AND r.run_status='ACTIVE'
+                ORDER BY o.price_minor,o.quota_bytes,o.validity_seconds,o.id
+                LIMIT 101
+            """), {"sandbox": sandbox_id}).mappings().all()
+        if len(rows) > 100:
+            raise ValueError("PACKAGE_CATALOGUE_LIMIT")
+        return [dict(row) for row in rows]
+
+    def get_package_usage(self, sandbox_id: UUID, account_id: UUID) -> dict[str, Any] | None:
+        """Summarize a complete 30-day synthetic usage window, when records support it."""
+        with self._engine.connect() as connection:
+            account = connection.execute(text("""
+                SELECT r.simulation_clock,r.fixture_version FROM sandbox.accounts a
+                JOIN sandbox.sandbox_runs r ON r.id=a.sandbox_id
+                WHERE a.sandbox_id=:sandbox AND a.id=:account AND r.run_status='ACTIVE'
+            """), {"sandbox": sandbox_id, "account": account_id}).mappings().one_or_none()
+            if account is None:
+                return None
+            end = account["simulation_clock"]
+            start = end - timedelta(days=30)
+            usage = connection.execute(text("""
+                SELECT coalesce(sum(bytes),0) AS total_bytes,
+                       coalesce(sum(bytes) FILTER (WHERE usage_kind='OUT_OF_BUNDLE'),0) AS out_bytes,
+                       count(*) AS row_count
+                FROM sandbox.usage_records
+                WHERE sandbox_id=:sandbox AND account_id=:account
+                  AND interval_end>:start AND interval_end<=:end
+            """), {"sandbox": sandbox_id, "account": account_id,
+                  "start": start, "end": end}).mappings().one()
+            charges = connection.execute(text("""
+                SELECT coalesce(sum(abs(m.amount_minor)),0)
+                FROM sandbox.usage_records u JOIN sandbox.money_entries m
+                  ON (m.sandbox_id,m.id)=(u.sandbox_id,u.charge_entry_id)
+                WHERE u.sandbox_id=:sandbox AND u.account_id=:account
+                  AND u.usage_kind='OUT_OF_BUNDLE' AND u.interval_end>:start AND u.interval_end<=:end
+            """), {"sandbox": sandbox_id, "account": account_id,
+                  "start": start, "end": end}).scalar_one()
+            last = connection.execute(text("""
+                SELECT o.name,s.expires_at FROM sandbox.subscriptions s
+                JOIN sandbox.offers o ON (o.sandbox_id,o.id)=(s.sandbox_id,s.offer_id)
+                WHERE s.sandbox_id=:sandbox AND s.account_id=:account AND o.offer_kind='PACKAGE'
+                  AND s.starts_at<=:end
+                ORDER BY s.starts_at DESC,s.id DESC LIMIT 1
+            """), {"sandbox": sandbox_id, "account": account_id, "end": end}).mappings().one_or_none()
+            balance = connection.execute(text("""
+                SELECT amount_minor,as_of FROM sandbox.balance_snapshots
+                WHERE sandbox_id=:sandbox AND account_id=:account AND wallet_kind='MAIN'
+                ORDER BY as_of DESC,last_posting_seq DESC,id DESC LIMIT 1
+            """), {"sandbox": sandbox_id, "account": account_id}).mappings().one_or_none()
+        # Usage rows have no source coverage/completeness marker. Never infer a
+        # complete 30-day window from sparse rows; show the catalogue without a
+        # personalized recommendation until the sandbox models coverage evidence.
+        return {"window_days": 30, "data_used_bytes": int(usage["total_bytes"]),
+                "out_of_bundle_bytes": int(usage["out_bytes"]),
+                "out_of_bundle_charge_minor": int(charges),
+                "last_package_name": last["name"] if last else None,
+                "last_package_ran_out_at": last["expires_at"] if last else None,
+                "as_of": end, "complete": False,
+                "balance_minor": balance["amount_minor"] if balance else None,
+                "balance_as_of": balance["as_of"] if balance else None,
+                "source_version": f"fixture-v{account['fixture_version']}:usage"}
+
+    def get_package_activation_target(self, sandbox_id: UUID, account_id: UUID,
+                                      offer_id: UUID) -> dict[str, Any] | None:
+        with self._engine.connect() as connection:
+            row = connection.execute(text("""
+                SELECT o.id,o.name,o.price_minor,o.currency,o.quota_bytes AS data_bytes,
+                       o.validity_seconds,o.recurring,o.version,o.available_for_purchase,
+                       r.simulation_clock,r.fixture_version,
+                       (SELECT bs.amount_minor FROM sandbox.balance_snapshots bs
+                        WHERE bs.sandbox_id=o.sandbox_id AND bs.account_id=:account
+                          AND bs.wallet_kind='MAIN'
+                        ORDER BY bs.as_of DESC,bs.last_posting_seq DESC,bs.id DESC LIMIT 1) AS balance_minor,
+                       EXISTS(SELECT 1 FROM sandbox.subscriptions s
+                        WHERE s.sandbox_id=o.sandbox_id AND s.account_id=:account
+                          AND s.offer_id=o.id AND s.status='ACTIVE' AND s.expires_at>r.simulation_clock) AS already_active
+                FROM sandbox.offers o JOIN sandbox.sandbox_runs r ON r.id=o.sandbox_id
+                WHERE o.sandbox_id=:sandbox AND o.id=:offer AND o.offer_kind='PACKAGE'
+                  AND r.run_status='ACTIVE'
+            """), {"sandbox": sandbox_id, "account": account_id,
+                  "offer": offer_id}).mappings().one_or_none()
+        if row is None:
+            return None
+        return {**dict(row), "id": row["id"], "label": row["name"],
+                "source": "PACKAGE_CATALOGUE",
+                "source_version": f"fixture-v{row['fixture_version']}:offer-v{row['version']}",
+                "as_of": row["simulation_clock"]}
+
     def get_statement(
         self,
         sandbox_id: UUID,
@@ -480,6 +577,8 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
         self, sandbox_id: UUID, account_id: UUID, action_type: str, target_id: UUID
     ) -> dict[str, Any] | None:
         with self._engine.connect() as connection:
+            if action_type == "ACTIVATE_PACKAGE":
+                return self.get_package_activation_target(sandbox_id, account_id, target_id)
             if action_type == "DEACTIVATE_VAS":
                 row = connection.execute(
                     text("""
