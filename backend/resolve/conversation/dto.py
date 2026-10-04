@@ -65,6 +65,15 @@ class EvidenceState(StrEnum):
     CONFLICTING = "CONFLICTING"
 
 
+class InvestigationClassification(StrEnum):
+    """How much of the complaint the records explain (Resolve's investigation outcome)."""
+
+    EXPLAINED = "EXPLAINED"
+    PARTIALLY_EXPLAINED = "PARTIALLY_EXPLAINED"
+    UNEXPLAINED = "UNEXPLAINED"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+
+
 class OperationStatus(StrEnum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
@@ -101,6 +110,9 @@ class ReportedFacts(Strict):
     recharge_reference: Annotated[str, Field(max_length=128)] | None = None
     subscription_id: UUID | None = None
     description: Annotated[str, Field(max_length=MAX_TEXT_CHARS)] | None = None
+    # What the customer says went missing, or the balance they say they see. Claims to compare, not evidence.
+    claimed_loss_minor: NonNegSafeInt | None = None
+    reported_balance_minor: NonNegSafeInt | None = None
 
     @model_serializer(mode="wrap")
     def _omit_absent(self, handler):  # contract fields are optional, not nullable
@@ -252,6 +264,77 @@ class InvestigationRequest(Strict):
     reported_facts: ReportedFacts
 
 
+class OutcomeItem(Strict):
+    """One ledger posting, or one itemised call/SMS/data session behind it."""
+
+    evidence_id: UUID | None
+    kind: str
+    amount_minor: SafeInt
+    posting_amount_minor: SafeInt
+    occurred_at: AwareDatetime | None
+    reference: str | None
+    event_kind: str | None = None
+    counterparty: str | None = None
+    duration_seconds: NonNegSafeInt | None = None
+    volume_bytes: NonNegSafeInt | None = None
+    rate_label: str | None = None
+    product_name: str | None = None
+    product_kind: str | None = None
+    itemisation: Literal["INCOMPLETE"] | None = None
+    reverses_reference: str | None = None
+    reverses_kind: str | None = None
+    reversed: bool | None = None
+
+
+class OutcomeLine(Strict):
+    category: str
+    direction: Literal["CREDIT", "DEBIT"]
+    amount_minor: NonNegSafeInt
+    count: NonNegSafeInt
+    evidence_ids: list[UUID]
+    items: list[OutcomeItem]
+
+
+class OutcomeAnomaly(Strict):
+    code: str
+    amount_minor: NonNegSafeInt | None
+    evidence_ids: list[UUID]
+    occurred_at: AwareDatetime | None = None
+    reference: str | None = None
+    direction: Literal["MISSING", "EXTRA"] | None = None
+    fulfilment_status: str | None = None
+    product_name: str | None = None
+    subscription_id: str | None = None
+
+
+class SupportHistoryItem(Strict):
+    case_ref: str
+    category: str
+    status: str
+    resolution: str | None
+    opened_at: str | None
+
+
+class InvestigationOutcome(Strict):
+    """Opening + credits - deductions = expected balance, compared with the records and the customer's claim."""
+
+    classification: InvestigationClassification
+    escalation: Literal["NOT_NEEDED", "OFFER"]
+    currency: Literal["LKR"] | None
+    opening_minor: SafeInt | None
+    credits_minor: NonNegSafeInt | None
+    debits_minor: NonNegSafeInt | None
+    expected_minor: SafeInt | None
+    observed_minor: SafeInt | None
+    claimed_minor: NonNegSafeInt | None
+    explained_minor: NonNegSafeInt | None
+    unexplained_minor: NonNegSafeInt | None
+    breakdown: list[OutcomeLine]
+    anomalies: list[OutcomeAnomaly]
+    notes: list[str]
+    history: list[SupportHistoryItem]
+
+
 class InvestigationResult(Strict):
     id: UUID
     case_id: UUID
@@ -270,6 +353,8 @@ class InvestigationResult(Strict):
     review_reasons: list[str]
     created_at: AwareDatetime
     simulation: Literal[True]
+    # Absent only on investigations recorded before the outcome existed.
+    outcome: InvestigationOutcome | None = None
 
 
 class ReceiptReference(Strict):

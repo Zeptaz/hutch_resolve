@@ -22,6 +22,8 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from . import templates as t
+from .claims import parse_claims
+from .outcome_reply import compose as compose_outcome, review_offer
 from .dto import (
     AccountCard,
     AuthContext,
@@ -550,7 +552,7 @@ class ConversationService:
             complaint_type=ex.complaint_type or base.complaint_type,
             window_start=window[0] if window else base.window_start,
             window_end=window[1] if window else base.window_end,
-            reported_facts=_merge_facts(base.reported_facts, ex),
+            reported_facts=_merge_facts(base.reported_facts, ex, _turn_text(turn)),
             ambiguities=ambiguities,
             clarified=base.clarified,
         )
@@ -597,7 +599,7 @@ class ConversationService:
                 complaint_type=case.complaint_type,
                 window_start=start,
                 window_end=end,
-                reported_facts=_merge_facts(ReportedFacts(), ex),
+                reported_facts=_merge_facts(ReportedFacts(), ex, _turn_text(turn)),
             ),
             command_key(turn.conversation_id, turn.turn_id, "reinvestigate", case.id),
         )
@@ -905,9 +907,9 @@ class ConversationService:
         If Resolve refuses an action because its target changed since the investigation, offer the
         next one instead of failing the whole turn; the findings are still shown.
 
-        When every finding says the records reconcile (nothing is outstanding), a human review is
-        not pushed unasked, since it would read as doubt about the answer. It stays available if
-        the customer asks for a person. Pending or unexplained findings still offer it.
+        When Resolve's outcome explains the complaint (or, for older investigations, every finding says the
+        records reconcile), a human review is not pushed unasked, since it would read as doubt about the
+        answer. It stays available if the customer asks for a person. Unexplained amounts still offer it.
         """
         choices = [
             ActionChoice(case_id=case_id, investigation_id=investigation.id, action_type=a.action_type,
@@ -915,8 +917,10 @@ class ConversationService:
             for a in investigation.eligible_actions
         ]
         kept: list[ActionChoice] = []
-        if (investigation.evidence_state is EvidenceState.SUFFICIENT and investigation.findings
-                and all(finding.code in _RECONCILED_FINDINGS for finding in investigation.findings)):
+        explained = investigation.outcome is not None and investigation.outcome.escalation == "NOT_NEEDED"
+        if explained or (investigation.outcome is None and investigation.evidence_state is EvidenceState.SUFFICIENT
+                         and investigation.findings
+                         and all(finding.code in _RECONCILED_FINDINGS for finding in investigation.findings)):
             kept = [c for c in choices if c.action_type is ActionType.CREATE_REVIEW_TICKET]
             choices = [c for c in choices if c.action_type is not ActionType.CREATE_REVIEW_TICKET]
         for index, choice in enumerate(choices):
@@ -1173,19 +1177,30 @@ def _checked_prefix(
     """What was checked, restating only what the customer reported (type, typed amount; no model text)."""
     key = "checked_default_window" if defaulted else "checked_window"
     parts = [t.text(key, lang, complaint=t.complaint_label(complaint_type, lang), window=t.format_window(start, end))]
-    if facts.amount_minor is not None:
+    if facts.amount_minor is not None and facts.claimed_loss_minor is None and facts.reported_balance_minor is None:
         parts.append(t.text("ack_amount", lang, amount=t.format_lkr(facts.amount_minor)))
     return " ".join(parts)
 
 
-def _merge_facts(base: ReportedFacts, ex: Extraction) -> ReportedFacts:
-    """Customer reports only. Newer statements replace older ones field by field."""
+def _merge_facts(base: ReportedFacts, ex: Extraction, text: str | None = None) -> ReportedFacts:
+    """Customer reports only. Newer statements replace older ones field by field.
+
+    The customer's own words also say what they think went missing ("LKR 100 was deducted") or what balance
+    they see ("my balance is only LKR 420"); Resolve compares those claims with the records.
+    """
+    loss, balance = parse_claims(text)
     return ReportedFacts(
         amount_minor=ex.amount_minor if ex.amount_minor is not None else base.amount_minor,
         recharge_reference=ex.recharge_reference or base.recharge_reference,
         subscription_id=base.subscription_id,
         description=ex.summary or base.description,
+        claimed_loss_minor=loss if loss is not None else base.claimed_loss_minor,
+        reported_balance_minor=balance if balance is not None else base.reported_balance_minor,
     )
+
+
+def _turn_text(turn: NormalizedTurn) -> str | None:
+    return turn.input.text if isinstance(turn.input, TextInput) else None
 
 
 def _window_problem(inp: DetailsInput) -> str | None:
@@ -1241,6 +1256,10 @@ def _investigation_draft(
     Paragraphs: what was found; what limits the answer (missing/conflicting records, Resolve's
     customer-facing limits); what I can do next. Every finding stays in the text and in its card.
     """
+    voice = channel is Channel.VOICE
+    outcome = inv.outcome
+    if outcome is not None and inv.complaint_type in _RECONSTRUCTED:
+        return _outcome_draft(inv, outcome, proposal, lang, alternatives or [], channel)
     findings = [finding.text for finding in inv.findings] or [t.text("no_findings", lang)]
     if inv.complaint_type is ComplaintType.VAS_DISPUTE:
         # Answer "what was I charged?" in words: quote each posted VAS charge line exactly as Resolve
@@ -1281,6 +1300,34 @@ def _investigation_draft(
 
     return TurnDraft(reply_text=_paragraphs([" ".join(findings), " ".join(limits), offer_text]), case_id=inv.case_id,
                      cards=cards, pending_question=question, rewrite_allowed=True, keep_exact=keep)
+
+
+_RECONSTRUCTED = {ComplaintType.BALANCE_RECHARGE, ComplaintType.VAS_DISPUTE}
+
+
+def _outcome_draft(inv: InvestigationResult, outcome, proposal: ProposalView | None, lang: t.Locale,
+                   alternatives: list[ActionChoice], channel: Channel) -> TurnDraft:
+    """Balance and VAS complaints: explain Resolve's reconstruction, then offer only what it justifies.
+
+    The chat gets the full itemised account; Voice gets the same conclusion in a few sentences. A human
+    review is phrased around the unexplained amount instead of the generic action wording.
+    """
+    voice = channel is Channel.VOICE
+    explanation = compose_outcome(outcome, voice=voice)
+    # Resolve's customer-facing limits (e.g. a future renewal stop does not decide a past charge) stay;
+    # code-style reasons are already explained by the outcome and are never shown raw.
+    limits = " ".join(reason for reason in dict.fromkeys(inv.review_reasons) if not _CODE.fullmatch(reason))
+    cards: list = [CalculationCard(data=calc) for calc in inv.calculations]
+    cards += [FindingCard(data=finding) for finding in inv.findings]
+    question, offer_text, keep = None, "", ()
+    if proposal is not None:
+        offer = _offer_with_alternatives(proposal, alternatives, lang, inv.case_id, channel)
+        review = review_offer(outcome, voice=voice) if proposal.action_type is ActionType.CREATE_REVIEW_TICKET else None
+        offer_text = review if review and not alternatives else offer.reply_text
+        keep, question = offer.keep_exact, offer.pending_question
+        cards += offer.cards
+    return TurnDraft(reply_text=_paragraphs([explanation, limits, offer_text]), case_id=inv.case_id, cards=cards,
+                     pending_question=question, rewrite_allowed=True, keep_exact=keep)
 
 
 def _after_investigation(

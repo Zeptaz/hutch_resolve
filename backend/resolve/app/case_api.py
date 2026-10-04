@@ -7,6 +7,8 @@ from uuid import UUID
 from fastapi import APIRouter, Header, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.resolve.conversation.dto import InvestigationOutcome
+
 from .auth import ResolveError, authenticated_context, authenticated_context_any_role, authenticated_customer_mutation
 
 
@@ -92,6 +94,7 @@ class InvestigationView(StrictModel):
     review_reasons: list[str]
     created_at: datetime
     simulation: Literal[True]
+    outcome: InvestigationOutcome | None = None
 
 
 class ReceiptReference(StrictModel):

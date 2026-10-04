@@ -37,11 +37,14 @@ def test_a_reconciles_and_offers_vas_proposal_from_resolve(h) -> None:
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, details(amount_minor=100000)))
 
-    # Reply text carries Resolve's finding verbatim; nothing is recomputed here.
+    # Reply text explains Resolve's reconstruction; every amount is quoted from its outcome, nothing recomputed.
     assert result.reply_text.startswith(
         "I looked at your balance or recharge records for 2 Oct, 08:00–12:00. You mentioned LKR 1,000.00. "
-        "The posted recharge and subsequent deductions reconcile to LKR 420."
+        "You started with LKR 0.00 and reloaded LKR 1,000.00. After that: LKR 499.00 for Synthetic 30-day data bundle, "
+        "LKR 60.00 for Synthetic video alerts and LKR 21.00 in usage charges. That leaves LKR 420.00, which matches "
+        "your recorded balance."
     )
+    assert "send this to our review team" not in result.reply_text  # explained: no unasked escalation
     kinds = [card.type for card in result.cards]
     assert kinds == ["calculation", "finding", "confirmation"]
     calc = result.cards[0].data
@@ -91,8 +94,9 @@ def test_d_conflict_blocks_conclusion_and_offers_only_review(h) -> None:
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, details()))
 
-    assert "differs by LKR 70" in result.reply_text
-    assert "can't give a final answer or change your account" in result.reply_text
+    assert ("I found records explaining LKR 580.00 of the LKR 650.00 you reported, but I can't find any record "
+            "for the remaining LKR 70.00.") in result.reply_text
+    assert "Would you like me to send the unexplained LKR 70.00 to our review team?" in result.reply_text
     proposal = confirmation_card(result).data
     assert proposal.action_type == "CREATE_REVIEW_TICKET"
     calc = result.cards[0].data
@@ -103,7 +107,7 @@ def test_partial_evidence_names_missing_records_and_offers_nothing(h) -> None:
     ctx = customer(ACCOUNT_PARTIAL)
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, details()))
-    assert "the starting balance" in result.reply_text
+    assert "couldn't get a complete balance history" in result.reply_text and "without guessing" in result.reply_text
     assert all(card.type != "confirmation" for card in result.cards)
     assert result.pending_question is None
     assert h.state(conv).pending_proposal is None
@@ -263,7 +267,12 @@ def test_resolve_codes_are_never_shown_raw() -> None:
         "missing": ["OPENING_SNAPSHOT_MISSING", "VAS_ACTIVATION_EVIDENCE_MISSING", "SOMETHING_NEW_MISSING"],
         "review_reasons": ["OPENING_SNAPSHOT_MISSING", "Stopping renewal does not decide the past charge."],
     })
-    reply = _investigation_draft(inv, None, Language.EN).reply_text
+    # Investigations recorded before outcomes existed still name the missing records in plain words.
+    reply = _investigation_draft(inv.model_copy(update={"outcome": None}), None, Language.EN).reply_text
     assert "the starting balance, proof the service was activated, some records" in reply
     assert "Stopping renewal does not decide the past charge." in reply
     assert "_MISSING" not in reply and "SNAPSHOT" not in reply
+    # With an outcome, Resolve's customer-facing limits are kept and codes stay hidden too.
+    reply = _investigation_draft(inv, None, Language.EN).reply_text
+    assert "Stopping renewal does not decide the past charge." in reply
+    assert "_MISSING" not in reply and "SNAPSHOT" not in reply and "INSUFFICIENT" not in reply

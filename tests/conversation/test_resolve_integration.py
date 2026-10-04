@@ -159,6 +159,13 @@ def test_a_reconciles_from_real_ledger_and_accept_persists_pending_operation(har
 
     calc = next(card.data for card in result.cards if card.type == "calculation")
     assert (calc.expected, calc.observed, calc.delta) == (42000, 42000, 0)  # computed by Harry from seeded postings
+    # Every deduction is explained, so nothing is pushed unasked; a review stays available on request.
+    assert "matches your recorded balance" in result.reply_text
+    assert all(card.data.action_type != "CREATE_REVIEW_TICKET" for card in result.cards if card.type == "confirmation")
+
+    # D's unexplained LKR 70 is offered for review; accepting persists a PENDING operation.
+    ctx, conv, repo, service, adapter = journey(harry, ACCOUNT_D)
+    result = send(service, repo, ctx, conv, details())
     offers = [card.data for card in result.cards if card.type == "confirmation"]
     assert len(offers) == 1 and result.pending_question.code == "CONFIRM_ACTION"
     offer = offers[0]
@@ -177,7 +184,10 @@ def test_d_conflict_comes_from_real_ledger(harry) -> None:
     result = send(service, repo, ctx, conv, details())
     calc = next(card.data for card in result.cards if card.type == "calculation")
     assert (calc.expected, calc.observed, calc.delta) == (42000, 35000, -7000)
-    assert "can't give a final answer or change your account" in result.reply_text
+    # Resolve's own reconstruction: LKR 70 left the balance with no posting behind it.
+    assert "From these records your balance should be LKR 420.00, but it is LKR 350.00" in result.reply_text \
+        or "LKR 70.00 is missing with no record behind it" in result.reply_text
+    assert "send the unexplained LKR 70.00 to our review team" in result.reply_text
 
 
 def test_replayed_turn_does_not_reach_resolve_twice(harry) -> None:

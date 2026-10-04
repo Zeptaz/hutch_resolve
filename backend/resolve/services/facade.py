@@ -17,6 +17,7 @@ from backend.resolve.providers.sandbox import AccountProvider, BalanceProvider, 
 from .voice_consent import VoiceConsentEvidence
 from .review import AgentReviewService
 from .turn_reconciliation import reconcile_stalled_turn
+from .reconstruction import ensure_uuid_strings, outcome_from_evidence, reconstruct_balance
 
 ALLOWED_LANGUAGES = {"en", "si", "ta"}
 ALLOWED_COMPLAINTS = {"BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE"}
@@ -70,7 +71,8 @@ def _validated_reported_facts(value: dict[str, Any] | None) -> dict[str, Any]:
     facts = value or {}
     if not isinstance(facts, dict):
         raise ResolveError(422, "VALIDATION_ERROR", "Reported facts must be a small JSON object")
-    allowed_fact_keys = {"amount_minor", "recharge_reference", "subscription_id", "description"}
+    allowed_fact_keys = {"amount_minor", "recharge_reference", "subscription_id", "description",
+                         "claimed_loss_minor", "reported_balance_minor"}
     if set(facts) - allowed_fact_keys:
         raise ResolveError(422, "VALIDATION_ERROR", "Reported facts include unsupported fields")
     try:
@@ -82,6 +84,11 @@ def _validated_reported_facts(value: dict[str, Any] | None) -> dict[str, Any]:
     amount = facts.get("amount_minor")
     if amount is not None and (not isinstance(amount, int) or isinstance(amount, bool) or abs(amount) > MAX_SAFE_INTEGER):
         raise ResolveError(422, "VALIDATION_ERROR", "Reported amount must be a safe integer in minor units")
+    for field in ("claimed_loss_minor", "reported_balance_minor"):
+        claim = facts.get(field)
+        if claim is not None and (not isinstance(claim, int) or isinstance(claim, bool) or claim < 0
+                                  or claim > MAX_SAFE_INTEGER):
+            raise ResolveError(422, "VALIDATION_ERROR", f"Reported {field} must be a non-negative safe integer")
     for field in ("recharge_reference", "subscription_id", "description"):
         item = facts.get(field)
         limit = 2000 if field == "description" else 128
@@ -194,6 +201,7 @@ class ResolveFacade:
             "missing": row["missing"], "conflicts": row["conflicts"],
             "eligible_actions": row["eligible_actions"],
             "review_reasons": row["review_reasons"], "created_at": row["created_at"],
+            "outcome": row.get("outcome") if hasattr(row, "get") else None,
             "simulation": True,
         }
 
@@ -389,6 +397,7 @@ class ResolveFacade:
             raise ResolveError(409, "STALE_VERSION", "Case changed; reload before investigating")
 
         additional_source_status: list[dict[str, Any]] = []
+        recharge_records: tuple = ()
         if complaint_type == "CONNECTIVITY":
             service_statement = self._provider.get_service_statement(context.sandbox_id, context.account_id)  # type: ignore[attr-defined]
             if service_statement is None:
@@ -520,6 +529,8 @@ class ResolveFacade:
                 if reported_subscription is None or reported_subscription == str(target["target_id"]):
                     result["eligible_actions"].append({"action_type": "DEACTIVATE_VAS", "target_id": target["target_id"],
                                                         "target_label": target["target_label"]})
+        outcome = self._outcome(context, complaint_type, statement, result, facts,
+                                recharge_records if complaint_type == "BALANCE_RECHARGE" else (), vas_targets)
         investigation_id = uuid4()
         created_at = datetime.now(UTC)
         source_status = alternate_source_status if statement is None else [{
@@ -569,10 +580,12 @@ class ResolveFacade:
                 text("""
                     INSERT INTO resolve.investigations
                       (id,case_id,revision,evidence_state,finding,evidence,created_at,calculations,source_status,
-                       missing,conflicts,eligible_actions,review_reasons,window_start,window_end,command_key,request_hash)
+                       missing,conflicts,eligible_actions,review_reasons,window_start,window_end,command_key,request_hash,
+                       outcome)
                     VALUES (:id,:case_id,:revision,:state,CAST(:finding AS jsonb),CAST(:evidence AS jsonb),
                       :created_at,CAST(:calculations AS jsonb),CAST(:source_status AS jsonb),:missing,:conflicts,
-                      CAST(:eligible_actions AS jsonb),:review_reasons,:window_start,:window_end,:command_key,:request_hash)
+                      CAST(:eligible_actions AS jsonb),:review_reasons,:window_start,:window_end,:command_key,:request_hash,
+                      CAST(:outcome AS jsonb))
                 """),
                 {"id": investigation_id, "case_id": case_id, "revision": revision,
                  "state": result["evidence_state"], "finding": json.dumps(result["findings"], ensure_ascii=False, default=str),
@@ -583,7 +596,8 @@ class ResolveFacade:
                  "missing": result["missing"], "conflicts": result["conflicts"],
                  "eligible_actions": json.dumps(result["eligible_actions"], default=str),
                  "review_reasons": result["review_reasons"], "window_start": window_start,
-                 "window_end": window_end, "command_key": command_key, "request_hash": request_hash},
+                 "window_end": window_end, "command_key": command_key, "request_hash": request_hash,
+                 "outcome": json.dumps(outcome, ensure_ascii=False, default=str)},
             )
             connection.execute(
                 text("""
@@ -604,6 +618,7 @@ class ResolveFacade:
                 """),
                 {"id": uuid4(), "session_id": context.session_id, "case_id": case_id,
                  "details": json.dumps({"revision": revision, "evidence_state": result["evidence_state"],
+                                        "classification": outcome["classification"],
                                         "finding_codes": [item["code"] for item in result["findings"]]}),
                  "created_at": created_at},
             )
@@ -617,8 +632,31 @@ class ResolveFacade:
             "missing": result["missing"], "conflicts": result["conflicts"],
             "eligible_actions": result["eligible_actions"],
             "review_reasons": result["review_reasons"], "created_at": created_at,
-            "simulation": True,
+            "outcome": outcome, "simulation": True,
         }
+
+    def _outcome(self, context: AuthContext, complaint_type: str, statement: Any, result: dict[str, Any],
+                 facts: dict[str, Any], recharges: tuple, vas_targets: list[dict[str, Any]]) -> dict[str, Any]:
+        """One classification both the chat and Voice explain (see services/reconstruction.py)."""
+        if statement is None:  # data and connectivity reconcile bytes and service checks, not money
+            return outcome_from_evidence(result["evidence_state"], result["findings"])
+        provider = self._provider
+        window_ids = [item.id for item in statement.postings]
+        charge_context = (provider.get_charge_context(context.sandbox_id, context.account_id, window_ids)  # type: ignore[attr-defined]
+                          if hasattr(provider, "get_charge_context") else {})
+        history = (provider.get_support_history(context.sandbox_id, context.account_id)  # type: ignore[attr-defined]
+                   if hasattr(provider, "get_support_history") else [])
+        # A VAS dispute is about past charges: check the subscription behind each charge in the period, even
+        # one that has since been stopped, not only the subscriptions that are still active.
+        unverified = {str(item["product"]["subscription_id"]): item["product"]["name"]
+                      for item in charge_context.values()
+                      if item.get("product") and item["product"].get("offer_kind") == "VAS"
+                      and item["product"].get("activation_evidence_ref") is None} if complaint_type == "VAS_DISPUTE" else {}
+        outcome = reconstruct_balance(
+            statement, result, charge_context=charge_context, recharges=tuple(recharges),
+            claimed_loss_minor=facts.get("claimed_loss_minor"), reported_balance_minor=facts.get("reported_balance_minor"),
+            vas_unverified=unverified, history=history)
+        return ensure_uuid_strings(outcome)
 
     def propose_action(self, context: AuthContext, *, case_id: UUID, expected_version: int,
                        investigation_id: UUID, action_type: str, target_id: UUID,

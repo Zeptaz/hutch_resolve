@@ -574,6 +574,48 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
         complete = len(rows) <= 500
         return tuple(RechargeRecord(**row) for row in rows[:500]), complete, f"fixture-v{run}:recharge"
 
+    def get_charge_context(self, sandbox_id: UUID, account_id: UUID,
+                           entry_ids: list[UUID]) -> dict[str, dict[str, Any]]:
+        """What each ledger posting was for: its itemised usage and the product behind a package/VAS charge.
+
+        Keyed by posting id. A posting with no row here simply has no itemised record; nothing is inferred.
+        """
+        if not entry_ids:
+            return {}
+        params = {"sandbox": sandbox_id, "account": account_id, "entries": list(entry_ids)}
+        with self._engine.connect() as connection:
+            events = connection.execute(text("""
+                SELECT id,charge_entry_id,event_kind,direction,counterparty,started_at,duration_seconds,
+                       volume_bytes,rate_label,charge_minor
+                FROM sandbox.rated_events
+                WHERE sandbox_id=:sandbox AND account_id=:account AND charge_entry_id = ANY(:entries)
+                ORDER BY started_at,id LIMIT 2001
+            """), params).mappings().all()
+            products = connection.execute(text("""
+                SELECT e.charge_entry_id,e.event_type,o.name,o.offer_kind,s.id AS subscription_id,s.status,
+                       s.activation_evidence_ref
+                FROM sandbox.subscription_events e
+                JOIN sandbox.subscriptions s ON (s.sandbox_id,s.id)=(e.sandbox_id,e.subscription_id)
+                JOIN sandbox.offers o ON (o.sandbox_id,o.id)=(s.sandbox_id,s.offer_id)
+                WHERE e.sandbox_id=:sandbox AND s.account_id=:account AND e.charge_entry_id = ANY(:entries)
+            """), params).mappings().all()
+        context: dict[str, dict[str, Any]] = {}
+        for row in events[:2000]:
+            context.setdefault(str(row["charge_entry_id"]), {"events": [], "product": None})["events"].append(dict(row))
+        for row in products:
+            context.setdefault(str(row["charge_entry_id"]), {"events": [], "product": None})["product"] = dict(row)
+        return context
+
+    def get_support_history(self, sandbox_id: UUID, account_id: UUID) -> list[dict[str, Any]]:
+        """Earlier support tickets for this line (newest reference first), as recorded in the CRM sandbox."""
+        with self._engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT id,case_ref,category,status,packet FROM sandbox.tickets
+                WHERE sandbox_id=:sandbox AND account_id=:account
+                ORDER BY case_ref DESC LIMIT 20
+            """), {"sandbox": sandbox_id, "account": account_id}).mappings().all()
+        return [dict(row) for row in rows]
+
     def get_action_target(
         self, sandbox_id: UUID, account_id: UUID, action_type: str, target_id: UUID
     ) -> dict[str, Any] | None:

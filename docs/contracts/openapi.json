@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "HUTCH Resolve API",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "Shared Resolve wire contract v1.2.0. Adds agent-authorized stalled-turn reconciliation; see docs/contracts.md for safety and verification status."
   },
   "servers": [
@@ -4029,6 +4029,34 @@
             ],
             "default": null,
             "title": "Description"
+          },
+          "claimed_loss_minor": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Claimed Loss Minor"
+          },
+          "reported_balance_minor": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reported Balance Minor"
           }
         },
         "title": "ReportedFacts",
@@ -4795,6 +4823,18 @@
             "const": true,
             "title": "Simulation",
             "type": "boolean"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvestigationOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Resolve's classification of how much of the complaint the records explain, with the itemised breakdown. Absent only on investigations recorded before contract 1.3.0."
           }
         },
         "required": [
@@ -6500,6 +6540,18 @@
                 "type": "null"
               }
             ]
+          },
+          "classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvestigationClassification"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Latest investigation's outcome classification; absent for cases investigated before contract 1.3.0."
           },
           "review_status": {
             "$ref": "#/components/schemas/ReviewStatus"
@@ -8654,6 +8706,617 @@
             }
           }
         }
+      },
+      "InvestigationClassification": {
+        "description": "How much of the complaint the records explain (Resolve's investigation outcome).",
+        "enum": [
+          "EXPLAINED",
+          "PARTIALLY_EXPLAINED",
+          "UNEXPLAINED",
+          "INSUFFICIENT_EVIDENCE"
+        ],
+        "title": "InvestigationClassification",
+        "type": "string"
+      },
+      "OutcomeItem": {
+        "additionalProperties": false,
+        "description": "One ledger posting, or one itemised call/SMS/data session behind it.",
+        "properties": {
+          "evidence_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Id"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "amount_minor": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "title": "Amount Minor",
+            "type": "integer"
+          },
+          "posting_amount_minor": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "title": "Posting Amount Minor",
+            "type": "integer"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "event_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Event Kind"
+          },
+          "counterparty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Counterparty"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration Seconds"
+          },
+          "volume_bytes": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Volume Bytes"
+          },
+          "rate_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Rate Label"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Product Name"
+          },
+          "product_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Product Kind"
+          },
+          "itemisation": {
+            "anyOf": [
+              {
+                "const": "INCOMPLETE",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Itemisation"
+          },
+          "reverses_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reverses Reference"
+          },
+          "reverses_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reverses Kind"
+          },
+          "reversed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reversed"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "kind",
+          "amount_minor",
+          "posting_amount_minor",
+          "occurred_at",
+          "reference"
+        ],
+        "title": "OutcomeItem",
+        "type": "object"
+      },
+      "OutcomeLine": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "CREDIT",
+              "DEBIT"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "amount_minor": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Amount Minor",
+            "type": "integer"
+          },
+          "count": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "evidence_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OutcomeItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "category",
+          "direction",
+          "amount_minor",
+          "count",
+          "evidence_ids",
+          "items"
+        ],
+        "title": "OutcomeLine",
+        "type": "object"
+      },
+      "OutcomeAnomaly": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "amount_minor": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Minor"
+          },
+          "evidence_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Occurred At"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reference"
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "enum": [
+                  "MISSING",
+                  "EXTRA"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Direction"
+          },
+          "fulfilment_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fulfilment Status"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Product Name"
+          },
+          "subscription_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subscription Id"
+          }
+        },
+        "required": [
+          "code",
+          "amount_minor",
+          "evidence_ids"
+        ],
+        "title": "OutcomeAnomaly",
+        "type": "object"
+      },
+      "SupportHistoryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "case_ref": {
+            "title": "Case Ref",
+            "type": "string"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "opened_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opened At"
+          }
+        },
+        "required": [
+          "case_ref",
+          "category",
+          "status",
+          "resolution",
+          "opened_at"
+        ],
+        "title": "SupportHistoryItem",
+        "type": "object"
+      },
+      "InvestigationOutcome": {
+        "additionalProperties": false,
+        "description": "Opening + credits - deductions = expected balance, compared with the records and the customer's claim.",
+        "properties": {
+          "classification": {
+            "$ref": "#/components/schemas/InvestigationClassification"
+          },
+          "escalation": {
+            "enum": [
+              "NOT_NEEDED",
+              "OFFER"
+            ],
+            "title": "Escalation",
+            "type": "string"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "const": "LKR",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "opening_minor": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opening Minor"
+          },
+          "credits_minor": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credits Minor"
+          },
+          "debits_minor": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Debits Minor"
+          },
+          "expected_minor": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Minor"
+          },
+          "observed_minor": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Minor"
+          },
+          "claimed_minor": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed Minor"
+          },
+          "explained_minor": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explained Minor"
+          },
+          "unexplained_minor": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unexplained Minor"
+          },
+          "breakdown": {
+            "items": {
+              "$ref": "#/components/schemas/OutcomeLine"
+            },
+            "title": "Breakdown",
+            "type": "array"
+          },
+          "anomalies": {
+            "items": {
+              "$ref": "#/components/schemas/OutcomeAnomaly"
+            },
+            "title": "Anomalies",
+            "type": "array"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/SupportHistoryItem"
+            },
+            "title": "History",
+            "type": "array"
+          }
+        },
+        "required": [
+          "classification",
+          "escalation",
+          "currency",
+          "opening_minor",
+          "credits_minor",
+          "debits_minor",
+          "expected_minor",
+          "observed_minor",
+          "claimed_minor",
+          "explained_minor",
+          "unexplained_minor",
+          "breakdown",
+          "anomalies",
+          "notes",
+          "history"
+        ],
+        "title": "InvestigationOutcome",
+        "type": "object"
       }
     },
     "parameters": {
