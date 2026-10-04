@@ -229,3 +229,25 @@ Voice consent prompts.
 - Verification: unit — conversation suite 395 passed, 19 skipped; new test fails if any reviewed locale
   overrides the Voice confirm prompt.
 - Core dependency: none.
+
+### CB-007 — Sinhala "remove my VAS charges" went to packages; "what are VAS charges" got an unrelated FAQ
+
+- Date / status: 2026-10-04 — DONE on `integration/voice-crm`, verified
+- Risk: **MEDIUM** — intent prompt change (`extract-v6` → `extract-v7`) affects routing of every turn; no code
+  path, consent or Resolve call changed.
+- Files: `conversation/extraction.py` (prompt), `conversation/eval/extraction_cases.jsonl` (+9 cases from a real
+  Sinhala/Tamil/English Voice call), `conversation/try_extract.py` (`--ids` filter for targeted evals).
+- What changed / why: in a live Sinhala call the transcripts were correct but extraction returned PACKAGES for
+  "මට ඒ VAS charges ටික අයින් කරන්න පුළුවන්ද?" (reply: "I couldn't load the packages") and FAQ for
+  "...මොනවද VAS charges කියන්නේ" (reply: an unrelated recharge-fee article). The prompt had no Sinhala-script VAS
+  examples and no "remove/stop VAS" example; its nearest example was "activate a package for me" → PACKAGES.
+  v7: removing/stopping a VAS or its charges is NEW_COMPLAINT/VAS_DISPUTE; PACKAGES is data/voice bundles only;
+  "what are the VAS charges" means the customer's own line; transcripts may mix scripts and mishear VAS
+  ("VA charges", "AVAS"); six new examples (Sinhala script, Tamil, English, Singlish) worded differently from the
+  eval cases.
+- Verification: live eval, same model `gemini-3.5-flash-lite`, all 71 cases: v6 **67/71** (vas-06, vas-07,
+  vas-09 wrong + 1 timeout) → v7 **71/71**, no regressions in any variety, max latency 6.0 s → 1.95 s. Unit
+  conversation suite 395 passed. Live signed Voice probe (Tamil synthesized speech, real Gemini Live + Resolve):
+  "what VAS charges are on my account" → services list; "stop this VAS service" (STT heard "Indus") →
+  VAS investigation with stop offer. Fluent Sinhala speaker retest still needed.
+- Core dependency: none.
