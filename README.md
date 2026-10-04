@@ -41,8 +41,11 @@ Resolve is a resolution layer behind HUTCH's customer channels. It turns a compl
 ## Key features
 
 - **Four complaint types, six seeded cases (A–F):** balance/recharge deduction (A), data depletion (B), no internet with an active package (C), balance conflict (D), payment captured but not credited (E), VAS dispute without an activation record (F).
+- **Eleven seeded lines (fixture v3):** lines 0007–0011 add a partly explained deduction (records explain LKR 73 of a reported LKR 100), a duplicate package renewal, heavy calling with a failed top-up, bonus, transfer and fee (fully explained), a refunded VAS charge with earlier support history, and a line with no balance snapshots.
 - **Exact reconciliation** in integer cents (e.g. 1,000 − 499 − 60 − 21 = 420); quota and money kept in separate calculations.
-- **Evidence states:** SUFFICIENT, PARTIAL or CONFLICTING, decided by rules; conflicts block account changes.
+- **Balance reconstruction:** opening balance + recharges, bonuses and refunds − calls, SMS, data, packages, VAS, transfers and fees = expected balance, from ledger postings and itemised usage, compared with the recorded balance and the customer's claim ("LKR 100 was deducted", "my balance is only LKR 420"). Each investigation is classified EXPLAINED, PARTIALLY_EXPLAINED, UNEXPLAINED or INSUFFICIENT_EVIDENCE with the explained and unexplained amounts; nothing is estimated.
+- **Escalation only when justified:** an explained balance is proved with its breakdown; a human review is offered for unexplained money or missing evidence, or when the customer asks. Chat shows the full breakdown, Voice says the same conclusion briefly.
+- **Evidence states:** SUFFICIENT, PARTIAL or CONFLICTING, decided by rules; conflicts block account changes. Seeded one-shot provider faults are resilience-test controls and stay off unless `SANDBOX_FAULTS_ENABLED=true`.
 - **Three allowed actions**, each needing an explicit, case-bound confirmation with a 5-minute hash-bound proposal: `DEACTIVATE_VAS`, `SEND_SETTINGS_INSTRUCTIONS`, `CREATE_REVIEW_TICKET`.
 - **Live operation status:** PENDING until the worker records SUCCEEDED or FAILED; pending is never shown as success. Idempotency keys give exactly one account change on retries.
 - **Trust Receipt:** append-only, with a SHA-256 digest.
@@ -92,7 +95,7 @@ There is no separate chatbot service, message broker or Redis. The full diagram 
 | `backend/resolve/conversation/` | Conversation module: extraction, routing, rewrite, grounded answers, telemetry |
 | `backend/resolve/providers/` | Sandbox adapters and deterministic reconciliation |
 | `backend/resolve/migrations/` | Alembic migrations |
-| `database/` | Bootstrap, SQL schemas, seed fixtures (six cases), knowledge cards |
+| `database/` | Bootstrap, SQL schemas, seed fixture v3 (eleven lines, itemised usage), knowledge cards |
 | `frontend/` | React app (customer `/` and agent `/agent`), Playwright tests in `frontend/e2e/` |
 | `docs/contracts/` | OpenAPI 3.1 contract (`openapi.json`) and examples |
 | `scripts/` | Start / stop / reset scripts and fixture generator |
@@ -257,6 +260,7 @@ The live demo at https://resolve.zeptaz.com follows `main`:
 - **Vercel** serves the React app; `frontend/vercel.json` sends `/api/*` to Resolve.
 - **Railway** runs Resolve (`railway.json` runs `scripts/hosted_db_setup.py`, then Uvicorn), the Voice service and PostgreSQL 18.
 - The hosted demo uses the built-in mock CRM and synthetic data only. Demo sign-in details are shared separately with the judges and are never committed.
+- `database/seed.sql` only inserts missing rows (`ON CONFLICT DO NOTHING`). When it declares a newer `fixture_version` than the hosted run, `hosted_db_setup.py` re-applies it, which adds the new lines and records and never changes or removes existing data.
 
 ## Project documents
 
