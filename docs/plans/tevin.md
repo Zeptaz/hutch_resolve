@@ -74,3 +74,24 @@ Resolve conversation answers now reject outcome claims unsupported by the availa
 ### Local full-stack conversation verification — 2026-10-03
 
 The real Resolve-backed package query initially failed strict presentation DTO validation because Resolve-only usage/offer metadata leaked into the chatbot adapter. The adapter now projects only declared presentation fields; a real facade/disposable PostgreSQL regression passes. Live structured browser/API paths exercised A/B/C/D/E/F, package selection, action status and receipts. The model capability was unavailable because no live model key was configured; free-text fallback requested structured complaint entry. Real-model semantic, native-language and physical Voice qualifications remain open. See root `context.md` for aggregate checks.
+
+### Direct balance enquiry recovery — 2026-10-04
+
+Two real Voice turns with “Can I know my account balance?” were transcribed correctly, but `EXTRACTION/TIMEOUT` at about six seconds sent them to the generic category prompt. The shared conversation service on `voice_test` now recognizes only clear account-balance read requests when extraction fails and invokes its existing customer-scoped `_account` path. It does not classify balance complaints or how-to questions as account reads, and guest access still requires sign-in. Regression tests cover timeout, complaint/how-to exclusion and guest denial; the full Resolve default suite passed **446/446** with 40 opt-in PostgreSQL skips. A live synthetic browser call returned the current scoped balance and verified PCM speech. Tevin's broader model and native-language intent qualification remains open.
+
+Implementation commit **7c5ebd9** is remotely confirmed on `hutch_resolve/voice_test`.
+
+### Model-failure routing follow-up — 2026-10-04
+
+The shared conversation service now recovers a narrow set of direct balance questions and complete English complaint starters after failed intent extraction, without bypassing the Resolve facade or consent gates. The local ignored demo setting was switched to `gemini-3.5-flash-lite` after a successful structured extraction. Full default Resolve suite: **449 passed, 40 opt-in PostgreSQL skipped**; two live API/PostgreSQL chat turns returned the expected scoped balance and investigated reload case, with `EXTRACTION/OK` telemetry. Physical Voice and native-language intent review remain open. Verified backend implementation commit **d5d1214** is on `voice_test`.
+
+
+### Voice confirmation and interruption repair - 2026-10-04
+
+- [x] Initial offers, alternatives and pending-offer follow-ups in Voice direct callers to the on-screen **Yes, go ahead / No, leave it** buttons. Security requires a button decision; spoken yes/no never authorizes an action. Text behavior and canonical pending-offer ownership remain unchanged. New English Voice strings are explicitly unreviewed for Sinhala/Tamil.
+- [x] Browser VAD requires three consecutive 100 ms speech frames and 700 ms quiet; it rejects playback echo more strongly until local playback actually drains, freezes room-noise learning during playback, and keeps the speaking indicator stable between PCM chunks. Normal sensitivity resumes immediately after drain.
+- [x] External Voice v3 uses browser activity boundaries as its sole VAD. Bounded 300 ms preroll preserves initial speech; mute discards it. V2 retains provider VAD. Live verification caught and fixed invalid automatic silence settings when provider detection is disabled.
+- [x] Verification: Resolve default suite **452 passed, 40 disposable-PostgreSQL checks skipped**; Voice **71 passed**; frontend TypeScript and final mock browser suite **30/30 passed**. Earlier failures exposed quiet-caller thresholds and an undersized test audio budget; corrected and rerun. One chat browser journey failed in an earlier run and passed in the final suite. A real Gemini connection produced **16 and 24 PCM frames across two synthetic turns**, with two accepted playback acknowledgements and exactly two Resolve-stub calls. This checks provider/manual-VAD runtime interoperability, not signed Resolve integration or physical acoustics.
+- [ ] H-08/J-03/J-04 remain open for physical microphone/speaker echo and repeated interruption, native-language review, and full signed browser/model qualification of this revision. Historical logs cannot identify the exact acoustic source of the reported loop.
+
+Changes belong to `hutch_resolve/voice_test` and `hutch_zeptazvoice/voice_test2`. Shared conversation changes are restricted to Voice wording/channel propagation. Commit and local service restart evidence follows after verification.

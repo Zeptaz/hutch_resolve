@@ -78,6 +78,7 @@ from .extraction import (
     PROMPT_VERSION,
     SpokenDecision,
     TimeKind,
+    TimeReference,
     default_window,
     resolve_window,
 )
@@ -116,6 +117,59 @@ _CRITICAL_REPLY = re.compile(
 )
 # Knowledge topics where a signed-in customer's current balance is useful context.
 _BALANCE_TOPICS = {"how-to-reload", "check-balance-how", "reload-not-received", "prepaid-recharge"}
+# A narrow, deterministic recovery for clear account reads when intent extraction
+# times out. Do not match complaints ("balance dropped"), how-to questions, or
+# requests mixed with another issue.
+_DIRECT_BALANCE_QUESTIONS = {
+    "my account balance",
+    "my balance",
+    "can i know my account balance",
+    "can i know my balance",
+    "can you tell me my account balance",
+    "can you tell me my balance",
+    "what is my account balance",
+    "what is my balance",
+    "what's my account balance",
+    "what's my balance",
+    "what is my current balance",
+    "what's my current balance",
+    "tell me my account balance",
+    "tell me my balance",
+    "check my account balance",
+    "check my balance",
+    "show me my account balance",
+    "show me my balance",
+    "how much balance do i have",
+    "i wanna know my account balance",
+    "i want to know my account balance",
+    "can you tell me what my account balance is",
+    "tell me what my account balance is",
+}
+# Only unmistakable, complete English complaint statements are recovered when
+# extraction is unavailable. These identify a complaint category; they do not
+# infer an amount, time, cause, evidence, consent, or an action outcome.
+_FALLBACK_COMPLAINT_PATTERNS = (
+    (ComplaintType.BALANCE_RECHARGE, re.compile(
+        r"(?:my |the )?(?:reload|recharge|top[ -]?up) (?:didn't|did not|hasn't|has not) "
+        r"(?:arrive|come|show up|credit|go through)"
+    )),
+    (ComplaintType.BALANCE_RECHARGE, re.compile(
+        r"my balance (?:dropped|went down|decreased|is missing|was deducted)"
+    )),
+    (ComplaintType.DATA_DEPLETION, re.compile(
+        r"my data (?:finished|ran out|is running out) (?:too fast|quickly|early)"
+    )),
+    (ComplaintType.CONNECTIVITY, re.compile(
+        r"(?:i have |there is )?no (?:internet|signal|network|connection)"
+    )),
+    (ComplaintType.CONNECTIVITY, re.compile(
+        r"my (?:internet|mobile data|data connection) (?:is not working|doesn't work|is down)"
+    )),
+    (ComplaintType.VAS_DISPUTE, re.compile(
+        r"i (?:was|am|got) charged for (?:a |an )?(?:service|subscription) "
+        r"i (?:didn't|did not) (?:subscribe|ask) for"
+    )),
+)
 _CODE = re.compile(r"[A-Z0-9_]+")
 # Resolve refuses a proposal when its target changed after the investigation; try the next option.
 _SKIPPABLE_OFFER_ERRORS = {"STALE_VERSION", "ACTION_NOT_ALLOWED", "PROPOSAL_INVALIDATED"}
@@ -154,6 +208,30 @@ _CONTINUES_CANDIDATE = {Intent.NEW_COMPLAINT, Intent.CORRECTION, Intent.FOLLOW_U
 SimulationClock = Callable[[AuthContext], Awaitable[datetime]]
 
 log = logging.getLogger(__name__)
+
+
+def _is_direct_balance_question(text: str) -> bool:
+    return _normalized_english(text) in _DIRECT_BALANCE_QUESTIONS
+
+
+def _normalized_english(text: str) -> str:
+    normalized = " ".join(text.casefold().strip().split())
+    normalized = re.sub(r"^(?:hi|hello|hey)[,!. ]+", "", normalized)
+    return normalized.rstrip(" ?!.")
+
+
+def _fallback_complaint(text: str) -> Extraction | None:
+    normalized = _normalized_english(text)
+    for complaint_type, pattern in _FALLBACK_COMPLAINT_PATTERNS:
+        if pattern.fullmatch(normalized):
+            return Extraction(
+                intent=Intent.NEW_COMPLAINT, decision=None, action_choice=None,
+                detected_language=Language.EN, script="LATIN", complaint_type=complaint_type,
+                time_reference=TimeReference(kind=TimeKind.NONE, count=None, start_date=None, end_date=None),
+                amount_lkr=None, recharge_reference=None, faq_query=None,
+                summary=text.strip()[:300], ambiguities=[],
+            )
+    return None
 
 
 async def _real_time(ctx: AuthContext) -> datetime:
@@ -250,6 +328,14 @@ class ConversationService:
         now = await self._simulation_now(ctx)
         extraction = await self._extract(ctx, turn, inp.text, state, now)
         if extraction is None:
+            if state.candidate is None and state.pending_proposal is None and _is_direct_balance_question(inp.text):
+                return await self._account(ctx, state) if _is_customer(ctx) else _login_required(state)
+            if state.candidate is None and state.pending_proposal is None:
+                recovered = _fallback_complaint(inp.text)
+                if recovered is not None:
+                    if not _is_customer(ctx):
+                        return _login_required(state)
+                    return await self._collect_complaint(ctx, turn, recovered, state, Candidate(), now)
             return self._structured_fallback(ctx, state)
         if extraction.detected_language is not Language.EN or len(inp.text.split()) >= 3:
             # Reply in the language the customer writes; a bare "ok" does not switch back to English.
@@ -300,7 +386,7 @@ class ConversationService:
             case Intent.CORRECTION if state.active_case_id:
                 return await self._correct(ctx, turn, extraction, state, now)
             case Intent.FOLLOW_UP if state.active_case_id:
-                return await self._follow_up(ctx, state)
+                return await self._follow_up(ctx, state, turn.channel)
             case Intent.STATUS:
                 return await self._status(ctx, state)
             case Intent.HUMAN_REQUEST:
@@ -517,11 +603,11 @@ class ConversationService:
         )
         # Resolve invalidates proposals bound to the previous revision.
         proposal, alternatives = await self._propose_first(ctx, turn, case.id, investigation)
-        draft = _investigation_draft(investigation, proposal, lang, alternatives)
+        draft = _investigation_draft(investigation, proposal, lang, alternatives, turn.channel)
         new_state = _after_investigation(state, turn, case.id, proposal, draft, alternatives)
         return _prefixed(draft, t.text("rechecked", lang, window=t.format_window(start, end))), new_state
 
-    async def _follow_up(self, ctx: AuthContext, state: DialogueState) -> Step:
+    async def _follow_up(self, ctx: AuthContext, state: DialogueState, channel: Channel = Channel.TEXT) -> Step:
         """Answer from the saved investigation; never re-investigate or re-propose."""
         lang = _lang(state)
         case = await self._facade.get_case(ctx, state.active_case_id)
@@ -530,8 +616,12 @@ class ConversationService:
         draft = _investigation_draft(case.investigation, None, lang)
         pending = state.pending_proposal if state.pending_proposal and state.pending_proposal.case_id == case.id else None
         if pending is not None:
-            question = PendingQuestion(code=Q_CONFIRM_ACTION, text=t.text("confirm_prompt", lang), allowed_input_types=["action_decision", "text"])
-            draft = replace(draft, reply_text=_paragraphs([draft.reply_text, t.text("offer_still_open", lang)]),
+            voice = channel is Channel.VOICE
+            question = PendingQuestion(code=Q_CONFIRM_ACTION,
+                text=t.text("confirm_prompt_voice" if voice else "confirm_prompt", lang),
+                allowed_input_types=["action_decision", "text"])
+            still_open = t.text("offer_still_open_voice" if voice else "offer_still_open", lang)
+            draft = replace(draft, reply_text=_paragraphs([draft.reply_text, still_open]),
                             case_id=case.id, pending_question=question)
             return draft, state.evolve(pending_question=question)
         return draft, state.evolve(pending_question=None)
@@ -599,7 +689,7 @@ class ConversationService:
             ),
             command_key(turn.conversation_id, turn.turn_id, "escalate", case.id),
         )
-        draft = _offer_draft(proposal, lang, case.id)
+        draft = _offer_draft(proposal, lang, case.id, turn.channel)
         return draft, state.evolve(pending_question=draft.pending_question, pending_proposal=_proposal_ref(proposal, turn))
 
     async def _faq(self, ctx: AuthContext, turn: NormalizedTurn, text: str, ex: Extraction, state: DialogueState) -> Step:
@@ -718,7 +808,7 @@ class ConversationService:
         if proposal.action_type is not ActionType.ACTIVATE_PACKAGE or proposal.package_terms is None:
             log.error("Resolve returned an invalid package proposal", extra={"request_id": str(ctx.request_id)})
             raise ResolveError("DEPENDENCY_UNAVAILABLE", "Package activation is unavailable")
-        draft = _offer_draft(proposal, lang, proposal.case_id)
+        draft = _offer_draft(proposal, lang, proposal.case_id, turn.channel)
         new_state = state.evolve(
             active_case_id=proposal.case_id,
             pending_proposal=_proposal_ref(proposal, turn),
@@ -787,7 +877,7 @@ class ConversationService:
             command_key(conv_id, turn_id, "investigate", case.id),
         )
         proposal, alternatives = await self._propose_first(ctx, turn, case.id, investigation)
-        draft = _investigation_draft(investigation, proposal, _lang(state), alternatives)
+        draft = _investigation_draft(investigation, proposal, _lang(state), alternatives, turn.channel)
         return draft, _after_investigation(state, turn, case.id, proposal, draft, alternatives)
 
     async def _choose_action(self, ctx: AuthContext, turn: NormalizedTurn, choice: ActionChoice, state: DialogueState) -> Step:
@@ -797,7 +887,7 @@ class ConversationService:
         previous = _pending_as_choice(state.pending_proposal)
         if previous is not None and previous.action_type is not choice.action_type and previous not in rest:
             rest.append(previous)  # the earlier offer stays reachable
-        draft = _offer_with_alternatives(proposal, rest, _lang(state), choice.case_id)
+        draft = _offer_with_alternatives(proposal, rest, _lang(state), choice.case_id, turn.channel)
         return draft, state.evolve(
             pending_choices=rest, pending_question=draft.pending_question, pending_proposal=_proposal_ref(proposal, turn)
         )
@@ -932,7 +1022,7 @@ class ConversationService:
                 if err.code in {"ACTION_NOT_ALLOWED", "STALE_VERSION", "PROPOSAL_INVALIDATED", "RESOURCE_NOT_FOUND"}:
                     return base, cleared.evolve(pending_choices=others)
                 raise
-            offer = _offer_with_alternatives(proposal, remaining[1:], lang, pending.case_id)
+            offer = _offer_with_alternatives(proposal, remaining[1:], lang, pending.case_id, turn.channel)
             draft = TurnDraft(
                 reply_text=_paragraphs([base.reply_text, offer.reply_text]), case_id=pending.case_id, cards=base.cards + offer.cards,
                 pending_question=offer.pending_question, operation_ids=base.operation_ids,
@@ -1106,21 +1196,28 @@ def _citations(cards: list[KnowledgeCard]) -> list[Citation]:
                      scope=c.scope) for c in cards]
 
 
-def _offer_draft(proposal: ProposalView, lang: t.Locale, case_id) -> TurnDraft:
-    question = PendingQuestion(code=Q_CONFIRM_ACTION, text=t.text("confirm_prompt", lang), allowed_input_types=["action_decision", "text"])
+def _offer_draft(proposal: ProposalView, lang: t.Locale, case_id, channel: Channel = Channel.TEXT) -> TurnDraft:
+    voice = channel is Channel.VOICE
+    question = PendingQuestion(code=Q_CONFIRM_ACTION,
+        text=t.text("confirm_prompt_voice" if voice else "confirm_prompt", lang),
+        allowed_input_types=["action_decision", "text"])
     # Resolve's consequences stay in the message: they carry limits such as "does not repair the network".
-    reply = t.text("offer_action", lang, action=t.action_label(proposal.action_type, lang), target=proposal.target_label,
-                   consequences=proposal.consequences)
+    reply = t.text("offer_action_voice" if voice else "offer_action", lang,
+        action=t.action_label(proposal.action_type, lang), target=proposal.target_label,
+        consequences=proposal.consequences)
     return TurnDraft(reply_text=reply, case_id=case_id, cards=[ConfirmationCard(data=proposal)], pending_question=question,
                      rewrite_allowed=True, keep_exact=(proposal.target_label,))
 
 
-def _offer_with_alternatives(proposal: ProposalView, alternatives: list[ActionChoice], lang: t.Locale, case_id) -> TurnDraft:
-    offer = _offer_draft(proposal, lang, case_id)
+def _offer_with_alternatives(proposal: ProposalView, alternatives: list[ActionChoice], lang: t.Locale, case_id,
+                             channel: Channel = Channel.TEXT) -> TurnDraft:
+    voice = channel is Channel.VOICE
+    offer = _offer_draft(proposal, lang, case_id, channel)
     if not alternatives:
         return offer
     options = "; ".join(f"{t.action_label(a.action_type, lang)} ({a.target_label})" for a in alternatives)
-    return replace(offer, reply_text=f"{offer.reply_text} {t.text('other_options', lang, options=options)}",
+    more = t.text("other_options_voice" if voice else "other_options", lang, options=options)
+    return replace(offer, reply_text=f"{offer.reply_text} {more}",
                    keep_exact=(*offer.keep_exact, *(a.target_label for a in alternatives)))
 
 
@@ -1131,7 +1228,8 @@ def _paragraphs(parts: list[str]) -> str:
 
 
 def _investigation_draft(
-    inv: InvestigationResult, proposal: ProposalView | None, lang: t.Locale, alternatives: list[ActionChoice] | None = None
+    inv: InvestigationResult, proposal: ProposalView | None, lang: t.Locale,
+    alternatives: list[ActionChoice] | None = None, channel: Channel = Channel.TEXT
 ) -> TurnDraft:
     """Reply strictly from Resolve's findings; no number is computed or rephrased here.
 
@@ -1162,7 +1260,7 @@ def _investigation_draft(
 
     question, offer_text, keep = None, "", ()
     if proposal is not None:
-        offer = _offer_with_alternatives(proposal, alternatives or [], lang, inv.case_id)
+        offer = _offer_with_alternatives(proposal, alternatives or [], lang, inv.case_id, channel)
         offer_text, keep = offer.reply_text, offer.keep_exact
         cards += offer.cards
         question = offer.pending_question

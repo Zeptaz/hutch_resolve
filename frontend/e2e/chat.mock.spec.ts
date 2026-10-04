@@ -39,3 +39,24 @@ test('a signed-in customer can open the call panel before any proposal', async (
   await expect(page.getByText('Talk to Resolve')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Start voice call' })).toBeVisible()
 })
+
+test('spoken yes keeps the call offer visible until its button records the decision', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByRole('textbox').last()).toBeEnabled()
+  await page.waitForLoadState('networkidle')
+  await mockControl(page, 'continueAsDemoLine')
+  await page.reload()
+
+  await page.getByRole('button', { name: 'Call', exact: true }).click()
+  await page.getByRole('button', { name: 'Start voice call' }).click()
+  await expect(page.getByRole('button', { name: 'Try a balance issue' })).toBeVisible()
+  await page.getByRole('button', { name: 'Try a balance issue' }).click()
+  await expect(page.getByRole('heading', { name: 'Confirm an action' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Say yes' }).click()
+  await expect(page.getByRole('heading', { name: 'Confirm an action' })).toBeVisible()
+  await expect(page.getByText('Please review the offer on your screen and tap "Yes, go ahead" or "No, leave it". Nothing has changed yet.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Yes, go ahead' })).toBeEnabled()
+  await page.getByRole('button', { name: 'Yes, go ahead' }).click()
+  await expect(page.getByRole('heading', { name: 'Confirm an action' })).toHaveCount(0)
+})

@@ -31,9 +31,11 @@ _EN: dict[str, str] = {
     "evidence_conflicting": "The records don't agree with each other, so I can't give a final answer or change your account. A person needs to review this.",
     "no_findings": "I checked the available records but found nothing to report for that time window.",
     "offer_action": "I can {action} for {target}. {consequences} Shall I go ahead?",
+    "offer_action_voice": "I can {action} for {target}. {consequences} For security, please review this offer on your screen and press 'Yes, go ahead' or 'No, leave it'. Nothing will change until you press one of those buttons.",
     "other_options": "If you'd rather, I can also {options}. Just tell me, or answer this offer first and I'll suggest that next.",
+    "other_options_voice": "Other eligible options are {options}. First answer this offer using the buttons on your screen; you can ask about those options afterward.",
     "confirm_prompt": "Please answer using the buttons on the offer above.",
-    "confirm_prompt_voice": "Please say clearly whether you want me to go ahead: yes or no.",
+    "confirm_prompt_voice": "For security, I can't take a spoken yes or no for this action. Please review the offer on your screen and tap 'Yes, go ahead' or 'No, leave it'. Nothing has changed yet.",
     "declined": "Okay, I won't make that change. Nothing on your account was changed.",
     "accepted": "Your request is recorded. {status}",
     "proposal_mismatch": "That request is no longer the one I'm waiting on. Please use the latest option shown.",
@@ -53,6 +55,7 @@ _EN: dict[str, str] = {
     "checked_default_window": "You didn't say when, so I looked at your {complaint} records for {window}.",
     "rechecked": "I re-checked with the corrected details ({window}).",
     "offer_still_open": "My earlier offer is still open.",
+    "offer_still_open_voice": "The earlier offer is still pending. Please use the on-screen 'Yes, go ahead' or 'No, leave it' buttons.",
     "no_pending_action": "There's nothing waiting for your confirmation right now.",
     "no_active_case": "There's no open request in this conversation yet. What would you like help with?",
     "case_status": "Your {complaint} request is {status}.",
@@ -166,8 +169,11 @@ ENGLISH: dict[str, dict[str, str]] = {
     "delivery": {k.value: v for k, v in _DELIVERY_EN.items()},
     "case_status": _CASE_STATUS_EN,
 }
-# Sent to Resolve as case data, not shown as a reply: always English.
-NOT_LOCALIZED = frozenset({"default_escalation_reason", "package_selection_unavailable", "PACKAGE_ACTIVATION"})
+# Internal terms and voice prompts without reviewed translations remain English.
+NOT_LOCALIZED = frozenset({
+    "default_escalation_reason", "package_selection_unavailable", "PACKAGE_ACTIVATION",
+    "offer_action_voice", "other_options_voice", "offer_still_open_voice",
+})
 LOCALES_DIR = Path(__file__).with_name("locales")
 REVIEWED = "REVIEWED"
 Locale = str  # "en", "si", "ta", "si-Latn"; Language members are valid locale codes
