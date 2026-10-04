@@ -1,7 +1,7 @@
 import { API_MODE, newId, request } from '@/api/client'
 import type { VoiceProposal, VoiceResolveResult, VoiceServerMessage, VoiceSessionGrant } from './contracts'
 import { CallAudio, MicError, type MicErrorKind } from './audio'
-import { openVoiceSocket, VOICE_PROTOCOL, type VoiceSocket } from './socket'
+import { DECISION_SPEECH_PROTOCOL, openVoiceSocket, VOICE_PROTOCOLS, type VoiceSocket } from './socket'
 
 /** Voice caps a call at 120 s (HUTCH_VOICE_MAX_SESSION_SECONDS). */
 export const CALL_LIMIT_MS = 600_000 // matches HUTCH_VOICE_MAX_SESSION_SECONDS=600 on the Voice service
@@ -145,7 +145,7 @@ class MockAudio implements AudioPort {
 }
 
 /**
- * One customer voice call: mic -> Voice WebSocket -> speaker, following protocol zeptaz-hutch-v3.
+ * One customer voice call: mic -> Voice WebSocket -> speaker, following protocol zeptaz-hutch-v4 (or v3).
  *
  * Rules (docs/hutch-resolve-contract.md):
  * - Send playback_complete only after a reply's audio has fully drained.
@@ -295,7 +295,7 @@ export class VoiceCall {
     }
     if (socket instanceof WebSocket) {
       socket.onopen = () => {
-        if (socket.protocol !== VOICE_PROTOCOL) socket.close(1002, 'protocol')
+        if (!(VOICE_PROTOCOLS as readonly string[]).includes(socket.protocol)) socket.close(1002, 'protocol')
       }
     }
   }
@@ -304,6 +304,16 @@ export class VoiceCall {
     const socket = this.socket
     this.finish('user') // detaches onclose first, so the close below isn't reported as a drop
     socket?.close(1000, 'caller_ended')
+  }
+
+  /**
+   * The caller answered an offer with the on-screen buttons and Resolve recorded it: ask Voice to speak
+   * Resolve's reply (v4 only; an older Voice service leaves the reply on screen). This is not consent.
+   */
+  announceDecision(proposalId: string) {
+    if (this.state.phase === 'live' && this.socket?.protocol === DECISION_SPEECH_PROTOCOL) {
+      this.send({ type: 'decision_recorded', proposal_id: proposalId })
+    }
   }
 
   setMuted(muted: boolean) {
