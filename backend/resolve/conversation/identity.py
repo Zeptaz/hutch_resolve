@@ -15,8 +15,13 @@ def turn_fingerprint(turn: NormalizedTurn) -> str:
     expected_version is excluded on purpose: it is concurrency control, not request
     identity. The Voice bridge derives it from the binding at receipt time, so a
     retried Voice turn after completion would otherwise look like a changed body.
+    The same holds for voice_evidence.presentation_response_id: the bridge looks up the
+    latest recorded offer, which the first processing of this turn may itself replace.
     """
     body = turn.model_dump(mode="json", exclude={"expected_version", "turn_id", "conversation_id"})
+    evidence = body.get("voice_evidence")
+    if isinstance(evidence, dict):
+        evidence.pop("presentation_response_id", None)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

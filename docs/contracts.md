@@ -177,6 +177,21 @@ For explicit end_session=true, Voice delivers the final grounded output, emits e
 
 Typed in-process ports: get_account, get_statement, list_recharges, list_offers/subscriptions, list_usage, get_quota_statement, get_service_status, deactivate_vas, send_settings_instructions, create/get/update_ticket, get_operation and get_operation_by_key. No public `/sandbox` routes are needed. Fault/reset controls are operator CLI/test-only. Provider writes require stable idempotency key and expected target version; changed body/key conflicts; committed lost response remains unknown until lookup/readback. Vendor-neutral mocks are not HUTCH deployment/schema facts.
 
+### External CRM for review tickets (proposed, branch `tevin/crm-integration`, pending Harry's review)
+
+`CRM_PROVIDER=mock` (default) keeps the behaviour above. `CRM_PROVIDER=hubspot` sends only `CREATE_REVIEW_TICKET` and review-sync writes to HubSpot; VAS and settings actions stay on the sandbox writer. Idempotency records, fault profiles (`crm/create_ticket`, `crm/update_ticket`, `operations/lookup`), retries and delivery states are unchanged and stay in Resolve.
+
+- `provider_ticket_id` is an opaque string. It is a UUID for the mock and HubSpot's numeric record ID for HubSpot. Clients must not parse it. `sandbox.provider_operations.target_id` stores a UUID derived from it for non-UUID IDs.
+- One ticket per handoff operation: the ticket carries a unique `resolve_operation_id`; a retry after a lost response finds and returns the existing ticket.
+- Fields sent on create: subject, synthetic-data marker, Resolve reference (`RESOLVE-<operation_id>`), case ID, investigation ID, complaint type, queue, evidence state, synthetic line alias, and the review reason trimmed to 500 characters. Never transcripts, phone numbers, e-mail addresses, evidence payloads or credentials.
+- Customer contact (CE-012): before the ticket is created, Resolve finds or creates one HubSpot **contact** for the synthetic customer and links the ticket to it (HubSpot-defined ticket-to-contact association). Contact fields sent: first and last name split from the synthetic `display_name`, `resolve_line_alias` (unique; the lookup key), `resolve_customer_id`, `resolve_region`, `resolve_preferred_language` and `resolve_data_source=SYNTHETIC_DEMO`. No phone number, e-mail address, transcript or account balance. The demo keys contacts on the line alias because every fixture reset issues new customer UUIDs; a real deployment would link to the operator CRM's existing customer record by its own customer ID and send no personal fields.
+- Contact linking never blocks or fails a ticket: if the contact cannot be found or created because HubSpot refuses it (for example missing contact scopes or properties), the ticket is created without a contact and a warning with the error code is logged. Provider-unavailable during the contact step happens before the ticket is created and is retried like any other unavailable outcome. A failed link after the ticket exists is logged and not retried.
+- Review sync writes one note per review event tagged `resolve-review:<event_id>` (checked before writing), then sets the pipeline stage (NEW, IN_REVIEW, CLOSED mapped by configuration) and `resolve_review_version`. An older case version than the ticket's is `FAILED` with `STALE_REVIEW_VERSION`. Review notes are agent-internal and HubSpot is an agent tool.
+- Outcome mapping: timeout, connection error, HTTP 5xx or 429 are provider-unavailable (UNKNOWN, retried, no success claimed); 401/403 are `FAILED` with `CRM_AUTH_REJECTED`; other 4xx are `FAILED` with `PROVIDER_REJECTED`; a missing ticket is `FAILED` with `TICKET_NOT_FOUND`.
+- Sync is one-way. Changes made in HubSpot are not read back into Resolve.
+- Startup check (non-fatal): the key, the configured pipeline stages and the `resolve_*` ticket properties (unique `resolve_operation_id`) are verified when the app starts; separately, contact access and the `resolve_*` contact properties (unique `resolve_line_alias`). Problems are logged as warnings.
+- The duplicate-note check pages through all associated notes (100 per page, at most 20 pages); a larger history is reported as provider-unavailable rather than risking a duplicate note.
+
 ## Configuration and verification
 
 | Setting | Location | Purpose/default |
@@ -185,6 +200,10 @@ Typed in-process ports: get_account, get_statement, list_recharges, list_offers/
 | APP_ORIGIN | Resolve server | http://localhost:5173; exact HTTPS origin on deployment |
 | DEMO_IDENTITIES_JSON | Resolve secret config | JSON map: identity -> `{credential_sha256, role, principal_id, sandbox_id, account_id?}`; credential hashes and fixed synthetic scope are server-side |
 | APP_SECRET_KEY | Resolve secret config | Random secret >=32 bytes for CSRF derivation; replace the example value |
+| CRM_PROVIDER | Resolve server | `mock` (default) or `hubspot` (proposed) |
+| HUBSPOT_ACCESS_TOKEN | Resolve secret config | HubSpot Service Key with ticket read/write (and contact object/schema read/write for customer contacts); required only when `CRM_PROVIDER=hubspot` |
+| HUBSPOT_PIPELINE_ID / HUBSPOT_STAGE_NEW / HUBSPOT_STAGE_IN_REVIEW / HUBSPOT_STAGE_CLOSED | Resolve server | Ticket pipeline and stage IDs; `scripts/hubspot_setup.py check --write-env` fills them |
+| HUBSPOT_PORTAL_ID / HUBSPOT_API_BASE | Resolve server | Hub ID for record links; API origin, default https://api.hubapi.com |
 | VOICE_BASE_URL | Resolve server | http://localhost:8088 |
 | VOICE_HMAC_SECRET | Resolve server | Random secret >=32 bytes; set the same value as Voice's `HUTCH_RESOLVE_HMAC_SECRET` |
 | HUTCH_RESOLVE_HMAC_SECRET | Voice server | Same random secret as Resolve `VOICE_HMAC_SECRET`, minimum32 bytes |

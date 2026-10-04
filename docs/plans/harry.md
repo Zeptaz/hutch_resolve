@@ -232,3 +232,9 @@ Merged `ResolveDev` into `main` with a normal merge commit after updating local 
 ### Local full-stack manual run — 2026-10-03
 
 Started fresh isolated PostgreSQL, Resolve, live Vite and external Voice on the merged `main` tree. Migrated to `0011_turn_recovery`. Fixed LF shell bootstrap on Windows, stale readiness revision, Voice grant expiry constraint, and strict package catalogue projection. Verified live synthetic A/B/C/D/E/F investigations, A receipt, F VAS deactivation/recovery, package activation/receipt, agent review, customer isolation, and unavailable-provider Voice text fallback. Backend default suite **443 passed, 40 skipped**; focused disposable PostgreSQL **10 passed** plus **1 package facade integration**; Voice suite **52 passed**. Real Gemini/microphone and native-language release qualification are still open. See root `context.md` for the full verification boundary and demo database state.
+
+### CRM integration branch for review — 2026-10-03
+
+`tevin/crm-integration` (not pushed) ports the HubSpot review-ticket adapter onto main + chatbot fixes. Needs Harry's review before merge: CE-005 (BIG: worker makes external CRM calls; default stays mock), CE-007 (`propose_escalation` assumes a UUID request key and writes dialogue state; chat requests 500 on main), CE-011 (un-ported scenario A policy/fixture changes). Records and verification are in [core-engine-changes.md](../changelogs/core-engine-changes.md) and [hubspot-crm.md](hubspot-crm.md).
+
+CE-012 (2026-10-04, MEDIUM): HubSpot tickets now link to a synthetic customer contact; the CRM contract section lists the contact fields. Needs your approval; live linking waits for contact scopes on the HubSpot key.
