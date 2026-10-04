@@ -274,6 +274,6 @@ The live demo at https://resolve.zeptaz.com follows `main`:
 | --- | --- |
 | Solution & Technical Document (PDF) | Provided with the IgnitX 2026 submission |
 | Presentation deck | Provided with the IgnitX 2026 submission |
-| Demo video | To be added |
+| Demo video | [Google Drive](https://drive.google.com/drive/folders/1W-2ktmFYeZHLNYF7e67zjlPjy3Sb8_l3?usp=sharing) |
 | Live demo | https://resolve.zeptaz.com |
 | Demo credentials | Shared separately with the judges |
