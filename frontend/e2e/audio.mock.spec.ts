@@ -44,9 +44,10 @@ test('caller can interrupt a playing reply and keep sending microphone audio', a
     call.audio = audio
     call.socket = { readyState: WebSocket.OPEN, send: (value: string | ArrayBuffer) => sent.push(value) }
     call.state = { ...call.state, phase: 'live', activity: 'speaking' }
-    call.reply = { id: 'reply-1' }
-    call.handleFrame(new ArrayBuffer(3200), 0.03)
-    call.handleFrame(new ArrayBuffer(3200), 0.03)
+    call.reply = { id: 'reply-1', audioEnded: false, playbackStarted: true, playbackDrained: false }
+    call.handleFrame(new ArrayBuffer(3200), 0.05)
+    call.handleFrame(new ArrayBuffer(3200), 0.05)
+    call.handleFrame(new ArrayBuffer(3200), 0.05)
     for (let i = 0; i < 7; i++) call.handleFrame(new ArrayBuffer(3200), 0)
     const controls = sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item))
     return { flushed, controls, audioFrames: sent.filter((item) => item instanceof ArrayBuffer).length,
@@ -55,10 +56,80 @@ test('caller can interrupt a playing reply and keep sending microphone audio', a
   expect(result).toEqual({
     flushed: 1,
     controls: [{ type: 'input_activity_start', segment_id: 1 }, { type: 'input_activity_end', segment_id: 1 }],
-    audioFrames: 9,
+    audioFrames: 10,
     currentReply: null,
     activity: 'listening',
   })
+})
+
+test('browser speech detector rejects background/echo levels and requires sustained caller speech', async ({ page }) => {
+  await page.goto('/')
+  const result = await page.evaluate(async () => {
+    const { SpeechActivityDetector } = await import('/src/voice/call.ts')
+    const detector = new SpeechActivityDetector()
+    const noise = Array.from({ length: 30 }, () => detector.observe(0.02, true))
+    const voice = [0.07, 0.07, 0.07].map((level) => detector.observe(level, true))
+    const silence = Array.from({ length: 7 }, () => detector.observe(0.004, true))
+    const listening = new SpeechActivityDetector()
+    const quietCaller = [0.02, 0.02, 0.02].map((level) => listening.observe(level, false))
+    return { noiseStart: noise.includes('start'), voiceStart: voice.at(-1), voiceEnd: silence.at(-1),
+      quietCallerStart: quietCaller.at(-1) }
+  })
+  expect(result).toEqual({ noiseStart: false, voiceStart: 'start', voiceEnd: 'end', quietCallerStart: 'start' })
+})
+
+test('playback status remains speaking across streamed PCM gaps until audio_end drains', async ({ page }) => {
+  await page.goto('/')
+  const result = await page.evaluate(async () => {
+    const { playbackActivity } = await import('/src/voice/call.ts')
+    return {
+      duringGap: playbackActivity(false, false),
+      onFrame: playbackActivity(true, false),
+      afterDrain: playbackActivity(false, true),
+    }
+  })
+  expect(result).toEqual({ duringGap: null, onFrame: 'speaking', afterDrain: 'listening' })
+})
+
+test('echo protection lasts until local playback drains, not just provider audio_end', async ({ page }) => {
+  await page.goto('/')
+  const result = await page.evaluate(async () => {
+    const { VoiceCall } = await import('/src/voice/call.ts')
+    function harness() {
+      const call = new VoiceCall('synthetic-conversation') as unknown as Record<string, any>
+      const controls: Record<string, unknown>[] = []
+      const audio = {
+        flush: () => {}, beginReply: () => {}, endReply: (_id: string) => {},
+        onPlayingChange: (playing: boolean) => call.handlePlaybackChange(playing),
+        onDrained: (id: string) => call.drained(id),
+      }
+      call.audio = audio
+      call.socket = { readyState: WebSocket.OPEN, send: (value: string | ArrayBuffer) => {
+        if (typeof value === 'string') controls.push(JSON.parse(value))
+      } }
+      call.state = { ...call.state, phase: 'live' }
+      call.handle({ type: 'resolve_result', response_id: 'reply-1', proposal: null })
+      return { call, audio, controls }
+    }
+    const pending = harness()
+    for (let i = 0; i < 3; i++) pending.call.handleFrame(new ArrayBuffer(3200), 0.02)
+    const active = harness()
+    active.call.handle({ type: 'audio_start', response_id: 'reply-1' })
+    active.audio.onPlayingChange(true)
+    active.call.handle({ type: 'audio_end', response_id: 'reply-1' })
+    // Provider generation finished, but scheduled PCM is still audible.
+    for (let i = 0; i < 30; i++) active.call.handleFrame(new ArrayBuffer(3200), 0.025)
+    const interruptedBeforeDrain = active.controls.some((control) => control.type === 'input_activity_start')
+    active.audio.onPlayingChange(false)
+    active.audio.onDrained('reply-1')
+    for (let i = 0; i < 3; i++) active.call.handleFrame(new ArrayBuffer(3200), 0.02)
+    return {
+      normalSpeechBeforePlayback: pending.controls.some((control) => control.type === 'input_activity_start'),
+      interruptedBeforeDrain,
+      normalSpeechAfterDrain: active.controls.some((control) => control.type === 'input_activity_start'),
+    }
+  })
+  expect(result).toEqual({ normalSpeechBeforePlayback: true, interruptedBeforeDrain: false, normalSpeechAfterDrain: true })
 })
 
 test('expired grant retries rotate the key while unknown outcomes retain it', async ({ page }) => {

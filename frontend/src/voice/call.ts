@@ -22,6 +22,57 @@ export function isCurrentCallAttempt(active: object | null, attempt: object): bo
   return active === attempt
 }
 
+/** Require sustained speech before interrupting, with a higher bar during playback. */
+export class SpeechActivityDetector {
+  private noiseFloor = 0.003
+  private active = false
+  private speechFrames = 0
+  private quietFrames = 0
+
+  observe(level: number, replyPlaying: boolean): 'start' | 'end' | null {
+    if (!this.active) {
+      const threshold = Math.min(0.05, Math.max(0.018, this.noiseFloor * 2.8 + 0.009, replyPlaying ? 0.03 : 0))
+      if (level >= threshold) {
+        this.speechFrames++
+        if (this.speechFrames >= 3) {
+          this.active = true
+          this.speechFrames = 0
+          this.quietFrames = 0
+          return 'start'
+        }
+      } else {
+        this.speechFrames = 0
+        // Playback echo is not the room baseline; learning it would suppress
+        // the caller's quieter next turn after the speakers stop.
+        if (!replyPlaying) this.noiseFloor = Math.min(0.02, this.noiseFloor * 0.9 + level * 0.1)
+      }
+      return null
+    }
+    const endThreshold = Math.max(0.009, this.noiseFloor * 1.5 + 0.004)
+    if (level < endThreshold) this.quietFrames++
+    else this.quietFrames = 0
+    if (this.quietFrames >= 7) {
+      this.active = false
+      this.quietFrames = 0
+      this.speechFrames = 0
+      return 'end'
+    }
+    return null
+  }
+
+  reset() {
+    this.active = false
+    this.speechFrames = 0
+    this.quietFrames = 0
+  }
+}
+
+/** Keep the UI in speaking state through short PCM gaps within one reply. */
+export function playbackActivity(playing: boolean, replyAudioEnded: boolean): CallActivity | null {
+  if (playing) return 'speaking'
+  return replyAudioEnded ? 'listening' : null
+}
+
 export type CallPhase = 'idle' | 'requesting' | 'connecting' | 'live' | 'ended'
 export type CallActivity = 'listening' | 'thinking' | 'speaking'
 
@@ -107,16 +158,14 @@ export class VoiceCall {
   private listeners = new Set<() => void>()
   private audio: AudioPort | null = null
   private socket: VoiceSocket | null = null
-  private reply: { id: string } | null = null
+  private reply: { id: string; audioEnded: boolean; playbackStarted: boolean; playbackDrained: boolean } | null = null
   private awaitingPlaybackAck: string | null = null
   private playbackAttempts = 0
   private playbackRetryTimer = 0
   private limitTimer = 0
   private grantRequestKey: string | null = null
   private greetingPlaying = false
-  private heardSpeech = false
-  private speechFrames = 0
-  private quietFrames = 0
+  private readonly speechDetector = new SpeechActivityDetector()
   private segmentId = 0
   private micStreaming = false
 
@@ -148,34 +197,22 @@ export class VoiceCall {
     if (micActive !== this.state.micActive) this.set({ micActive })
     if (this.state.phase !== 'live' || this.state.muted || this.greetingPlaying ||
         this.socket?.readyState !== WebSocket.OPEN) return
-    if (micActive) {
-      this.speechFrames++
-      this.quietFrames = 0
-      if (!this.heardSpeech && this.speechFrames >= 2) {
-        this.heardSpeech = true
-        this.segmentId++
-        this.send({ type: 'input_activity_start', segment_id: this.segmentId })
-        if (this.reply) {
-          this.audio?.flush()
-          this.reply = null
-          this.awaitingPlaybackAck = null
-          window.clearTimeout(this.playbackRetryTimer)
-          this.set({ activity: 'listening' })
-        }
+    const activity = this.speechDetector.observe(level, Boolean(this.reply?.playbackStarted && !this.reply.playbackDrained))
+    if (activity === 'start') {
+      this.segmentId++
+      this.send({ type: 'input_activity_start', segment_id: this.segmentId })
+      if (this.reply) {
+        this.audio?.flush()
+        this.reply = null
+        this.awaitingPlaybackAck = null
+        window.clearTimeout(this.playbackRetryTimer)
+        this.set({ activity: 'listening' })
       }
-    } else if (this.heardSpeech) {
-      this.quietFrames++
-    } else {
-      this.speechFrames = 0
+    } else if (activity === 'end') {
+      this.send({ type: 'input_activity_end', segment_id: this.segmentId })
     }
     this.socket.send(pcm)
     this.micStreaming = true
-    if (this.heardSpeech && this.quietFrames >= 7) {
-      this.send({ type: 'input_activity_end', segment_id: this.segmentId })
-      this.heardSpeech = false
-      this.speechFrames = 0
-      this.quietFrames = 0
-    }
   }
 
   private set(patch: Partial<CallState>) {
@@ -195,11 +232,7 @@ export class VoiceCall {
     const audio = this.audio
     audio.onFrame = (pcm, level) => this.handleFrame(pcm, level)
     audio.onDrained = (id) => this.drained(id)
-    audio.onPlayingChange = (playing) => {
-      if (this.state.phase !== 'live') return
-      if (playing) this.set({ activity: 'speaking' })
-      else if (this.state.activity === 'speaking') this.set({ activity: 'listening' })
-    }
+    audio.onPlayingChange = (playing) => this.handlePlaybackChange(playing)
 
     // Ask for the microphone before the grant: the grant is only valid for about a minute.
     // Mock mode simulates the caller with buttons, so it never opens the microphone.
@@ -277,9 +310,7 @@ export class VoiceCall {
     if (muted && !this.state.muted && this.micStreaming) {
       this.send({ type: 'input_audio_end' })
       this.micStreaming = false
-      this.heardSpeech = false
-      this.speechFrames = 0
-      this.quietFrames = 0
+      this.speechDetector.reset()
     }
     this.set({ muted })
   }
@@ -316,7 +347,7 @@ export class VoiceCall {
         this.awaitingPlaybackAck = null
         window.clearTimeout(this.playbackRetryTimer)
         this.playbackAttempts = 0
-        this.reply = { id: msg.response_id }
+        this.reply = { id: msg.response_id, audioEnded: false, playbackStarted: false, playbackDrained: false }
         this.set({
           activity: 'thinking',
           proposal: msg.proposal ? { data: msg.proposal, responseId: msg.response_id, status: 'text-only' } : null,
@@ -327,10 +358,12 @@ export class VoiceCall {
       case 'audio_start':
         if (this.reply?.id === msg.response_id) {
           this.audio?.beginReply(msg.response_id)
+          this.set({ activity: 'speaking' })
           if (this.state.error?.kind === 'voice' && this.state.error.code === 'speech_unavailable') this.set({ error: null })
         }
         break
       case 'audio_end':
+        if (this.reply?.id === msg.response_id) this.reply.audioEnded = true
         this.audio?.endReply(msg.response_id)
         break
       case 'playback_ack':
@@ -378,9 +411,19 @@ export class VoiceCall {
     }
   }
 
+  private handlePlaybackChange(playing: boolean) {
+    if (this.state.phase !== 'live') return
+    if (playing && this.reply) this.reply.playbackStarted = true
+    const next = playbackActivity(playing, this.reply?.audioEnded ?? true)
+    if (next && this.state.activity !== next) this.set({ activity: next })
+  }
+
   /** The reply's audio has fully played: report it, and nothing else. */
   private drained(id: string) {
     if (this.reply?.id !== id || this.state.phase !== 'live') return
+    this.reply.audioEnded = true
+    this.reply.playbackDrained = true
+    if (this.state.activity !== 'listening') this.set({ activity: 'listening' })
     this.awaitingPlaybackAck = id
     this.playbackAttempts = 1
     this.send({ type: 'playback_complete', response_id: id })
@@ -440,9 +483,7 @@ export class VoiceCall {
     this.awaitingPlaybackAck = null
     window.clearTimeout(this.playbackRetryTimer)
     this.playbackAttempts = 0
-    this.heardSpeech = false
-    this.speechFrames = 0
-    this.quietFrames = 0
+    this.speechDetector.reset()
     this.segmentId = 0
     this.micStreaming = false
   }

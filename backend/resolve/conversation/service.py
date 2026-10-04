@@ -361,7 +361,7 @@ class ConversationService:
             case Intent.CORRECTION if state.active_case_id:
                 return await self._correct(ctx, turn, extraction, state, now)
             case Intent.FOLLOW_UP if state.active_case_id:
-                return await self._follow_up(ctx, state)
+                return await self._follow_up(ctx, state, turn.channel)
             case Intent.STATUS:
                 return await self._status(ctx, state)
             case Intent.HUMAN_REQUEST:
@@ -568,11 +568,11 @@ class ConversationService:
         )
         # Resolve invalidates proposals bound to the previous revision.
         proposal, alternatives = await self._propose_first(ctx, turn, case.id, investigation)
-        draft = _investigation_draft(investigation, proposal, lang, alternatives)
+        draft = _investigation_draft(investigation, proposal, lang, alternatives, turn.channel)
         new_state = _after_investigation(state, turn, case.id, proposal, draft, alternatives)
         return _prefixed(draft, t.text("rechecked", lang, window=t.format_window(start, end))), new_state
 
-    async def _follow_up(self, ctx: AuthContext, state: DialogueState) -> Step:
+    async def _follow_up(self, ctx: AuthContext, state: DialogueState, channel: Channel = Channel.TEXT) -> Step:
         """Answer from the saved investigation; never re-investigate or re-propose."""
         lang = state.language
         case = await self._facade.get_case(ctx, state.active_case_id)
@@ -581,9 +581,11 @@ class ConversationService:
         draft = _investigation_draft(case.investigation, None, lang)
         pending = state.pending_proposal if state.pending_proposal and state.pending_proposal.case_id == case.id else None
         if pending is not None:
-            question = PendingQuestion(code=Q_CONFIRM_ACTION, text=t.text("confirm_prompt", lang), allowed_input_types=["action_decision", "text"])
+            question = PendingQuestion(code=Q_CONFIRM_ACTION,
+                text=t.text("confirm_prompt_voice" if channel is Channel.VOICE else "confirm_prompt", lang),
+                allowed_input_types=["action_decision", "text"])
             draft = TurnDraft(
-                reply_text=f"{draft.reply_text} {t.text('offer_still_open', lang)}",
+                reply_text=f"{draft.reply_text} {t.text('offer_still_open_voice' if channel is Channel.VOICE else 'offer_still_open', lang)}",
                 case_id=case.id,
                 cards=draft.cards,
                 pending_question=question,
@@ -648,7 +650,7 @@ class ConversationService:
             ),
             command_key(turn.conversation_id, turn.turn_id, "escalate", case.id),
         )
-        draft = _offer_draft(proposal, lang, case.id)
+        draft = _offer_draft(proposal, lang, case.id, turn.channel)
         return draft, state.evolve(pending_question=draft.pending_question, pending_proposal=_proposal_ref(proposal, turn))
 
     async def _faq(self, ctx: AuthContext, turn: NormalizedTurn, text: str, ex: Extraction, state: DialogueState) -> Step:
@@ -766,7 +768,7 @@ class ConversationService:
         if proposal.action_type is not ActionType.ACTIVATE_PACKAGE or proposal.package_terms is None:
             log.error("Resolve returned an invalid package proposal", extra={"request_id": str(ctx.request_id)})
             raise ResolveError("DEPENDENCY_UNAVAILABLE", "Package activation is unavailable")
-        draft = _offer_draft(proposal, lang, proposal.case_id)
+        draft = _offer_draft(proposal, lang, proposal.case_id, turn.channel)
         new_state = state.evolve(
             active_case_id=proposal.case_id,
             pending_proposal=_proposal_ref(proposal, turn),
@@ -835,7 +837,7 @@ class ConversationService:
             command_key(conv_id, turn_id, "investigate", case.id),
         )
         proposal, alternatives = await self._propose_first(ctx, turn, case.id, investigation)
-        draft = _investigation_draft(investigation, proposal, state.language, alternatives)
+        draft = _investigation_draft(investigation, proposal, state.language, alternatives, turn.channel)
         return draft, _after_investigation(state, turn, case.id, proposal, draft, alternatives)
 
     async def _choose_action(self, ctx: AuthContext, turn: NormalizedTurn, choice: ActionChoice, state: DialogueState) -> Step:
@@ -845,7 +847,7 @@ class ConversationService:
         previous = _pending_as_choice(state.pending_proposal)
         if previous is not None and previous.action_type is not choice.action_type and previous not in rest:
             rest.append(previous)  # the earlier offer stays reachable
-        draft = _offer_with_alternatives(proposal, rest, state.language, choice.case_id)
+        draft = _offer_with_alternatives(proposal, rest, state.language, choice.case_id, turn.channel)
         return draft, state.evolve(
             pending_choices=rest, pending_question=draft.pending_question, pending_proposal=_proposal_ref(proposal, turn)
         )
@@ -933,7 +935,7 @@ class ConversationService:
                 if err.code in {"ACTION_NOT_ALLOWED", "STALE_VERSION", "PROPOSAL_INVALIDATED", "RESOURCE_NOT_FOUND"}:
                     return base, cleared.evolve(pending_choices=others)
                 raise
-            offer = _offer_with_alternatives(proposal, remaining[1:], lang, pending.case_id)
+            offer = _offer_with_alternatives(proposal, remaining[1:], lang, pending.case_id, turn.channel)
             draft = TurnDraft(
                 reply_text=f"{base.reply_text} {offer.reply_text}", case_id=pending.case_id, cards=base.cards + offer.cards,
                 pending_question=offer.pending_question, operation_ids=base.operation_ids,
@@ -1063,23 +1065,31 @@ def _citations(cards: list[KnowledgeCard]) -> list[Citation]:
                      scope=c.scope) for c in cards]
 
 
-def _offer_draft(proposal: ProposalView, lang: Language, case_id) -> TurnDraft:
-    question = PendingQuestion(code=Q_CONFIRM_ACTION, text=t.text("confirm_prompt", lang), allowed_input_types=["action_decision", "text"])
-    reply = t.text("offer_action", lang, action=t.action_label(proposal.action_type, lang), target=proposal.target_label, consequences=proposal.consequences)
+def _offer_draft(proposal: ProposalView, lang: Language, case_id, channel: Channel = Channel.TEXT) -> TurnDraft:
+    voice = channel is Channel.VOICE
+    question = PendingQuestion(code=Q_CONFIRM_ACTION,
+        text=t.text("confirm_prompt_voice" if voice else "confirm_prompt", lang),
+        allowed_input_types=["action_decision", "text"])
+    reply = t.text("offer_action_voice" if voice else "offer_action", lang,
+        action=t.action_label(proposal.action_type, lang), target=proposal.target_label,
+        consequences=proposal.consequences)
     return TurnDraft(reply_text=reply, case_id=case_id, cards=[ConfirmationCard(data=proposal)], pending_question=question)
 
 
-def _offer_with_alternatives(proposal: ProposalView, alternatives: list[ActionChoice], lang: Language, case_id) -> TurnDraft:
-    offer = _offer_draft(proposal, lang, case_id)
+def _offer_with_alternatives(proposal: ProposalView, alternatives: list[ActionChoice], lang: Language, case_id,
+                             channel: Channel = Channel.TEXT) -> TurnDraft:
+    voice = channel is Channel.VOICE
+    offer = _offer_draft(proposal, lang, case_id, channel)
     if not alternatives:
         return offer
     options = "; ".join(f"{t.action_label(a.action_type, lang)} ({a.target_label})" for a in alternatives)
-    return TurnDraft(reply_text=f"{offer.reply_text} {t.text('other_options', lang, options=options)}", case_id=case_id,
+    return TurnDraft(reply_text=f"{offer.reply_text} {t.text('other_options_voice' if voice else 'other_options', lang, options=options)}", case_id=case_id,
                      cards=offer.cards, pending_question=offer.pending_question)
 
 
 def _investigation_draft(
-    inv: InvestigationResult, proposal: ProposalView | None, lang: Language, alternatives: list[ActionChoice] | None = None
+    inv: InvestigationResult, proposal: ProposalView | None, lang: Language,
+    alternatives: list[ActionChoice] | None = None, channel: Channel = Channel.TEXT
 ) -> TurnDraft:
     """Reply strictly from Resolve's findings; no number is computed or rephrased here."""
     parts = [finding.text for finding in inv.findings] or [t.text("no_findings", lang)]
@@ -1097,7 +1107,7 @@ def _investigation_draft(
 
     question = None
     if proposal is not None:
-        offer = _offer_with_alternatives(proposal, alternatives or [], lang, inv.case_id)
+        offer = _offer_with_alternatives(proposal, alternatives or [], lang, inv.case_id, channel)
         parts.append(offer.reply_text)
         cards += offer.cards
         question = offer.pending_question

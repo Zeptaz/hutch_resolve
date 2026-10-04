@@ -67,6 +67,23 @@ def test_spoken_yes_without_presentation_evidence_directs_to_buttons(hm: Harness
     assert hm.state(conv).pending_proposal is not None
 
 
+def test_initial_voice_offer_does_not_invite_spoken_confirmation(hm: Harness) -> None:
+    ctx = customer(ACCOUNT_A, Channel.VOICE)
+    conv = hm.open(ctx)
+    result = hm.send(ctx, hm.turn(conv, details(), channel=Channel.VOICE))
+    assert "Shall I go ahead" not in result.reply_text
+    assert "press 'Yes, go ahead' or 'No, leave it'" in result.reply_text
+    assert "Nothing will change until you press" in result.reply_text
+
+
+def test_voice_follow_up_reminds_customer_to_use_buttons(hm: Harness) -> None:
+    hm.model.on("Is it still open?", extraction(intent="FOLLOW_UP"))
+    ctx, conv, proposal = voice_call(hm)
+    result = hm.send(ctx, spoken(hm, conv, "Is it still open?"))
+    assert "on-screen 'Yes, go ahead' or 'No, leave it' buttons" in result.reply_text
+    assert hm.state(conv).pending_proposal.proposal_id == proposal.id
+
+
 def test_repeated_spoken_yes_never_claims_action_or_asks_for_more_spoken_yes(hm: Harness) -> None:
     hm.model.on("yes go ahead", YES)
     ctx, conv, proposal = voice_call(hm)

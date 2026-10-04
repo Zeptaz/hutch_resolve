@@ -317,3 +317,16 @@ Resolve's Voice confirmation prompt now explicitly directs callers to the on-scr
 Verification: project-venv backend **450 passed, 40 opt-in PostgreSQL skipped**; frontend typecheck and lint exit 0; mock browser **27/27 passed**, including spoken yes followed by a button decision and canonical offer reconciliation. Physical microphone/speaker and native-language checks remain open under H-08/J-03/J-04. No external Voice repository files changed in this phase.
 
 Implementation commit: **4156679** on `hutch_resolve/voice_test`.
+
+
+### Voice confirmation and interruption repair - 2026-10-04
+
+- [x] Initial offers, alternatives and pending-offer follow-ups in Voice direct callers to the on-screen **Yes, go ahead / No, leave it** buttons. Security requires a button decision; spoken yes/no never authorizes an action. Text behavior and canonical pending-offer ownership remain unchanged. New English Voice strings are explicitly unreviewed for Sinhala/Tamil.
+- [x] Browser VAD requires three consecutive 100 ms speech frames and 700 ms quiet; it rejects playback echo more strongly until local playback actually drains, freezes room-noise learning during playback, and keeps the speaking indicator stable between PCM chunks. Normal sensitivity resumes immediately after drain.
+- [x] External Voice v3 uses browser activity boundaries as its sole VAD. Bounded 300 ms preroll preserves initial speech; mute discards it. V2 retains provider VAD. Live verification caught and fixed invalid automatic silence settings when provider detection is disabled.
+- [x] Verification: Resolve default suite **452 passed, 40 disposable-PostgreSQL checks skipped**; Voice **71 passed**; frontend TypeScript and final mock browser suite **30/30 passed**. Earlier failures exposed quiet-caller thresholds and an undersized test audio budget; corrected and rerun. One chat browser journey failed in an earlier run and passed in the final suite. A real Gemini connection produced **16 and 24 PCM frames across two synthetic turns**, with two accepted playback acknowledgements and exactly two Resolve-stub calls. This checks provider/manual-VAD runtime interoperability, not signed Resolve integration or physical acoustics.
+- [ ] H-08/J-03/J-04 remain open for physical microphone/speaker echo and repeated interruption, native-language review, and full signed browser/model qualification of this revision. Historical logs cannot identify the exact acoustic source of the reported loop.
+
+Changes belong to `hutch_resolve/voice_test` and `hutch_zeptazvoice/voice_test2`. Shared conversation changes are restricted to Voice wording/channel propagation. Commit and local service restart evidence follows after verification.
+
+Local services restarted with this revision; Resolve `/api/v1/healthz` and `/api/v1/readyz`, Voice `/healthz`, and the customer frontend returned HTTP 200 on ports 8080, 8088 and 5173 respectively. Final wording checks passed 22/22; Voice suite remained 71/71. Implementation is in the Git commit containing this checkpoint.
