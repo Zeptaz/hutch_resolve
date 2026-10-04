@@ -66,16 +66,19 @@ from .dto import (
     TextInput,
     TicketCard,
     TurnResult,
+    TimelineCard,
 )
 from .errors import ResolveError
 from .extraction import (
     AMBIGUITY_PRIORITY,
     AccountTopic,
     Ambiguity,
+    ChargeCategory,
     Extraction,
     ExtractionContext,
     ExtractionOutcome,
     Extractor,
+    HistoryPosition,
     Intent,
     PROMPT_VERSION,
     SpokenDecision,
@@ -84,6 +87,7 @@ from .extraction import (
     default_window,
     resolve_window,
 )
+from .activity import AccountActivity, answer_history, timeline as activity_timeline
 from .identity import command_key, turn_fingerprint
 from .answer import ANSWER_PROMPT_VERSION, GroundedAnswerer
 from .packages import UsageSummary, format_gb, monthly_need_bytes, recommend
@@ -343,6 +347,12 @@ class ConversationService:
             # Reply in the language the customer writes; a bare "ok" does not switch back to English.
             state = state.evolve(language=extraction.detected_language, script=extraction.script)
 
+        cancel_request = _is_cancel_after_services(extraction, inp.text, state)
+        if cancel_request:
+            extraction = extraction.model_copy(update={
+                "intent": Intent.NEW_COMPLAINT, "complaint_type": ComplaintType.VAS_DISPUTE, "faq_query": None})
+        if extraction.intent is not Intent.ACCOUNT_ENQUIRY and (state.last_account_topic or state.history_focus):
+            state = state.evolve(last_account_topic=None, history_focus=None)
         intent = extraction.intent
         choice = _match_choice(state, extraction)
         if choice is not None:
@@ -357,7 +367,7 @@ class ConversationService:
             if extraction.decision is SpokenDecision.DECLINE:
                 return _ask(state.evolve(candidate=None), Q_CHOOSE_COMPLAINT, t.text("anything_else", _lang(state)),
                             ["category_selection", "text"])
-            return _ask(state, Q_OFFER_CHARGE_CHECK, t.text("offer_charge_check", _lang(state)), ["text"])
+            return _ask(state, Q_OFFER_CHARGE_CHECK, state.pending_question.text, ["text"])
         if intent is Intent.ACTION_DECISION:
             if state.pending_proposal is None:
                 return TurnDraft(reply_text=t.text("no_pending_action", _lang(state)), case_id=state.active_case_id), state
@@ -379,10 +389,11 @@ class ConversationService:
             return _login_required(state)
 
         if state.candidate is not None and intent in _CONTINUES_CANDIDATE:
-            return await self._collect_complaint(ctx, turn, extraction, state, state.candidate, now)
+            step = await self._collect_complaint(ctx, turn, extraction, state, state.candidate, now)
+            return (_prefixed(step[0], t.text("cancel_here", _lang(state))), step[1]) if cancel_request else step
         match intent:
             case Intent.ACCOUNT_ENQUIRY:
-                return await self._account(ctx, state, extraction.account_topic)
+                return await self._account(ctx, state, extraction.account_topic, extraction, now)
             case Intent.NEW_COMPLAINT:
                 return await self._collect_complaint(ctx, turn, extraction, state, Candidate(), now)
             case Intent.CORRECTION if state.active_case_id:
@@ -420,6 +431,7 @@ class ConversationService:
             has_pending_proposal=state.pending_proposal is not None,
             actions_offered=tuple(c.action_type.value for c in state.pending_choices),
             packages_shown=tuple(p.name for p in state.packages_shown),
+            last_account_answer=state.last_account_topic,
         )
         outcome = await self._extractor.extract(text, context, budget_seconds=self._remaining())
         await self._record_usage(ctx, turn, state, outcome)
@@ -628,12 +640,17 @@ class ConversationService:
             return draft, state.evolve(pending_question=question)
         return draft, state.evolve(pending_question=None)
 
-    async def _account(self, ctx: AuthContext, state: DialogueState, topic: AccountTopic | None = None) -> Step:
-        """Answer from Resolve's account view: balance by default, or the services/packages asked about."""
+    async def _account(self, ctx: AuthContext, state: DialogueState, topic: AccountTopic | None = None,
+                       ex: Extraction | None = None, now: datetime | None = None) -> Step:
+        """Answer from Resolve's account view: balance by default, or the services/packages/history asked about."""
         lang = _lang(state)
+        state = state.evolve(last_account_topic=(topic or AccountTopic.BALANCE).value,
+                             history_focus=state.history_focus if topic in _HISTORY_TOPICS else None)
+        if topic in _HISTORY_TOPICS:
+            return await self._history(ctx, state, topic, ex, now)
         account = await self._facade.get_account(ctx)
         if topic is AccountTopic.SERVICES:
-            return _services_reply(account, state, lang)
+            return _services_reply(account, await self._recent_activity(ctx), state, lang)
         if topic is AccountTopic.PACKAGES:
             return _packages_reply(account, state, lang)
         parts = [
@@ -646,6 +663,33 @@ class ConversationService:
                          rewrite_allowed=True), state.evolve(
             pending_question=None
         )
+
+    async def _recent_activity(self, ctx: AuthContext) -> AccountActivity | None:
+        """The line's recent postings, or None when Resolve can't provide them (the reply then omits charges)."""
+        try:
+            return await self._facade.get_account_activity(ctx)
+        except ResolveError:
+            return None
+
+    async def _history(self, ctx: AuthContext, state: DialogueState, topic: AccountTopic,
+                       ex: Extraction | None, now: datetime | None) -> Step:
+        """Reloads and charges, quoted from Resolve's postings; "the one before that" follows history_focus."""
+        activity = await self._recent_activity(ctx)
+        if activity is None:
+            return TurnDraft(reply_text=t.text("history_unavailable", _lang(state)), case_id=state.active_case_id), state
+        window = None
+        if ex is not None and ex.time_reference.kind is not TimeKind.NONE:
+            window = resolve_window(ex.time_reference, now or activity.as_of)
+        result = answer_history(
+            activity, topic=topic.value, category=ex.charge_category if ex else None,
+            position=ex.history_position if ex else None, window=window, focus=state.history_focus)
+        parts = [result.text]
+        if not activity.complete:
+            parts.append(t.text("account_incomplete", _lang(state)))
+        cards = [TimelineCard(data=activity_timeline(result.entries))] if result.entries else []
+        draft = TurnDraft(reply_text=" ".join(parts), case_id=state.active_case_id, cards=cards, rewrite_allowed=True,
+                          keep_exact=tuple({e.product_name for e in result.entries if e.product_name}))
+        return draft, state.evolve(pending_question=None, history_focus=result.focus)
 
     async def _status(self, ctx: AuthContext, state: DialogueState) -> Step:
         lang = _lang(state)
@@ -1112,9 +1156,9 @@ def _subscription_status(status: str) -> str:
     return status.lower().replace("_", " ")
 
 
-def _services_reply(account, state: DialogueState, lang: t.Locale) -> Step:
-    """Which value-added services the line has. Prices are not in the account view, so offer to check the
-    charge records (a VAS investigation in Resolve) instead of guessing an amount."""
+def _services_reply(account, activity: AccountActivity | None, state: DialogueState, lang: t.Locale) -> Step:
+    """Which value-added services the line has, what they charged recently (from Resolve's postings), and an
+    offer to check those charges and stop a service, which runs the VAS investigation in Resolve."""
     services = [s for s in account.subscriptions if s.kind == "VAS"]
     card = AccountCard(data=account)
     if not services:
@@ -1125,8 +1169,18 @@ def _services_reply(account, state: DialogueState, lang: t.Locale) -> Step:
         t.text("service_renews" if s.renewal else "service_no_renewal", lang, name=s.name, status=_subscription_status(s.status))
         for s in services
     )
-    question = PendingQuestion(code=Q_OFFER_CHARGE_CHECK, text=t.text("offer_charge_check", lang), allowed_input_types=["text"])
-    reply = _paragraphs([t.text("account_services", lang, services=listed), question.text])
+    charged = None
+    if activity is not None:
+        charged = answer_history(activity, topic=AccountTopic.CHARGES.value, category=ChargeCategory.VAS,
+                                 position=HistoryPosition.ALL, window=None, focus=None)
+    if charged is not None and charged.entries:
+        question_text = t.text("offer_charge_check_stop", lang)
+        state = state.evolve(history_focus=charged.focus)
+    else:
+        question_text = t.text("offer_charge_check", lang)
+    question = PendingQuestion(code=Q_OFFER_CHARGE_CHECK, text=question_text, allowed_input_types=["text"])
+    reply = _paragraphs([t.text("account_services", lang, services=listed),
+                         *([charged.text] if charged is not None and charged.entries else []), question.text])
     draft = TurnDraft(reply_text=reply, case_id=state.active_case_id, cards=[card], pending_question=question,
                       rewrite_allowed=True, keep_exact=tuple(s.name for s in services))
     return draft, state.evolve(pending_question=question, candidate=Candidate(complaint_type=ComplaintType.VAS_DISPUTE))
@@ -1403,3 +1457,15 @@ def _user_body(turn: NormalizedTurn, lang: t.Locale) -> str:
     if isinstance(inp, PackageSelectionInput):
         return "Selected a data package to review."
     return t.text("user_case_selection", lang)
+
+
+_HISTORY_TOPICS = {AccountTopic.RECHARGES, AccountTopic.CHARGES}
+# "How do I cancel them?" right after the services list asks to stop a VAS. Resolve can do that (after its
+# charge check), so this is the VAS request, not a how-to article. English wording only; the model is told
+# the same for other languages.
+_CANCEL_WORDS = re.compile(r"\b(?:cancel|stop|unsubscribe|deactivate|remove|turn off|get rid of)\b", re.IGNORECASE)
+
+
+def _is_cancel_after_services(ex: Extraction, text: str, state: DialogueState) -> bool:
+    return (state.last_account_topic == AccountTopic.SERVICES.value and state.candidate is not None
+            and ex.intent in {Intent.FAQ, Intent.OTHER, Intent.NEW_COMPLAINT} and bool(_CANCEL_WORDS.search(text)))

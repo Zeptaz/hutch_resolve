@@ -41,7 +41,8 @@ Resolve is a resolution layer behind HUTCH's customer channels. It turns a compl
 ## Key features
 
 - **Four complaint types, six seeded cases (A–F):** balance/recharge deduction (A), data depletion (B), no internet with an active package (C), balance conflict (D), payment captured but not credited (E), VAS dispute without an activation record (F).
-- **Eleven seeded lines (fixture v3):** lines 0007–0011 add a partly explained deduction (records explain LKR 73 of a reported LKR 100), a duplicate package renewal, heavy calling with a failed top-up, bonus, transfer and fee (fully explained), a refunded VAS charge with earlier support history, and a line with no balance snapshots.
+- **Eleven seeded lines (fixture v4):** lines 0007–0011 add a partly explained deduction (records explain LKR 73 of a reported LKR 100), a duplicate package renewal, heavy calling with a failed top-up, bonus, transfer and fee (fully explained), a refunded VAS charge with earlier support history, and a line with no balance snapshots. Fixture v4 adds September history (older reloads, a failed top-up, earlier VAS charges) to lines 0001, 0004, 0007 and 0009, before each line's 2 Oct opening snapshot.
+- **Account history questions:** "when did my last reload take place?", "and the one before that?", "how much was it?", "how much did you cut for VAS this month?", "what VAS am I subscribed to?" and "how do I cancel them?" are answered from the line's postings in English, Sinhala and Tamil (chat and Voice). Amounts and times are quoted from records, refunded charges are left out of totals, and cancelling goes to the VAS charge check and stop offer.
 - **Exact reconciliation** in integer cents (e.g. 1,000 − 499 − 60 − 21 = 420); quota and money kept in separate calculations.
 - **Balance reconstruction:** opening balance + recharges, bonuses and refunds − calls, SMS, data, packages, VAS, transfers and fees = expected balance, from ledger postings and itemised usage, compared with the recorded balance and the customer's claim ("LKR 100 was deducted", "my balance is only LKR 420"). Each investigation is classified EXPLAINED, PARTIALLY_EXPLAINED, UNEXPLAINED or INSUFFICIENT_EVIDENCE with the explained and unexplained amounts; nothing is estimated.
 - **Escalation only when justified:** an explained balance is proved with its breakdown; a human review is offered for unexplained money or missing evidence, or when the customer asks. Chat shows the full breakdown, Voice says the same conclusion briefly.
@@ -95,7 +96,7 @@ There is no separate chatbot service, message broker or Redis. The full diagram 
 | `backend/resolve/conversation/` | Conversation module: extraction, routing, rewrite, grounded answers, telemetry |
 | `backend/resolve/providers/` | Sandbox adapters and deterministic reconciliation |
 | `backend/resolve/migrations/` | Alembic migrations |
-| `database/` | Bootstrap, SQL schemas, seed fixture v3 (eleven lines, itemised usage), knowledge cards |
+| `database/` | Bootstrap, SQL schemas, seed fixture v4 (eleven lines, itemised usage, September history), knowledge cards |
 | `frontend/` | React app (customer `/` and agent `/agent`), Playwright tests in `frontend/e2e/` |
 | `docs/contracts/` | OpenAPI 3.1 contract (`openapi.json`) and examples |
 | `scripts/` | Start / stop / reset scripts and fixture generator |

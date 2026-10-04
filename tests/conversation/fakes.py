@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from resolve.conversation.dto import (
     ActionType,
@@ -343,6 +343,9 @@ class FakeResolveFacade:
         self.active_offer_ids: defaultdict[UUID, set[UUID]] = defaultdict(set)
         self.balance_delta: Counter[UUID] = Counter()
         self.extra_subscriptions: defaultdict[UUID, list[SubscriptionSummary]] = defaultdict(list)
+        # Account history per line: (occurred_at, kind, amount_minor, product_name, channel, reversed) tuples.
+        self.activity: defaultdict[UUID, list[tuple]] = defaultdict(list)
+        self.uncredited: defaultdict[UUID, list[dict]] = defaultdict(list)
 
     def _maybe_fail(self, method: str) -> None:
         self.calls[method] += 1
@@ -378,6 +381,22 @@ class FakeResolveFacade:
                     if b.wallet == "MAIN" else b for b in account.balances]
         return account.model_copy(update={"balances": balances,
                                           "subscriptions": account.subscriptions + self.extra_subscriptions[ctx.account_id]})
+
+    async def get_account_activity(self, ctx):
+        self._maybe_fail("get_account_activity")
+        if ctx.role is not Role.CUSTOMER:
+            raise ResolveError("ROLE_FORBIDDEN")
+        from resolve.conversation.activity import AccountActivity
+
+        now = self._clock()
+        rows = sorted(self.activity[ctx.account_id], key=lambda row: row[0], reverse=True)
+        return AccountActivity.model_validate({
+            "as_of": now, "since": now - timedelta(days=90), "complete": True,
+            "entries": [{"id": uuid5(NAMESPACE_URL, f"entry-{ctx.account_id}-{index}"), "occurred_at": when, "kind": kind,
+                         "amount_minor": amount, "product_name": product, "recharge_channel": channel, "reversed": reversed_}
+                        for index, (when, kind, amount, product, channel, reversed_) in enumerate(rows)],
+            "uncredited_recharges": self.uncredited[ctx.account_id],
+        })
 
     async def list_package_offers(self, ctx):
         self._maybe_fail("list_package_offers")
