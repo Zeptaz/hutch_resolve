@@ -2,10 +2,14 @@
 
 Safe to run before every deploy: roles are created or their passwords re-synced, the SQL baseline and
 synthetic fixture load only into an empty database, and Alembic then applies any new revisions.
+Every row in database/seed.sql is inserted with ON CONFLICT DO NOTHING, so when the seed declares a newer
+fixture_version than the active run, re-applying it only adds the new rows (new lines, itemised usage);
+existing rows, cases, chats and sessions are never changed or removed.
 Role names and passwords come from DATABASE_URL (application) and SANDBOX_DATABASE_URL (sandbox);
 MIGRATION_DATABASE_URL is the admin connection.
 """
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -57,7 +61,8 @@ def baseline(conn: psycopg.Connection, sandbox: str, resolve: str) -> None:
             "ALTER DEFAULT PRIVILEGES IN SCHEMA sandbox GRANT SELECT ON TABLES TO {r}",
         ):
             conn.execute(sql.SQL(stmt).format(s=s, r=r))
-        for name in ("migrations/001_sandbox.sql", "migrations/002_resolve.sql", "migrations/003_scope_constraints.sql", "knowledge_seed.sql"):
+        for name in ("migrations/001_sandbox.sql", "migrations/002_resolve.sql", "migrations/003_scope_constraints.sql",
+                     "migrations/004_rated_events.sql", "knowledge_seed.sql"):
             conn.execute((DATABASE / name).read_text(encoding="utf-8"))
         conn.execute(sql.SQL("GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA resolve TO {r}").format(r=r))
         conn.execute(sql.SQL(
@@ -66,6 +71,18 @@ def baseline(conn: psycopg.Connection, sandbox: str, resolve: str) -> None:
         conn.execute(sql.SQL(
             "REVOKE UPDATE ON resolve.receipts, resolve.audit_events, resolve.integration_events,"
             " resolve.model_calls, resolve.knowledge_articles FROM {r}").format(r=r))
+
+
+def seed_text() -> str:
+    return "\n".join(line for line in (DATABASE / "seed.sql").read_text(encoding="utf-8").splitlines()
+                     if not line.startswith("\\"))
+
+
+def seed_fixture_version(seed: str) -> int:
+    match = re.search(r"INSERT INTO sandbox\.sandbox_runs\(id,fixture_version[^)]*\) VALUES\s*\('[^']+',(\d+),", seed)
+    if match is None:
+        sys.exit("database/seed.sql does not declare a fixture_version")
+    return int(match.group(1))
 
 
 def main() -> None:
@@ -80,10 +97,16 @@ def main() -> None:
         if conn.execute("SELECT count(*) FROM sandbox.sandbox_runs").fetchone()[0] == 0:
             # The local volume loads the fixture before Alembic adopts the baseline; keep that order.
             print("hosted_db_setup: loading the synthetic fixture")
-            seed = "\n".join(line for line in (DATABASE / "seed.sql").read_text(encoding="utf-8").splitlines()
-                             if not line.startswith("\\"))
-            conn.execute(seed)
+            conn.execute(seed_text())
     subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=ROOT, check=True)
+    with psycopg.connect(libpq_url("MIGRATION_DATABASE_URL"), autocommit=True) as conn:
+        seed = seed_text()
+        loaded = conn.execute("SELECT max(fixture_version) FROM sandbox.sandbox_runs").fetchone()[0]
+        if loaded is not None and loaded < seed_fixture_version(seed):
+            # Additive only: the seed's inserts skip rows that already exist (after the schema is current,
+            # since newer fixture rows may need newer tables).
+            print(f"hosted_db_setup: adding fixture v{seed_fixture_version(seed)} rows to v{loaded} data")
+            conn.execute(seed)
     print("hosted_db_setup: database ready")
 
 
