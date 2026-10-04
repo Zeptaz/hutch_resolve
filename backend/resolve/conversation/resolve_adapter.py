@@ -18,6 +18,7 @@ from dataclasses import asdict, is_dataclass
 from typing import Any, Callable
 from uuid import UUID
 
+from .activity import AccountActivity
 from .dto import (
     AccountView,
     ActionType,
@@ -111,6 +112,9 @@ class ResolveFacadeAdapter:
 
     async def get_account(self, ctx: AuthContext) -> AccountView:
         return AccountView.model_validate(self._plain(await self._call(self._facade.get_account, self._context(ctx))))
+
+    async def get_account_activity(self, ctx: AuthContext) -> AccountActivity:
+        return AccountActivity.model_validate(self._plain(await self._call(self._facade.get_account_activity, self._context(ctx))))
 
     async def list_package_offers(self, ctx: AuthContext) -> list[PackageOfferView]:
         rows = await self._call(self._facade.list_package_offers, self._context(ctx))

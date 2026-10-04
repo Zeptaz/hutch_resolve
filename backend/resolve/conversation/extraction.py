@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .dto import CONTRACT_ACTION_TYPES, ActionType, ComplaintType, Language, MAX_TEXT_CHARS
 from .model import ModelClient, ModelError, ModelReply
 
-PROMPT_VERSION = "extract-v7"
+PROMPT_VERSION = "extract-v8"
 TOTAL_BUDGET_SECONDS = 6.0
 MAX_WINDOW = timedelta(days=30)
 # Sri Lanka observes no DST; a fixed offset avoids a tzdata dependency.
@@ -48,6 +48,30 @@ class AccountTopic(StrEnum):
     BALANCE = "BALANCE"
     SERVICES = "SERVICES"  # value-added services (VAS) / subscriptions they pay for
     PACKAGES = "PACKAGES"  # data/voice packages they currently have
+    RECHARGES = "RECHARGES"  # their own past reloads: when, how much, through which channel
+    CHARGES = "CHARGES"  # how much was charged/deducted, optionally for one kind of charge
+
+
+class ChargeCategory(StrEnum):
+    """Which charges a CHARGES enquiry asks about."""
+
+    VAS = "VAS"
+    PACKAGES = "PACKAGES"
+    CALLS = "CALLS"
+    SMS = "SMS"
+    DATA = "DATA"
+    FEES = "FEES"
+    TRANSFERS = "TRANSFERS"
+    ALL = "ALL"
+
+
+class HistoryPosition(StrEnum):
+    """Which record of a RECHARGES/CHARGES enquiry the customer means."""
+
+    LATEST = "LATEST"  # the most recent one
+    PREVIOUS = "PREVIOUS"  # the one before the one just discussed
+    SAME = "SAME"  # the one just discussed ("how much was it?")
+    ALL = "ALL"  # a list or total over a period
 
 
 class Script(StrEnum):
@@ -113,6 +137,8 @@ class Extraction(BaseModel):
     summary: Annotated[str, Field(max_length=300)] | None
     ambiguities: list[Ambiguity]
     account_topic: AccountTopic | None = None  # optional so older payloads and fakes stay valid
+    charge_category: ChargeCategory | None = None
+    history_position: HistoryPosition | None = None
 
     @property
     def amount_minor(self) -> int | None:
@@ -155,10 +181,13 @@ RESPONSE_SCHEMA: dict[str, Any] = {
         "summary": _nullable({"type": "string", "maxLength": 300}),
         "ambiguities": {"type": "array", "items": _enum(Ambiguity)},
         "account_topic": _nullable(_enum(AccountTopic)),
+        "charge_category": _nullable(_enum(ChargeCategory)),
+        "history_position": _nullable(_enum(HistoryPosition)),
     },
     "required": [
         "intent", "decision", "action_choice", "detected_language", "script", "complaint_type", "time_reference",
         "amount_lkr", "recharge_reference", "faq_query", "summary", "ambiguities", "account_topic",
+        "charge_category", "history_position",
     ],
 }
 
@@ -181,8 +210,13 @@ intent:
 - FOLLOW_UP: a question about findings already given for the active case.
 - CORRECTION: the customer changes facts (time, amount, which service) of the active case.
 - ACCOUNT_ENQUIRY: asks about their OWN line without reporting a problem: balance, which value-added services (VAS)
-  or subscriptions they have / pay for, which packages they have. Questions about "my" services/charges are never FAQ.
+  or subscriptions they have / pay for, which packages they have, when they last reloaded and how much, or how
+  much was charged/deducted for something. Questions about "my" services/charges are never FAQ.
   "What are the VAS charges" from a customer means the charges on their own line: ACCOUNT_ENQUIRY, not FAQ.
+  A short follow-up about the account answer just given ("and the one before that?", "how much was it?",
+  "when was that?") is ACCOUNT_ENQUIRY with the same account_topic as conversation.last_account_answer.
+  Asking HOW to cancel/stop/unsubscribe their own VAS or subscription ("how do I cancel them?" after their
+  services were listed) is NEW_COMPLAINT with VAS_DISPUTE: the assistant can stop it for them.
 - FAQ: a general question about services, OR the customer wants to do something themselves and needs to know how:
   reload/recharge/top up, activate a package or data plan themselves, use the app, check balance in general,
   contact support or register a complaint. A greeting before the request ("hi, ...") does not change this. Set faq_query.
@@ -212,8 +246,15 @@ Extract only what the customer actually said. Never guess numbers or dates.
 - amount_lkr: an amount the customer stated, in rupees (e.g. "Rs.500", "500 rupees", "panseeya" = 500). null if none.
 - time_reference: relative to the provided current local date. TODAY, YESTERDAY, LAST_N_HOURS/LAST_N_DAYS with count,
   DATE with start_date, DATE_RANGE with start_date and end_date (YYYY-MM-DD). NONE if no time was mentioned.
-- account_topic (ACCOUNT_ENQUIRY only, else null): BALANCE (balance, money left), SERVICES (VAS, subscriptions,
-  services or service charges they have/pay for), PACKAGES (packages/bundles they have, data left in them).
+- account_topic (ACCOUNT_ENQUIRY only, else null): BALANCE (balance, money left), SERVICES (which VAS,
+  subscriptions or services they have/are subscribed to), PACKAGES (packages/bundles they have, data left in them),
+  RECHARGES (their past reloads/top-ups: when, how much, the one before), CHARGES (how much money was
+  charged, cut or deducted, for VAS, packages, calls, SMS, data, fees or in total).
+- charge_category (CHARGES only, else null): VAS, PACKAGES, CALLS, SMS, DATA, FEES, TRANSFERS, or ALL when no kind is named.
+- history_position (RECHARGES or CHARGES only, else null): LATEST (the last/most recent one), PREVIOUS (the one
+  before the one just discussed: "before that", "previous one", "eka kalin", "athu munnadi"), SAME (asks more about
+  the one just discussed: "how much was it?", "when was that?"), ALL (how much in total, a list, or a period like
+  "this month"). null if unclear.
 - faq_query: for FAQ only, a few English keywords for the topic (e.g. "how to reload", "activate data package",
   "contact support"). Otherwise null.
 - summary: one neutral English sentence describing the complaint, without names or numbers not in the message. null if not a complaint.
@@ -233,6 +274,21 @@ Examples (message -> key fields):
 "Mata VAS charges monadwada kiyanna puluwanda?" -> ACCOUNT_ENQUIRY, si, LATIN, account_topic SERVICES
 "mage VAS charges mokadda" -> ACCOUNT_ENQUIRY, si, LATIN, account_topic SERVICES
 "mata thiyena packages monawada" -> ACCOUNT_ENQUIRY, si, LATIN, account_topic PACKAGES
+"when did my last reload take place?" -> ACCOUNT_ENQUIRY, account_topic RECHARGES, history_position LATEST
+"when was the reload before that?" -> ACCOUNT_ENQUIRY, account_topic RECHARGES, history_position PREVIOUS
+"how much was it?" (last_account_answer RECHARGES) -> ACCOUNT_ENQUIRY, account_topic RECHARGES, history_position SAME
+"how much did I reload this month?" -> ACCOUNT_ENQUIRY, account_topic RECHARGES, history_position ALL, time DATE_RANGE from the 1st of the current month to today
+"how much was cut for VAS last week?" -> ACCOUNT_ENQUIRY, account_topic CHARGES, charge_category VAS, history_position ALL, time LAST_N_DAYS 7
+"and the one before that?" (last_account_answer CHARGES) -> ACCOUNT_ENQUIRY, account_topic CHARGES, charge_category null, history_position PREVIOUS
+"mage anthima reload eka kawadda?" -> ACCOUNT_ENQUIRY, si, LATIN, account_topic RECHARGES, history_position LATEST
+"eka kalin reload eka kawadda" -> ACCOUNT_ENQUIRY, si, LATIN, account_topic RECHARGES, history_position PREVIOUS
+"கடைசியாக எப்போது ரீலோட் செய்தேன்?" -> ACCOUNT_ENQUIRY, ta, TAMIL, account_topic RECHARGES, history_position LATEST
+"how much did you cut for VAS?" -> ACCOUNT_ENQUIRY, account_topic CHARGES, charge_category VAS, history_position ALL
+"VAS walata kiyak kapuwada?" -> ACCOUNT_ENQUIRY, si, LATIN, account_topic CHARGES, charge_category VAS, history_position ALL
+"how much was charged for calls yesterday?" -> ACCOUNT_ENQUIRY, account_topic CHARGES, charge_category CALLS, history_position ALL, time YESTERDAY
+"when was my last VAS charge?" -> ACCOUNT_ENQUIRY, account_topic CHARGES, charge_category VAS, history_position LATEST
+"what VAS services am I subscribed to right now?" -> ACCOUNT_ENQUIRY, account_topic SERVICES
+"how do I cancel them?" (last_account_answer SERVICES) -> NEW_COMPLAINT, VAS_DISPUTE
 "මගේ ලයින් එකේ තියෙන VAS මොනවද?" -> ACCOUNT_ENQUIRY, si, SINHALA, account_topic SERVICES
 "எனக்கு என்ன VAS சேவைகள் இருக்கின்றன?" -> ACCOUNT_ENQUIRY, ta, TAMIL, account_topic SERVICES
 "please stop this video alerts service, I don't want it" -> NEW_COMPLAINT, en, LATIN, VAS_DISPUTE
@@ -272,6 +328,7 @@ class ExtractionContext:
     has_pending_proposal: bool = False
     actions_offered: tuple[str, ...] = ()
     packages_shown: tuple[str, ...] = ()
+    last_account_answer: str | None = None  # AccountTopic of the previous account reply, for "the one before that"
 
 
 def build_prompt(text: str, context: ExtractionContext) -> str:
@@ -284,6 +341,7 @@ def build_prompt(text: str, context: ExtractionContext) -> str:
             "action_offer_open": context.has_pending_proposal,
             "actions_offered": list(context.actions_offered),
             "packages_shown": list(context.packages_shown),
+            "last_account_answer": context.last_account_answer,
         },
         "message": text[:MAX_TEXT_CHARS],
     }

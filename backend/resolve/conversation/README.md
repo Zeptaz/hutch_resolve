@@ -37,7 +37,12 @@ Gemini classifies a message into one intent (`FAQ`, `ACCOUNT_ENQUIRY`, `NEW_COMP
 - turns the reported time ("yesterday", "last 2 days", a date) into an explicit UTC window from the **simulation clock**, rejecting future, reversed or >30-day windows; with no time mentioned it checks the local day so far and says so;
 - asks at most one clarification per turn and never repeats one (`CLARIFY_TIME_WINDOW`, `CLARIFY_AMOUNT`, `CLARIFY_TARGET`, `CLARIFY_NEGATION`);
 - never treats a typed or spoken "yes" as consent; the explicit `action_decision` control is required;
-- answers FAQs only from reviewed knowledge cards with citations; guests get FAQs only.
+- answers FAQs only from reviewed knowledge cards with citations; guests get FAQs only;
+- answers `ACCOUNT_ENQUIRY` from Resolve: balance, VAS, packages, and history (`activity.py`). History uses the
+  facade's `get_account_activity` (the line's MAIN postings and uncredited top-ups for the last 90 simulated days):
+  `RECHARGES` (last reload, "the one before that", totals over a period) and `CHARGES` by `charge_category`
+  (VAS, packages, calls, SMS, data, fees, transfers). `DialogueState.history_focus` remembers the record just named,
+  so `history_position` PREVIOUS/SAME steps back or repeats. Totals skip refunded charges; no records means it says so.
 
 Pending question codes for the UI: `CHOOSE_COMPLAINT_TYPE`, `COMPLAINT_DETAILS`, `DESCRIBE_COMPLAINT`, `CONFIRM_ACTION`, `LOGIN_REQUIRED`, and the four `CLARIFY_*` codes. The UI should choose forms from `allowed_input_types`; `DESCRIBE_COMPLAINT` and `CLARIFY_*` are text-only and appear only when a model can read the answer.
 

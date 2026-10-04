@@ -190,6 +190,15 @@ class ResolveFacade:
             raise ResolveError(404, "RESOURCE_NOT_FOUND", "Account was not found")
         return account
 
+    def get_account_activity(self, context: AuthContext) -> dict[str, Any]:
+        """The signed-in line's recent reloads and charges (last 90 days of the simulation), newest first."""
+        if context.role != "CUSTOMER" or context.account_id is None or context.sandbox_id is None:
+            raise ResolveError(403, "ROLE_FORBIDDEN", "A customer account session is required")
+        activity = self._provider.get_account_activity(context.sandbox_id, context.account_id)  # type: ignore[attr-defined]
+        if activity is None:
+            raise ResolveError(404, "RESOURCE_NOT_FOUND", "Account was not found")
+        return activity
+
     @staticmethod
     def _investigation_view(row: Any, case_id: UUID, complaint_type: str) -> dict[str, Any]:
         return {

@@ -616,6 +616,57 @@ class PostgresSandboxProvider(AccountProvider, BalanceProvider):
             """), {"sandbox": sandbox_id, "account": account_id}).mappings().all()
         return [dict(row) for row in rows]
 
+    def get_account_activity(self, sandbox_id: UUID, account_id: UUID, lookback: timedelta = timedelta(days=90),
+                             limit: int = 200) -> dict[str, Any] | None:
+        """The line's MAIN-wallet postings and top-up attempts in the `lookback` before the simulation clock,
+        newest first, as recorded.
+
+        Each posting carries the product behind a package/VAS charge (when the CRM linked one) and whether a
+        later posting reversed it. Top-ups whose payment or credit did not complete are listed separately;
+        they never moved the balance. Nothing is summed or inferred here.
+        """
+        with self._engine.connect() as connection:
+            run = connection.execute(text("""
+                SELECT r.fixture_version,r.simulation_clock FROM sandbox.accounts a
+                JOIN sandbox.sandbox_runs r ON r.id=a.sandbox_id
+                WHERE a.sandbox_id=:sandbox AND a.id=:account AND r.run_status='ACTIVE'
+            """), {"sandbox": sandbox_id, "account": account_id}).mappings().one_or_none()
+            if run is None:
+                return None
+            since = run["simulation_clock"] - lookback
+            params = {"sandbox": sandbox_id, "account": account_id, "since": since,
+                      "until": run["simulation_clock"], "limit": limit + 1}
+            entries = connection.execute(text("""
+                SELECT m.id,m.posting_seq,m.amount_minor,m.kind,m.occurred_at,m.reference,m.reversal_of,
+                       r.channel AS recharge_channel,
+                       (SELECT o.name FROM sandbox.subscription_events e
+                          JOIN sandbox.subscriptions s ON (s.sandbox_id,s.id)=(e.sandbox_id,e.subscription_id)
+                          JOIN sandbox.offers o ON (o.sandbox_id,o.id)=(s.sandbox_id,s.offer_id)
+                         WHERE e.sandbox_id=m.sandbox_id AND e.charge_entry_id=m.id LIMIT 1) AS product_name,
+                       EXISTS (SELECT 1 FROM sandbox.money_entries x
+                                WHERE x.sandbox_id=m.sandbox_id AND x.reversal_of=m.id) AS reversed
+                FROM sandbox.money_entries m
+                LEFT JOIN sandbox.recharges r ON (r.sandbox_id,r.credited_entry_id)=(m.sandbox_id,m.id)
+                WHERE m.sandbox_id=:sandbox AND m.account_id=:account AND m.wallet_kind='MAIN'
+                  AND m.occurred_at>=:since AND m.occurred_at<=:until
+                ORDER BY m.occurred_at DESC,m.posting_seq DESC LIMIT :limit
+            """), params).mappings().all()
+            attempts = connection.execute(text("""
+                SELECT id,payment_ref,channel,amount_minor,payment_status,fulfilment_status,created_at
+                FROM sandbox.recharges
+                WHERE sandbox_id=:sandbox AND account_id=:account AND created_at>=:since AND created_at<=:until
+                  AND (credited_entry_id IS NULL OR fulfilment_status<>'FULFILLED')
+                ORDER BY created_at DESC,id LIMIT :limit
+            """), params).mappings().all()
+        return {
+            "as_of": run["simulation_clock"],
+            "since": since,
+            "complete": len(entries) <= limit and len(attempts) <= limit,
+            "source_version": f"fixture-v{run['fixture_version']}:activity",
+            "entries": [dict(row) for row in entries[:limit]],
+            "uncredited_recharges": [dict(row) for row in attempts[:limit]],
+        }
+
     def get_action_target(
         self, sandbox_id: UUID, account_id: UUID, action_type: str, target_id: UUID
     ) -> dict[str, Any] | None:

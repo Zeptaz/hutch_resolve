@@ -39,6 +39,7 @@ from .dto import (
     TurnResult,
     VoiceConsentEvidence,
 )
+from .activity import AccountActivity
 from .state import DialogueState
 from .packages import UsageSummary
 
@@ -47,6 +48,8 @@ class ResolveFacade(Protocol):
     """Harry's business services. Raises ResolveError with contract codes."""
 
     async def get_account(self, ctx: AuthContext) -> AccountView: ...
+
+    async def get_account_activity(self, ctx: AuthContext) -> AccountActivity: ...
 
     async def list_package_offers(self, ctx: AuthContext) -> list[PackageOfferView]: ...
 

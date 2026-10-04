@@ -192,6 +192,9 @@ class HybridFacade:
     async def get_account(self, ctx):
         return await self.real.get_account(ctx)
 
+    async def get_account_activity(self, ctx):
+        return await self.real.get_account_activity(ctx)
+
     async def create_case(self, ctx, conversation_id, turn_id, complaint_type, *, expected_conversation_version):
         if complaint_type in HARRY_COMPLAINTS:
             version = self.db_version.setdefault(conversation_id, 1)

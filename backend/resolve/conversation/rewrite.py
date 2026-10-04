@@ -29,7 +29,7 @@ from .dto import Language
 from .extraction import Script
 from .model import ModelClient, ModelError, ModelReply
 
-REWRITE_PROMPT_VERSION = "rewrite-v3"
+REWRITE_PROMPT_VERSION = "rewrite-v4"
 REWRITE_BUDGET_SECONDS = 5.0
 
 # Keep signs, decimal precision, separators, percentages and repeated values. A set of
@@ -71,6 +71,9 @@ Return only JSON {"reply": "..."}.
 Rules:
 - Keep the meaning exactly. Do not add facts, promises, refunds, credits, times, fixes or apologies that change meaning.
 - Copy every number, amount (e.g. "LKR 1,000.00"), date, time and ID exactly, digit for digit. Do not add any other numbers.
+- Times are 24-hour clock times ("09:00" is morning, "19:15" is evening). Copy them as written and never add a part
+  of day ("morning", "evening", "hawasa", "ude", "rae", "kaalai", "maalai") that the source does not state.
+- "last" in "your last reload" means the most recent one (Singlish "anthima"), not "another" ("anith").
 - Never attach "k" or "m" to a number ("LKR 80k" reads as 80,000). Write "LKR 80" and put any suffix after a space.
 - Keep product and service names as written (e.g. "Synthetic video alerts"). Copy every string in "keep_exact" exactly.
 - Keep every negation and limit: "not", "no", "nothing", "cannot", "does not prove", "not confirmed yet" must stay negative.

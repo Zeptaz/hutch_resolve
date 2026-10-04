@@ -82,6 +82,16 @@ class ShownPackage(BaseModel):
     name: str
 
 
+class HistoryFocus(BaseModel):
+    """The record the last reload/charge answer pointed at, so "the one before that" moves one step back."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    topic: str  # AccountTopic.RECHARGES or AccountTopic.CHARGES
+    category: str | None = None  # ChargeCategory for CHARGES
+    index: Annotated[int, Field(ge=0)] = 0  # 0 = the most recent record
+
+
 class DialogueState(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -97,6 +107,9 @@ class DialogueState(BaseModel):
     # Package prototype: packages named in the last package reply (for "the second one"), last activation.
     packages_shown: list[ShownPackage] = []
     last_activation: ActivationRef | None = None
+    # Account history: the topic of the last account answer and the record it named.
+    last_account_topic: str | None = None
+    history_focus: HistoryFocus | None = None
 
     def evolve(self, **changes: object) -> "DialogueState":
         """Return a validated copy with changes applied."""
