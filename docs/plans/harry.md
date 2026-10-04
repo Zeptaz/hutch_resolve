@@ -289,3 +289,16 @@ Implementation commit: **4156679** on `hutch_resolve/voice_test`.
 Changes belong to `hutch_resolve/voice_test` and `hutch_zeptazvoice/voice_test2`. Shared conversation changes are restricted to Voice wording/channel propagation. Commit and local service restart evidence follows after verification.
 
 Local services restarted with this revision; Resolve `/api/v1/healthz` and `/api/v1/readyz`, Voice `/healthz`, and the customer frontend returned HTTP 200 on ports 8080, 8088 and 5173 respectively. Final wording checks passed 22/22; Voice suite remained 71/71. Implementation is in the Git commit containing this checkpoint.
+
+### H-08 Voice-only decision readback - 2026-10-04
+
+- [x] Added a signed, read-only decision-result lookup for an exact completed browser `action_decision` after the latest matching proposal shown by the current Voice binding. The returned saved reply lets Voice speak the button outcome and continue the call; no action execution or shared conversation behavior changed.
+- [x] Extended Voice bindings to 420 seconds, capped by customer session and conversation expiry, while retaining the 60-second one-use browser grant.
+- [x] Verified focused bridge tests **16 passed** and project-venv backend default suite **455 passed, 40 opt-in PostgreSQL checks skipped**. This is unit/mock coverage; isolated PostgreSQL readback, live browser call and native-language review remain open under H-08. No implementation commit yet.
+
+
+### H-08 decision readback and call continuation - current local update
+
+- [x] Resolve exposes a strict HMAC-protected, read-only decision-result lookup keyed by active binding/session and completed browser `client_turn_id`. It verifies the exact proposal was returned to that binding before the authenticated decision; it returns the persisted result with `end_session=false` and does not execute actions.
+- [x] Voice grants bind for at most 420 seconds, capped by session and conversation expiry. Browser grants remain single-use and at most 60 seconds.
+- [x] Resolve focused bridge tests **16 passed** and default backend suite **455 passed, 40 PostgreSQL-gated skipped** as recorded with the implementation update. The route still needs migrated-PostgreSQL and signed live-call qualification. Source changes are local and are not included in the documentation-only commit.
