@@ -31,9 +31,11 @@ _EN: dict[str, str] = {
     "evidence_conflicting": "The records don't agree with each other, so I can't give a final answer or change your account. A person needs to review this.",
     "no_findings": "I checked the available records but found nothing to report for that time window.",
     "offer_action": "I can {action} for {target}. {consequences} Shall I go ahead?",
+    "offer_action_voice": "I can {action} for {target}. {consequences} For security, please review this offer on your screen and press 'Yes, go ahead' or 'No, leave it'. Nothing will change until you press one of those buttons.",
     "other_options": "If you'd rather, I can also {options}. Just tell me, or answer this offer first and I'll suggest that next.",
+    "other_options_voice": "Other eligible options are {options}. First answer this offer using the buttons on your screen; you can ask about those options afterward.",
     "confirm_prompt": "Please answer using the buttons on the offer above.",
-    "confirm_prompt_voice": "Please say clearly whether you want me to go ahead: yes or no.",
+    "confirm_prompt_voice": "For security, I can't take a spoken yes or no for this action. Please review the offer on your screen and tap 'Yes, go ahead' or 'No, leave it'. Nothing has changed yet.",
     "declined": "Okay, I won't make that change. Nothing on your account was changed.",
     "accepted": "Your request is recorded. {status}",
     "proposal_mismatch": "That request is no longer the one I'm waiting on. Please use the latest option shown.",
@@ -53,6 +55,7 @@ _EN: dict[str, str] = {
     "checked_default_window": "You didn't say when, so I looked at your {complaint} records for {window}.",
     "rechecked": "I re-checked with the corrected details ({window}).",
     "offer_still_open": "My earlier offer is still open.",
+    "offer_still_open_voice": "The earlier offer is still pending. Please use the on-screen 'Yes, go ahead' or 'No, leave it' buttons.",
     "no_pending_action": "There's nothing waiting for your confirmation right now.",
     "no_active_case": "There's no open request in this conversation yet. What would you like help with?",
     "case_status": "Your {complaint} request is {status}.",
@@ -60,12 +63,15 @@ _EN: dict[str, str] = {
     "human_needs_case": "I can pass this to a person with all the details. First, tell me what the problem is.",
     "default_escalation_reason": "Customer asked for a person to review this case.",
     "faq_none": "I don't have reviewed information on that yet. I can help with your balance, recharges, data, connection or service charges.",
+    "faq_none_case": "I'm not sure I caught that, so here is where your request stands.",
     "guest_help": "I can answer general questions. To check your own account, please sign in first.",
     "account_balance": "Your {wallet} balance is {amount} (as of {as_of}).",
     "account_no_balance": "I couldn't find a balance for your account right now.",
     "account_incomplete": "Some account information may not be up to date.",
     # Each value is a posted ledger line quoted from Resolve's calculation, e.g. "-LKR 60.00".
     "vas_charge_lines": "Value-added service charges posted in these records: {amounts}.",
+    # Each line is quoted from Resolve's ledger calculation; nothing is summed here.
+    "ledger_lines": "Posted in these records: opening balance {opening}; {lines}; recorded balance {closing}.",
     "account_services": "Value-added services on your line: {services}.",
     "account_no_services": "You have no value-added services on your line right now.",
     "service_renews": "{name} ({status}, renews automatically)",
@@ -166,8 +172,12 @@ ENGLISH: dict[str, dict[str, str]] = {
     "delivery": {k.value: v for k, v in _DELIVERY_EN.items()},
     "case_status": _CASE_STATUS_EN,
 }
-# Sent to Resolve as case data, not shown as a reply: always English.
-NOT_LOCALIZED = frozenset({"default_escalation_reason", "package_selection_unavailable", "PACKAGE_ACTIVATION"})
+# Internal terms and voice prompts without reviewed translations remain English.
+NOT_LOCALIZED = frozenset({
+    "default_escalation_reason", "package_selection_unavailable", "PACKAGE_ACTIVATION",
+    "offer_action_voice", "other_options_voice", "offer_still_open_voice", "confirm_prompt_voice",
+    "ledger_lines", "faq_none_case",  # English until the SI/TA drafts gain a reviewed wording
+})
 LOCALES_DIR = Path(__file__).with_name("locales")
 REVIEWED = "REVIEWED"
 Locale = str  # "en", "si", "ta", "si-Latn"; Language members are valid locale codes
@@ -251,6 +261,18 @@ def format_lkr(amount_minor: int) -> str:
     sign = "-" if amount_minor < 0 else ""
     rupees, cents = divmod(abs(amount_minor), 100)
     return f"{sign}LKR {rupees:,}.{cents:02d}"
+
+
+# Plain words for Resolve's ledger term labels; unknown labels fall back to lower-case words.
+LEDGER_LABELS_EN = {
+    "RECHARGE": "recharge", "PACKAGE_RENEWAL": "package renewal", "PACKAGE_PURCHASE": "package purchase",
+    "VAS_CHARGE": "value-added service charge", "RATED_USAGE": "usage charges",
+}
+
+
+def ledger_line(label: str, amount_minor: int) -> str:
+    name = LEDGER_LABELS_EN.get(label, label.replace("_", " ").lower())
+    return f"{name} {'+' if amount_minor > 0 else ''}{format_lkr(amount_minor)}"
 
 
 def format_time(value: datetime) -> str:

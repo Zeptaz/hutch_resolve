@@ -5,14 +5,12 @@ type Schemas = components['schemas']
 export type VoiceSessionGrant = Schemas['VoiceSessionGrant']
 export type VoiceProposal = Schemas['Proposal']
 
-/** Browser wire messages from the external Zeptaz Voice v2 runtime. */
+/** Browser wire messages from the external Zeptaz Voice v3 runtime. */
 export type VoiceResolveResult = {
   type: 'resolve_result'
   response_id: string
   case_id: string | null
   reply_text: string
-  speech_text: string
-  sensitive_audio: boolean
   pending_question: string | null
   proposal: VoiceProposal | null
   operation_status: string | null
@@ -25,7 +23,6 @@ export type VoiceServerMessage =
   | { type: 'transcript'; speaker: 'user' | 'assistant'; text: string; final: boolean; response_id?: string }
   | VoiceResolveResult
   | { type: 'audio_start' | 'audio_end'; response_id: string }
-  | { type: 'audio_fallback'; response_id: string; text: string; reason: string }
   | { type: 'playback_ack' | 'proposal_ack'; response_id: string; accepted: boolean }
   | { type: 'interrupted'; response_id: string | null }
   | { type: 'error'; code: string; message?: string }

@@ -11,6 +11,8 @@ from uuid import UUID, uuid5, NAMESPACE_URL
 
 from sqlalchemy import Engine, text
 
+from backend.resolve.providers.crm import CrmCustomer, CrmRejected, CrmUnavailable, RemoteTicketCrm
+
 from .case_status import refresh_case_status
 
 logger = logging.getLogger("hutch_resolve.operations")
@@ -44,11 +46,24 @@ class ProviderUnavailable(Exception):
     pass
 
 
-class MockSandboxWriter:
-    """Idempotent synthetic write adapter; it never connects to HUTCH systems."""
+def _ticket_target(ticket_id: str) -> UUID:
+    """provider_operations.target_id is a UUID; external CRM ticket IDs map to a stable one."""
+    try:
+        return UUID(ticket_id)
+    except ValueError:
+        return uuid5(NAMESPACE_URL, f"crm-ticket:{ticket_id}")
 
-    def __init__(self, engine: Engine) -> None:
+
+class MockSandboxWriter:
+    """Idempotent synthetic write adapter; it never connects to HUTCH systems.
+
+    With a remote CRM configured, review tickets and review updates go to that CRM instead of
+    sandbox.tickets. Idempotency records, fault profiles and recovery stay here unchanged.
+    """
+
+    def __init__(self, engine: Engine, crm: RemoteTicketCrm | None = None) -> None:
         self._engine = engine
+        self._crm = crm
 
     def _fault(self, sandbox_id: UUID, provider: str, operation: str, account_id: UUID) -> str | None:
         with self._engine.begin() as connection:
@@ -73,7 +88,8 @@ class MockSandboxWriter:
     def execute(self, *, sandbox_id: UUID, account_id: UUID, case_id: UUID, operation_id: UUID,
                 action_type: str, target_id: UUID, target_version: int, request_hash: str,
                 complaint_type: str, investigation_id: UUID,
-                escalation_reason: str | None = None) -> tuple[str, dict[str, Any]]:
+                escalation_reason: str | None = None,
+                evidence_state: str | None = None) -> tuple[str, dict[str, Any]]:
         provider, operation = {
             "DEACTIVATE_VAS": ("vas", "deactivate"),
             "SEND_SETTINGS_INSTRUCTIONS": ("messaging", "send_settings"),
@@ -110,14 +126,25 @@ class MockSandboxWriter:
                      "hash": request_hash, "target": target_id, "expected": target_version, "status": status,
                      "result": json.dumps(result)})
         else:
+            remote: tuple[str, dict[str, Any]] | None = None
+            if action_type == "CREATE_REVIEW_TICKET" and self._crm is not None:
+                # Fence the external write against a retired run before calling the CRM.
+                with self._engine.connect() as connection:
+                    if self._active_run(connection, sandbox_id) is None:
+                        raise ProviderUnavailable("SANDBOX_RETIRED")
+                remote = self._create_remote_ticket(
+                    sandbox_id=sandbox_id, account_id=account_id, case_id=case_id,
+                    operation_id=operation_id, complaint_type=complaint_type,
+                    investigation_id=investigation_id, escalation_reason=escalation_reason,
+                    evidence_state=evidence_state)
             with self._engine.begin() as connection:
-                active_run = connection.execute(text("""
-                    SELECT id FROM sandbox.sandbox_runs
-                    WHERE id=:sandbox AND run_status='ACTIVE' FOR SHARE
-                """), {"sandbox": sandbox_id}).scalar_one_or_none()
-                if active_run is None:
+                # A ticket already created in the external CRM is recorded even if the run was
+                # retired meanwhile: it exists, so claiming "no change was made" would be false.
+                if remote is None and self._active_run(connection, sandbox_id, lock=True) is None:
                     raise ProviderUnavailable("SANDBOX_RETIRED")
-                if action_type == "DEACTIVATE_VAS":
+                if remote is not None:
+                    status, result = remote
+                elif action_type == "DEACTIVATE_VAS":
                     changed = connection.execute(text("""
                         UPDATE sandbox.subscriptions s SET status='CANCELLED',renew_enabled=false,version=s.version+1
                         FROM sandbox.offers o WHERE s.sandbox_id=:sandbox AND s.account_id=:account AND s.id=:target
@@ -243,7 +270,48 @@ class MockSandboxWriter:
             raise ProviderUnavailable("COMMITTED_RESPONSE_LOST")
         return status, result
 
-    def sync_review(self, *, sandbox_id: UUID, account_id: UUID, ticket_id: UUID, event_id: UUID,
+    @staticmethod
+    def _active_run(connection: Any, sandbox_id: UUID, *, lock: bool = False) -> UUID | None:
+        return connection.execute(text("""
+            SELECT id FROM sandbox.sandbox_runs
+            WHERE id=:sandbox AND run_status='ACTIVE'
+        """ + (" FOR SHARE" if lock else "")), {"sandbox": sandbox_id}).scalar_one_or_none()
+
+    def _create_remote_ticket(self, *, sandbox_id: UUID, account_id: UUID, case_id: UUID,
+                              operation_id: UUID, complaint_type: str, investigation_id: UUID,
+                              escalation_reason: str | None,
+                              evidence_state: str | None) -> tuple[str, dict[str, Any]]:
+        if self._crm is None:
+            raise RuntimeError("No remote CRM is configured")
+        queue = "BILLING_REVIEW" if complaint_type in {"BALANCE_RECHARGE", "VAS_DISPUTE"} else "TECHNICAL_SUPPORT"
+        with self._engine.connect() as connection:
+            account = connection.execute(text("""
+                SELECT a.line_alias,a.region_code,c.id AS customer_id,c.display_name,c.preferred_language
+                FROM sandbox.accounts a
+                JOIN sandbox.customers c ON (c.sandbox_id,c.id)=(a.sandbox_id,a.customer_id)
+                WHERE a.sandbox_id=:sandbox AND a.id=:account
+            """), {"sandbox": sandbox_id, "account": account_id}).mappings().one_or_none()
+        # Only these synthetic fields describe the customer outside Resolve (contract: CE-012).
+        customer = None if account is None else CrmCustomer(
+            customer_id=str(account["customer_id"]), display_name=account["display_name"],
+            line_alias=account["line_alias"], region_code=account["region_code"],
+            preferred_language=account["preferred_language"])
+        try:
+            ticket_id = self._crm.create_review_ticket(
+                operation_id=operation_id, case_id=case_id, investigation_id=investigation_id,
+                complaint_type=complaint_type, queue=queue,
+                line_alias=account["line_alias"] if account is not None else None,
+                escalation_reason=escalation_reason, evidence_state=evidence_state, customer=customer)
+        except CrmUnavailable as exc:
+            raise ProviderUnavailable(exc.code) from None
+        except CrmRejected as exc:
+            return "FAILED", {"code": exc.code, "message": exc.message,
+                              "actual_target_status": None, "provider_ticket_id": None}
+        return "SUCCEEDED", {"code": "REVIEW_TICKET_CREATED",
+                             "message": f"A human review ticket was created in {self._crm.provider_name} (synthetic demo data).",
+                             "actual_target_status": "OPEN", "provider_ticket_id": ticket_id}
+
+    def sync_review(self, *, sandbox_id: UUID, account_id: UUID, ticket_id: str | UUID, event_id: UUID,
                     case_id: UUID, case_version: int, review_status: str,
                     disposition: str | None, note: str) -> tuple[str, dict[str, Any]]:
         provider_key = f"resolve-review:{event_id}"
@@ -282,9 +350,32 @@ class MockSandboxWriter:
                       (id,sandbox_id,provider,idempotency_key,request_hash,target_id,expected_version,status,result)
                     VALUES (:id,:sandbox,'crm',:key,:hash,:target,0,:status,CAST(:result AS jsonb))
                 """), {"id": operation_id, "sandbox": sandbox_id, "key": provider_key,
-                    "hash": request_hash, "target": ticket_id, "status": status, "result": json.dumps(result)})
+                    "hash": request_hash, "target": _ticket_target(str(ticket_id)), "status": status,
+                    "result": json.dumps(result)})
             return status, result
 
+        if self._crm is not None:
+            try:
+                status, result = self._crm.sync_review(
+                    ticket_id=str(ticket_id), event_id=event_id, case_id=case_id, case_version=case_version,
+                    review_status=review_status, disposition=disposition, note=note)
+            except CrmUnavailable as exc:
+                raise ProviderUnavailable(exc.code) from None
+            except CrmRejected as exc:
+                status, result = "FAILED", {"code": exc.code, "message": exc.message}
+            with self._engine.begin() as connection:
+                connection.execute(text("""
+                    INSERT INTO sandbox.provider_operations
+                      (id,sandbox_id,provider,idempotency_key,request_hash,target_id,expected_version,status,result)
+                    VALUES (:id,:sandbox,'crm',:key,:hash,:target,:version,:status,CAST(:result AS jsonb))
+                """), {"id": operation_id, "sandbox": sandbox_id, "key": provider_key,
+                    "hash": request_hash, "target": _ticket_target(str(ticket_id)), "version": case_version,
+                    "status": status, "result": json.dumps(result)})
+            if fault == "COMMITTED_RESPONSE_LOST":
+                raise ProviderUnavailable("COMMITTED_RESPONSE_LOST")
+            return status, result
+
+        ticket_id = _ticket_target(str(ticket_id))
         with self._engine.begin() as connection:
             ticket = connection.execute(text("""
                 SELECT id,version FROM sandbox.tickets WHERE sandbox_id=:sandbox AND id=:ticket FOR UPDATE
@@ -328,9 +419,10 @@ class MockSandboxWriter:
 
 
 class OperationRunner:
-    def __init__(self, resolve_engine: Engine, sandbox_engine: Engine) -> None:
+    def __init__(self, resolve_engine: Engine, sandbox_engine: Engine,
+                 crm: RemoteTicketCrm | None = None) -> None:
         self._resolve = resolve_engine
-        self._writer = MockSandboxWriter(sandbox_engine)
+        self._writer = MockSandboxWriter(sandbox_engine, crm)
 
     def run_once(self) -> bool:
         if self._run_review_sync_once():
@@ -339,7 +431,8 @@ class OperationRunner:
         with self._resolve.begin() as connection:
             row = connection.execute(text("""
                 SELECT o.id,o.case_id,o.proposal_id,o.attempt_count,c.sandbox_id,c.account_id,c.complaint_type,
-                       p.action_type,p.target_id,p.target_version,p.investigation_id,p.escalation_reason,i.revision
+                       p.action_type,p.target_id,p.target_version,p.investigation_id,p.escalation_reason,i.revision,
+                       i.evidence_state
                 FROM resolve.operations o
                 JOIN resolve.cases c ON c.id=o.case_id
                 JOIN resolve.action_proposals p ON p.id=o.proposal_id AND p.case_id=o.case_id
@@ -369,7 +462,8 @@ class OperationRunner:
                 case_id=operation["case_id"], operation_id=operation_id, action_type=operation["action_type"],
                 target_id=operation["target_id"], target_version=operation["target_version"], request_hash=request_hash,
                 complaint_type=operation["complaint_type"], investigation_id=operation["investigation_id"],
-                escalation_reason=operation["escalation_reason"])
+                escalation_reason=operation["escalation_reason"],
+                evidence_state=operation["evidence_state"])
         except ProviderUnavailable as exc:
             attempts = operation["attempt_count"]
             retired = str(exc) == "SANDBOX_RETIRED"
@@ -444,7 +538,7 @@ class OperationRunner:
         started_at = time.perf_counter()
         try:
             provider_status, result = self._writer.sync_review(sandbox_id=job["sandbox_id"],
-                account_id=job["account_id"], ticket_id=UUID(job["provider_ticket_id"]),
+                account_id=job["account_id"], ticket_id=job["provider_ticket_id"],
                 event_id=job["review_event_id"], case_id=job["case_id"],
                 case_version=job["case_version"], review_status=job["review_status"],
                 disposition=job["disposition"], note=job["note"])

@@ -232,3 +232,79 @@ Merged `ResolveDev` into `main` with a normal merge commit after updating local 
 ### Local full-stack manual run — 2026-10-03
 
 Started fresh isolated PostgreSQL, Resolve, live Vite and external Voice on the merged `main` tree. Migrated to `0011_turn_recovery`. Fixed LF shell bootstrap on Windows, stale readiness revision, Voice grant expiry constraint, and strict package catalogue projection. Verified live synthetic A/B/C/D/E/F investigations, A receipt, F VAS deactivation/recovery, package activation/receipt, agent review, customer isolation, and unavailable-provider Voice text fallback. Backend default suite **443 passed, 40 skipped**; focused disposable PostgreSQL **10 passed** plus **1 package facade integration**; Voice suite **52 passed**. Real Gemini/microphone and native-language release qualification are still open. See root `context.md` for the full verification boundary and demo database state.
+
+### CRM integration branch for review — 2026-10-03
+
+`tevin/crm-integration` (not pushed) ports the HubSpot review-ticket adapter onto main + chatbot fixes. Needs Harry's review before merge: CE-005 (BIG: worker makes external CRM calls; default stays mock), CE-007 (`propose_escalation` assumes a UUID request key and writes dialogue state; chat requests 500 on main), CE-011 (un-ported scenario A policy/fixture changes). Records and verification are in [core-engine-changes.md](../changelogs/core-engine-changes.md) and [hubspot-crm.md](hubspot-crm.md).
+
+CE-012 (2026-10-04, MEDIUM): HubSpot tickets now link to a synthetic customer contact; the CRM contract section lists the contact fields. Needs your approval; live linking waits for contact scopes on the HubSpot key.
+
+### Voice-only repair — 2026-10-03
+
+On the user's `voice_test`/`voice_test2` branches, live synthetic speech isolated the missing reply to Voice's Gemini event handling: authoritative `input_transcription` lacked `finished`, and no tool call arrived. Updated only the external Voice runtime and customer call frontend/wire contract. No shared Resolve backend engine or dashboard code changed. Voice unit suite **54 passed**; frontend typecheck/build and mock desktop/phone browser suite **24/24 passed**; live synthetic WAV reached a Resolve-backed reply with browser speech-synthesis invocation. Physical microphone/playback and multilingual human review remain open under H-08/J-03.
+
+Follow-up verification on the same branches: Gemini Live produced 378 KB of PCM with an output transcript exactly matching Resolve's 134-character approved reply. The browser received and drained the frames and sent `playback_complete`; Voice returned `playback_ack`. The original Live turn was discarded as ungrounded, and the second turn was bounded at 45 seconds to accommodate real provider latency. Voice unit suite remains **54/54 passed**, frontend build/typecheck and mock E2E **24/24 passed**. H-08 remains open for a human microphone/speaker call, spoken proposal consent and native-language review. Shared Resolve backend files remain untouched.
+
+Implementation commits remotely confirmed: Voice `voice_test2` **47e8c92**; Resolve `voice_test` **8911392**.
+
+### Scoped account balance fallback — 2026-10-04
+
+The user's two saved Voice balance questions were handled as generic complaints because the configured intent model timed out at about six seconds on both. After explicitly warning the user that this touches the shared Resolve conversation engine, `voice_test` adds a narrow deterministic recovery for direct account-balance reads through the existing scoped account facade. No action, permission, provider, dashboard or database path changed. The full default backend suite passed **446 tests** with 40 opt-in PostgreSQL skips; a live synthetic browser call returned the current scoped account balance and verified natural speech. See root `context.md` and Tevin/Jayith plans for remaining human qualification.
+
+Implementation commit **7c5ebd9** is remotely confirmed on `hutch_resolve/voice_test`.
+
+### Repeated generic prompt repair — 2026-10-04
+
+Saved customer text and Voice turns were intact at Resolve, but the local 3.1 Flash Lite extraction repeatedly timed out at about six seconds. The shared conversation service now recovers narrow, clear balance reads and complete English complaint starters through existing account or investigation routes when model extraction fails; it preserves guest, pending-proposal, reported-fact and consent boundaries. The ignored local demo configuration uses `gemini-3.5-flash-lite` after a real structured extraction completed within the budget. This is a local model choice, not a repository credential change or a guarantee of provider uptime.
+
+Focused routing **31 passed**; full default backend suite **449 passed, 40 PostgreSQL opt-in skipped**. Two real API turns against the running isolated PostgreSQL returned the current account balance and an investigated missing-reload case; both extraction records were `OK` on the new model (2,004 and 1,342 ms). No new physical Voice test or native-language human review occurred. Implementation commit **d5d1214** was pushed and remotely confirmed on `voice_test`; Voice repository unchanged.
+
+### Voice latency boundary — 2026-10-04
+
+No shared Resolve backend code changed. Resolve still owns canonical `reply_text`, operation state and consent. The external Voice branch now supplies these through a per-turn Gemini Live session memory snapshot and streams generated PCM immediately. The HTTP `speech_text` field remains for compatibility but is not used to gate browser audio. Spoken proposal consent is disabled; only explicit customer buttons may accept or decline. Voice unit suite **54/54** and paired frontend typecheck/build/mock browser **24/24** pass. Live provider latency and human semantic review remain open.
+
+### Voice v3 repair checkpoint — 2026-10-04
+
+The external Voice runtime and customer call frontend now implement numbered caller activity, continued microphone transmission during replies, asynchronous Resolve forwarding, bounded queued turns, saved-result handling for duplicate/cancelled/failed tool calls, and speech requests after Gemini's previous tool turn completes. Voice **65/65** and frontend mock browser **25/25** pass. Two synthetic real-Gemini turns on one connection generated audio after an initial failed probe exposed the tool-completion gap. The first PCM arrived about 3.5 seconds after each Resolve result, so the 2-second target remains unmet. H-08 remains open for signed Resolve/browser, repeated interruption, physical audio, and Sinhala/Tamil qualification. Shared Resolve backend files were not changed.
+
+The existing signed Voice bridge PostgreSQL integration test passed **1/1** after a fresh isolated database migration through `0011_turn_recovery`; its temporary Compose project and volume were removed. This closes the isolated persistence check only. Full signed browser/model qualification and the H-08 live gate remain open.
+
+The external Voice runtime has one speech-only retry after zero-PCM completion or a 10-second first-audio watchdog, still inside the 45-second total limit. It reuses the saved Resolve result. Focused Voice tests **35/35** and full suite **67/67** pass; a signed live call remains to be repeated after this change.
+
+The signed local service path has since passed a two-turn synthetic speech probe: Resolve provisioned a real grant, Voice v3 forwarded both turns to Resolve through HMAC, Gemini Live produced both audio replies and Voice accepted both playback acknowledgements. Persistence showed two completed claims and two matching user/assistant message pairs; the scoped probe session was revoked. A 30-turn fake-provider soak and complete Voice suite **68/68** pass. H-08 remains open for physical microphone/speaker, repeated real interruption, Sinhala/Tamil semantic review and latency qualification. No shared Resolve backend code changed.
+
+### External Voice latency qualification — 2026-10-04
+
+The no-tool Voice path waited for the full ungrounded Gemini turn before requesting speech. The external runtime now interrupts that turn as soon as Resolve returns, discards queued original audio through Gemini's boundary and streams only the grounded reply. The late-tool route reuses the saved result and stays pending through the boundary. Real synthetic Gemini 3.1 probes with a two-second Resolve stub measured first PCM 0.73 seconds after Resolve text without a tool and 0.72 seconds with a late tool; Voice suite **58/58 passed**. No shared Resolve backend/frontend code changed. Full signed browser call, physical audio and native-language review remain outstanding.
+
+### Voice spoken-decision repair — 2026-10-04
+
+The Resolve Voice confirmation prompt now states that spoken yes/no cannot authorize the proposed action and directs the caller to the visible **Yes, go ahead / No, leave it** buttons. Focused tests confirm repeated spoken yes leaves the same proposal pending and never invokes action confirmation. This is a narrow shared conversation-template change; action execution and permissions are unchanged. The project-venv backend suite passed **450 tests**, with **40 disposable-PostgreSQL checks skipped**. The customer call frontend and mock consent path were updated separately; frontend typecheck/lint passed and the complete mock browser suite passed **27/27**. H-08 still requires physical and multilingual qualification.
+
+Implementation commit: **4156679** on `hutch_resolve/voice_test`.
+
+
+### Voice confirmation and interruption repair - 2026-10-04
+
+- [x] Initial offers, alternatives and pending-offer follow-ups in Voice direct callers to the on-screen **Yes, go ahead / No, leave it** buttons. Security requires a button decision; spoken yes/no never authorizes an action. Text behavior and canonical pending-offer ownership remain unchanged. New English Voice strings are explicitly unreviewed for Sinhala/Tamil.
+- [x] Browser VAD requires three consecutive 100 ms speech frames and 700 ms quiet; it rejects playback echo more strongly until local playback actually drains, freezes room-noise learning during playback, and keeps the speaking indicator stable between PCM chunks. Normal sensitivity resumes immediately after drain.
+- [x] External Voice v3 uses browser activity boundaries as its sole VAD. Bounded 300 ms preroll preserves initial speech; mute discards it. V2 retains provider VAD. Live verification caught and fixed invalid automatic silence settings when provider detection is disabled.
+- [x] Verification: Resolve default suite **452 passed, 40 disposable-PostgreSQL checks skipped**; Voice **71 passed**; frontend TypeScript and final mock browser suite **30/30 passed**. Earlier failures exposed quiet-caller thresholds and an undersized test audio budget; corrected and rerun. One chat browser journey failed in an earlier run and passed in the final suite. A real Gemini connection produced **16 and 24 PCM frames across two synthetic turns**, with two accepted playback acknowledgements and exactly two Resolve-stub calls. This checks provider/manual-VAD runtime interoperability, not signed Resolve integration or physical acoustics.
+- [ ] H-08/J-03/J-04 remain open for physical microphone/speaker echo and repeated interruption, native-language review, and full signed browser/model qualification of this revision. Historical logs cannot identify the exact acoustic source of the reported loop.
+
+Changes belong to `hutch_resolve/voice_test` and `hutch_zeptazvoice/voice_test2`. Shared conversation changes are restricted to Voice wording/channel propagation. Commit and local service restart evidence follows after verification.
+
+Local services restarted with this revision; Resolve `/api/v1/healthz` and `/api/v1/readyz`, Voice `/healthz`, and the customer frontend returned HTTP 200 on ports 8080, 8088 and 5173 respectively. Final wording checks passed 22/22; Voice suite remained 71/71. Implementation is in the Git commit containing this checkpoint.
+
+### H-08 Voice-only decision readback - 2026-10-04
+
+- [x] Added a signed, read-only decision-result lookup for an exact completed browser `action_decision` after the latest matching proposal shown by the current Voice binding. The returned saved reply lets Voice speak the button outcome and continue the call; no action execution or shared conversation behavior changed.
+- [x] Extended Voice bindings to 420 seconds, capped by customer session and conversation expiry, while retaining the 60-second one-use browser grant.
+- [x] Verified focused bridge tests **16 passed** and project-venv backend default suite **455 passed, 40 opt-in PostgreSQL checks skipped**. This is unit/mock coverage; isolated PostgreSQL readback, live browser call and native-language review remain open under H-08. No implementation commit yet.
+
+
+### H-08 decision readback and call continuation - current local update
+
+- [x] Resolve exposes a strict HMAC-protected, read-only decision-result lookup keyed by active binding/session and completed browser `client_turn_id`. It verifies the exact proposal was returned to that binding before the authenticated decision; it returns the persisted result with `end_session=false` and does not execute actions.
+- [x] Voice grants bind for at most 420 seconds, capped by session and conversation expiry. Browser grants remain single-use and at most 60 seconds.
+- [x] Resolve focused bridge tests **16 passed** and default backend suite **455 passed, 40 PostgreSQL-gated skipped** as recorded with the implementation update. The route still needs migrated-PostgreSQL and signed live-call qualification. Source changes are local and are not included in the documentation-only commit.

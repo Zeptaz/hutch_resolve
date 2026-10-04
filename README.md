@@ -36,15 +36,35 @@ HTTP logs are compact JSON with request ID, route template, method, status, elap
 
 The database volume is Docker-managed, outside the OneDrive-synced repository. `docker compose down -v` permanently removes local database history.
 
+## Local demo database and tests (macOS/Linux)
+
+- `sh scripts/dev_db.sh reset --demo` recreates a disposable PostgreSQL on `127.0.0.1:55434` (container `hutch-dev-db`, never the shared compose database), migrates it to head, clears the seeded faults and arms one CRM outage. It prints the URLs for `.env`. Restart the backend afterwards.
+- A fresh fixture run arms 13 one-shot faults (late and duplicate postings, VAS write failures, a CRM outage), so the first journeys after a reset are deliberately imperfect. `python scripts/demo_faults.py list` shows them; `clear` gives a predictable happy path; `arm crm-outage` (or `crm-lost-response`, `vas-rejected`, ...) prepares exactly the failure to show.
+- `sh scripts/run_db_tests.sh` runs every opt-in PostgreSQL test file on its own freshly reset database (a separate `hutch-test-db` on port 55435, never the app's database) with the derived fixture runs the tests expect. The default `pytest` run skips all of them, so run this before calling the backend verified.
+- Demo phrasing: the fixture day is 2 October and its opening balance snapshots are at 08:00, so a free-text window that starts earlier (e.g. "this morning" from 00:00) can report the opening balance as missing. The CRM branch's fixture move to 1 October 00:00 was not ported (Harry's fixture; see `docs/plans/hubspot-crm.md`).
+- Languages: the interface is English, Sinhala and Tamil. In text chat, findings and offers are rewritten into the customer's style under a strict fact check (CB-001); outcomes, consent prompts and Voice stay deterministic, using `locales/si.json`/`ta.json` only after a fluent reviewer marks them `REVIEWED` (see `LANGUAGE_REVIEW.md`).
+
+## HubSpot CRM (optional)
+
+Review tickets can go to a real HubSpot account instead of the mock CRM. Only synthetic case references and summaries are sent; sync is one-way (Resolve to HubSpot).
+
+1. In HubSpot, create a Service Key (Settings, Integrations, Service Keys) with ticket read/write and ticket schema read/write. For customer contacts on each ticket also add `crm.objects.contacts.read`/`write` and `crm.schemas.contacts.read`/`write`; without them tickets are still created, just not linked to a contact. Put the key in `.env` as `HUBSPOT_ACCESS_TOKEN`; never commit or share it.
+2. `python scripts/hubspot_setup.py check --write-env` writes the Hub ID, web domain, pipeline and stage IDs to `.env` and reports whether contacts are ready; `properties` creates the `resolve_*` ticket and contact fields; `spike --pause` runs a live create/duplicate/note/stage test and archives its tickets.
+   Each review ticket is linked to a HubSpot contact for the synthetic customer (name, line, region, language, marked `SYNTHETIC_DEMO`; never phone or e-mail), found by its line so one demo customer keeps one contact across resets.
+3. Set `CRM_PROVIDER=hubspot` and restart. The backend checks the key, stages and properties at startup and logs a warning if anything is missing.
+4. Optional agent link: set `VITE_CRM_NAME=HubSpot` and `VITE_CRM_TICKET_URL=https://<web domain>/contacts/<hub id>/record/0-5/{id}` in `frontend/.env.local`.
+
+Fallback: `CRM_PROVIDER=mock` and a restart restore the built-in mock CRM. Details, limits and verification: [docs/plans/hubspot-crm.md](docs/plans/hubspot-crm.md).
+
 ## Repository map
 
 - `database/migrations/001_sandbox.sql`: synthetic CRM, charging, recharge, product/VAS, usage/quota and service-assurance records.
 - `database/migrations/002_resolve.sql` and `003_scope_constraints.sql`: initial Resolve persistence and cross-run ownership constraints.
 - `database/seed.sql`: fixture version 2 with six deterministic prepaid support cases and provider fault profiles.
 - `backend/resolve/app/`: FastAPI startup, health/readiness, error envelope, session lifecycle, auth context, and account endpoint.
-- `backend/resolve/providers/`: vendor-neutral PostgreSQL adapter and deterministic ledger reconciliation function.
+- `backend/resolve/providers/`: vendor-neutral PostgreSQL adapter and deterministic ledger reconciliation function; `crm.py` (external CRM port) and `hubspot.py` (optional HubSpot adapter).
 - `backend/resolve/migrations/`: Alembic environment, non-destructive baseline adoption, lifecycle schema and case-investigation persistence.
-- `scripts/`: start/stop/reset and fixture UUID generation.
+- `scripts/`: start/stop/reset (PowerShell), fixture UUID generation, `dev_db.sh` and `run_db_tests.sh` (macOS/Linux), `demo_faults.py` (fault control) and `hubspot_setup.py` (HubSpot setup and spike).
 - `docs/mock-environment.md`: relationships, assumptions, failure modes and future provider contracts.
 
 ## Boundaries and security

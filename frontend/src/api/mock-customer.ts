@@ -175,6 +175,9 @@ function handleTurn(state: MockState, session: SessionView, conv: ConversationVi
       input.complaint_type === 'BALANCE_RECHARGE'
         ? ask('COMPLAINT_DETAILS', 'When did this happen, and how much did you recharge?', ['complaint_details', 'text'])
         : plain('Mock: only the balance-after-recharge journey (fixture A) is scripted. Try “Balance or recharge”.')
+  } else if (input.type === 'text' && conv.pending_proposal &&
+      /^\s*(yes|yeah|yep|sure|go ahead|okay|ok|no|nope|decline|leave it)\b/i.test(input.text)) {
+    reply = plain('Please review the offer on your screen and tap "Yes, go ahead" or "No, leave it". Nothing has changed yet.')
   } else if (input.type === 'text' && /balance|recharge|lkr|charge|money/i.test(input.text)) {
     reply = investigate(state, conv)
   } else if (input.type === 'text') {

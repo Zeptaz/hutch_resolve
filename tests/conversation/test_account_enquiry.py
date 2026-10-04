@@ -169,3 +169,34 @@ def test_yes_answers_the_charge_check_even_while_an_older_offer_is_open() -> Non
     result = h.send(ctx, h.turn(conv, text("ow")))
     assert h.facade.calls["create_case"] == 2 and h.facade.calls["confirm_action"] == 0  # looked up, nothing accepted
     assert "service charge records" in result.reply_text
+
+
+def _balance_result(terms, *, opening=0, observed=42_000):
+    from uuid import uuid4
+
+    from fakes import scenario_result
+    from resolve.conversation.dto import Calculation, ComplaintType, InvestigationResult
+
+    result = InvestigationResult.model_validate(scenario_result("F"))
+    calc = Calculation(code="BALANCE_LEDGER_RECONCILIATION", unit="LKR_MINOR", opening=opening, expected=observed or 0,
+                       observed=observed, delta=0, evidence_ids=[],
+                       terms=[{"evidence_id": uuid4(), "label": label, "value": value} for label, value in terms])
+    return result.model_copy(update={"calculations": [calc], "complaint_type": ComplaintType.BALANCE_RECHARGE})
+
+
+def test_balance_investigation_reads_out_every_ledger_line_in_order() -> None:
+    from resolve.conversation.service import _investigation_draft
+
+    inv = _balance_result([("RECHARGE", 100_000), ("PACKAGE_RENEWAL", -49_900), ("VAS_CHARGE", -6000), ("RATED_USAGE", -2100)])
+    draft = _investigation_draft(inv, None, "en")
+    first_finding = inv.findings[0].text
+    assert draft.reply_text.startswith(first_finding + " " +
+        "Posted in these records: opening balance LKR 0.00; recharge +LKR 1,000.00; package renewal -LKR 499.00; "
+        "value-added service charge -LKR 60.00; usage charges -LKR 21.00; recorded balance LKR 420.00.")
+
+
+def test_balance_investigation_without_an_observed_balance_adds_no_ledger_sentence() -> None:
+    from resolve.conversation.service import _investigation_draft
+
+    inv = _balance_result([("RECHARGE", 100_000)], observed=None)
+    assert "Posted in these records" not in _investigation_draft(inv, None, "en").reply_text

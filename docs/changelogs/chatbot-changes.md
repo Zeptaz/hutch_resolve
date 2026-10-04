@@ -4,7 +4,7 @@ Changes to the conversation module only: `backend/resolve/conversation/**` and i
 Anything that touches Resolve services, providers, migrations, shared DTOs/contracts, the Voice
 bridge or the frontend goes in [core-engine-changes.md](core-engine-changes.md) instead.
 
-Branch: `tevin/chatbot-fixes` (from `main` @ `4b581b2`). CB-001..CB-003 merged into `main` on 2026-10-04 as `0375c4b`.
+Branch: `tevin/chatbot-fixes` (from `main` @ `4b581b2`) for CB-001..003, merged into `main` on 2026-10-04 as `0375c4b`; `tevin/crm-integration` for CB-004..005.
 
 ## Risk levels
 
@@ -157,3 +157,130 @@ English card + buttons, English source in storage, and Voice/outcomes excluded.
   a spoken yes to the charge check now starts the look-up instead of being treated as offer consent — safer).
 - Commit: `73677a4` (branch `tevin/chatbot-fixes`, pushed and remote-confirmed).
 - Core dependency: CE-004 (price per subscription).
+
+---
+
+## CRM integration — branch `tevin/crm-integration` (2026-10-03)
+
+From `tevin/chatbot-fixes` `4b305ff` + `main` `d7dc9da`; conversation fixes ported from `tevin/hubspot-crm`.
+Engine/frontend/tooling parts of the same work are CE-005..CE-011 in [core-engine-changes.md](core-engine-changes.md).
+
+### CB-004 — Offer re-try, no review loop, no unprompted review on reconciled answers, Voice replay
+
+- Date / status: 2026-10-03 — DONE on branch, verified, committed `ddf619d` (ported from `tevin/hubspot-crm`
+  `3120d4e`/`61d8506`, audit findings 5, 6, 7, 16, 17, 19)
+- Risk: **HIGH** — touches the confirmation flow (a fresh proposal after PROPOSAL_INVALIDATED) and turn
+  idempotency (Voice fingerprint). Needs Harry's review before merge. Small code size (~70 lines).
+- Files: `backend/resolve/conversation/{service.py,identity.py,locales/si.json,locales/ta.json}`,
+  `tests/conversation/{test_decisions_and_handoff.py,test_resolve_integration.py}`.
+- What changed:
+  - Accepting an offer that the case invalidated meanwhile (an earlier action finished) re-offers the same
+    action on a fresh proposal; the customer confirms again; nothing runs on the stale proposal.
+  - If Resolve refuses the first offer (STALE_VERSION / ACTION_NOT_ALLOWED / PROPOSAL_INVALIDATED), the next
+    eligible action is offered instead of failing the turn.
+  - No unprompted human review when every finding is `LEDGER_RECONCILED`/`QUOTA_RECONCILED`; still available
+    on request; a pending payment (E) still offers it.
+  - The action just accepted or declined is never re-offered as the "next" option (decline-review loop).
+  - Voice turn fingerprint ignores `presentation_response_id`, so a retried Voice turn that produced a new
+    offer is no longer `IDEMPOTENCY_CONFLICT`.
+  - SI/TA package hint names the translated button.
+- Not ported: the CRM branch's adapter change (Resolve-offered reviews via `propose_escalation` with a fixed
+  reason) — main's facade now supplies a default reason; `test_postgres_runtime` expectation tied to the
+  un-ported scenario A VAS offer (CE-011).
+- Verification: unit (default suite) **505 passed, 48 skipped**; PostgreSQL disposable: conversation runtime
+  6 passed, real-facade conversation 22 passed incl. the new reconciled-vs-pending test; browser: decline of
+  the offered review on A did not loop.
+- Core dependency: none.
+
+### CB-005 — "I want a real person" after a case returned a 500
+
+- Date / status: 2026-10-03 — DONE on branch, verified, committed `2d34967`
+- Risk: **HIGH** by the table above — it changes which facade method the chat calls for a customer-requested
+  review (`propose_action` with `escalation_reason` instead of `propose_escalation`). The payload is the same
+  case, latest investigation, Resolve-listed review target and the customer's reason; Resolve still validates
+  eligibility/version and stores the reason. Needs Harry's review. Small code size (one adapter method).
+- Files: `backend/resolve/conversation/resolve_adapter.py`, `tests/test_conversation_review_reason.py`,
+  `tests/conversation/test_resolve_integration.py`.
+- Root cause: CE-007 — main's `propose_escalation` parses the request key as a UUID and writes the dialogue
+  state; the chat's command key is deterministic and not a UUID. Found in the browser during the CRM test.
+- Verification: unit 4 passed (reason passed through; no proposal when Resolve listed no review); PostgreSQL
+  real-facade regression fails on main's adapter and passes with the fix; browser on the live HubSpot stack:
+  decline → "Actually I want a real person…" → review offered with "Reason: Customer asked for a person to
+  review this case." → accepted → HubSpot ticket created and synced.
+- Core dependency: CE-007 (proper engine fix).
+
+## Voice + CRM integration — branch `integration/voice-crm` (2026-10-04)
+
+`main` + `tevin/crm-integration` + Harry's `voice_test`, merged for a team release candidate. The
+`service.py` merge kept both sides: chatbot locale/paragraph/rewrite handling and Harry's channel-aware
+Voice consent prompts.
+
+### CB-006 — Sinhala/Tamil drafts still told Voice callers to say "yes or no"
+
+- Date / status: 2026-10-04 — DONE on `integration/voice-crm`, verified
+- Risk: **LOW** — one template key pinned to English; no routing or consent logic changed.
+- Files: `backend/resolve/conversation/templates.py`, `locales/{si,ta,si-Latn}.json`,
+  `tests/conversation/test_locales.py`.
+- What changed / why: `voice_test` made Voice consent button-only and kept its new Voice prompts English
+  (`NOT_LOCALIZED`), but `confirm_prompt_voice` stayed localized and the SI/TA/Singlish drafts still said
+  "say clearly: yes or no". Drafts are unreviewed so English is served today; once a draft was marked
+  REVIEWED the caller would be invited to give a spoken yes that Resolve ignores. The key is now
+  `NOT_LOCALIZED` like the other Voice prompts and removed from the drafts.
+- Verification: unit — conversation suite 395 passed, 19 skipped; new test fails if any reviewed locale
+  overrides the Voice confirm prompt.
+- Core dependency: none.
+
+### CB-007 — Sinhala "remove my VAS charges" went to packages; "what are VAS charges" got an unrelated FAQ
+
+- Date / status: 2026-10-04 — DONE on `integration/voice-crm`, verified
+- Risk: **MEDIUM** — intent prompt change (`extract-v6` → `extract-v7`) affects routing of every turn; no code
+  path, consent or Resolve call changed.
+- Files: `conversation/extraction.py` (prompt), `conversation/eval/extraction_cases.jsonl` (+9 cases from a real
+  Sinhala/Tamil/English Voice call), `conversation/try_extract.py` (`--ids` filter for targeted evals).
+- What changed / why: in a live Sinhala call the transcripts were correct but extraction returned PACKAGES for
+  "මට ඒ VAS charges ටික අයින් කරන්න පුළුවන්ද?" (reply: "I couldn't load the packages") and FAQ for
+  "...මොනවද VAS charges කියන්නේ" (reply: an unrelated recharge-fee article). The prompt had no Sinhala-script VAS
+  examples and no "remove/stop VAS" example; its nearest example was "activate a package for me" → PACKAGES.
+  v7: removing/stopping a VAS or its charges is NEW_COMPLAINT/VAS_DISPUTE; PACKAGES is data/voice bundles only;
+  "what are the VAS charges" means the customer's own line; transcripts may mix scripts and mishear VAS
+  ("VA charges", "AVAS"); six new examples (Sinhala script, Tamil, English, Singlish) worded differently from the
+  eval cases.
+- Verification: live eval, same model `gemini-3.5-flash-lite`, all 71 cases: v6 **67/71** (vas-06, vas-07,
+  vas-09 wrong + 1 timeout) → v7 **71/71**, no regressions in any variety, max latency 6.0 s → 1.95 s. Unit
+  conversation suite 395 passed. Live signed Voice probe (Tamil synthesized speech, real Gemini Live + Resolve):
+  "what VAS charges are on my account" → services list; "stop this VAS service" (STT heard "Indus") →
+  VAS investigation with stop offer. Fluent Sinhala speaker retest still needed.
+- Core dependency: none.
+
+### CB-008 — "Why is my balance 450 after a 1000 reload?" never said where the money went
+
+- Date / status: 2026-10-04 — DONE on `integration/voice-crm`, verified
+- Risk: **LOW** — adds one quoted sentence to balance/recharge investigation replies; no routing, consent or
+  Resolve call changed; every number is copied from Resolve's calculation, none is computed.
+- Files: `conversation/service.py` (`_investigation_draft`), `conversation/templates.py` (`ledger_lines`,
+  `ledger_line`, English ledger labels; `ledger_lines` English-only until SI/TA wording is reviewed),
+  `tests/conversation/test_account_enquiry.py`.
+- What changed / why: a BALANCE_RECHARGE reply only said "the observed closing balance matches opening plus
+  posted entries"; the amounts were only on the calculation card, which a Voice caller never sees. The reply
+  now reads Resolve's ledger lines in order after its conclusion: opening balance, each posted recharge and
+  deduction, recorded balance.
+- Verification: unit 528 passed (2 new); PostgreSQL conversation files 22 + 6 passed; live chat replay of the
+  reported Sinhala message on SIM-LK-0001 lists recharge +1,000, renewal −499, VAS −60, usage −21, two demo
+  package purchases −49/−299, recorded LKR 72.00.
+- Core dependency: none.
+
+### CB-009 — A vague question during an open case ended at "I don't have reviewed information"
+
+- Date / status: 2026-10-04 — DONE on `integration/voice-crm`, verified
+- Risk: **LOW** — only changes the no-knowledge-card FAQ reply for a signed-in customer with an active case;
+  guests and customers without a case keep the old reply. Uses the existing read-only status path.
+- Files: `conversation/service.py` (`_faq`), `conversation/templates.py` (`faq_none_case`, English-only until
+  reviewed), `tests/conversation/test_text_routing.py`.
+- What changed / why: in a Sinhala Voice call, right after accepting a review, "ආවාට පස්සේ කරන්න පුළුවන්
+  කියලා මට පැහැදිලි කරන්න පුළුවන්ද?" ("explain what can be done after it comes?" — the subject was likely
+  lost in transcription) was extracted as FAQ, matched no card and hit the dead end. With "review" in the
+  sentence the same model returns FOLLOW_UP. Now an unmatched FAQ during an open case answers with that case's
+  status (review state, delivery, ticket number, receipt) after "I'm not sure I caught that".
+- Verification: unit 529 passed (1 new; the guest dead-end test still passes); live API replay as SIM-LK-0001
+  (complaint → button accept → the same sentence) returns the case status with ticket and receipt.
+- Core dependency: none.

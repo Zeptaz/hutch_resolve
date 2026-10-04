@@ -60,3 +60,12 @@
 {"id": "vas-03", "variety": "english", "message": "which value added services am I paying for?", "expect": {"intent": "ACCOUNT_ENQUIRY", "account_topic": "SERVICES"}}
 {"id": "vas-04", "variety": "singlish", "message": "Mata VAS charges gana poddak check karanna puluwan da ?", "expect": {"intent": "NEW_COMPLAINT", "complaint_type": "VAS_DISPUTE", "detected_language": "si"}}
 {"id": "vas-05", "variety": "singlish", "message": "mata thiyena packages monawada", "expect": {"intent": "ACCOUNT_ENQUIRY", "account_topic": "PACKAGES", "detected_language": "si"}}
+{"id": "vas-06", "variety": "sinhala_script", "message": "එතකොට මට දැනගන්න පුළුවන්ද මොනවද VAS charges කියන්නේ කියලා?", "expect": {"intent_not": ["FAQ", "PACKAGES"], "detected_language": "si"}}
+{"id": "vas-07", "variety": "sinhala_script", "message": "මට ඒ VAS charges ටික අයින් කරන්න පුළුවන්ද?", "expect": {"intent": "NEW_COMPLAINT", "complaint_type": "VAS_DISPUTE", "detected_language": "si"}}
+{"id": "vas-08", "variety": "sinhala_script", "message": "අන්න අතනදි ඇත්තටම දැනගන්න ඕනේ මොනවද මගේ එකවුන්ට් එකේ ඇඩ් වෙලා තියෙන VAS charges කියලා.", "expect": {"intent": "ACCOUNT_ENQUIRY", "account_topic": "SERVICES", "detected_language": "si"}}
+{"id": "vas-09", "variety": "mixed", "message": "Hi madam, මට දැනගන්න පුළුවන්ද මොනාද VA charges කියන්නේ කියලා?", "expect": {"intent_not": ["FAQ", "PACKAGES"], "detected_language": "si"}}
+{"id": "vas-10", "variety": "english", "message": "Yeah, can you remove that VA charges from now on? I don't need that VA charges.", "expect": {"intent": "NEW_COMPLAINT", "complaint_type": "VAS_DISPUTE"}}
+{"id": "vas-11", "variety": "singlish", "message": "mata me VAS eka ain karala denna, mata eka epa", "expect": {"intent": "NEW_COMPLAINT", "complaint_type": "VAS_DISPUTE", "detected_language": "si"}}
+{"id": "vas-12", "variety": "sinhala_script", "message": "මට මේ සේවාව නවත්වන්න ඕනේ, හැමදාම සල්ලි කපනවා", "expect": {"intent": "NEW_COMPLAINT", "complaint_type": "VAS_DISPUTE", "detected_language": "si"}}
+{"id": "vas-13", "variety": "tamil_script", "message": "இந்த VAS சேவையை நிறுத்துங்கள், எனக்கு வேண்டாம்", "expect": {"intent": "NEW_COMPLAINT", "complaint_type": "VAS_DISPUTE", "detected_language": "ta"}}
+{"id": "vas-14", "variety": "tamil_script", "message": "என் கணக்கில் என்ன VAS கட்டணங்கள் உள்ளன?", "expect": {"intent": "ACCOUNT_ENQUIRY", "account_topic": "SERVICES", "detected_language": "ta"}}

@@ -53,6 +53,7 @@ Acceptance: a full A journey produces the same case/action/receipt through text 
 
 | Date | Task | Evidence | Remaining |
 | --- | --- | --- | --- |
+| 2026-10-03 | CRM integration onto main (branch `tevin/crm-integration`): CB-004 offer re-try / no review loop / no unprompted review on reconciled answers / Voice replay fingerprint; CB-005 customer-requested review via `propose_action` (main returned 500) | Unit 505 passed/48 skipped; PostgreSQL disposable: conversation runtime 6, real-facade conversation 22 (new regression fails without CB-005); browser mock CRM and live HubSpot journeys (see context.md). Commits `ddf619d`, `2d34967`. | Harry review (both HIGH); CE-007 engine fix; scenario A policy (CE-011). |
 | 2026-10-03 | CB-002/CB-003 VAS questions + knowledge language | Knowledge search falls back to English cards for si/ta customers; `account_topic` SERVICES/PACKAGES answers from the account view with an opt-in charge-records check; VAS charge lines quoted verbatim; prompts translatable after a case. Unit 473 passed/40 skipped; live extraction samples; browser end to end. | Fluent review of new draft strings; Tamil live samples; CE-004 subscription price. Commit `73677a4`. |
 | 2026-10-03 | CB-001 Singlish replies (T-04, branch `tevin/chatbot-fixes`) | Two-tier `_localize`: text-chat findings/offers/balance rewritten with strict fact check (`rewrite-v3`), outcomes/consent/Voice deterministic; paragraphed text replies; script-aware locales (`si-Latn` draft, unreviewed). Unit 461 passed/40 skipped; live Gemini + fake Resolve; browser on local live stack with `REPLY_REWRITE` OK rows. See `docs/changelogs/chatbot-changes.md`. | Fluent review of `si-Latn.json` and rewritten samples; Harry AUD-01 review; CB-002 VAS "check charges" routing; CE-001/002/003 engine requests. Commit `73677a4`. |
 | 2026-10-03 | Package query/selection integration | Added typed package-query/selection turns; conversation gets catalogue/usage and asks ResolveFacade to create case/evidence/proposal. No duplicate package policy. Tests: 347 passed, 16 database-gated skipped. Resolve-backed package selection/action was separately verified through disposable PostgreSQL, including concurrent confirmation. | Usage lacks explicit coverage so no personalized best-fit claim is exposed; full customer Voice/browser journey remains open. |
@@ -73,3 +74,32 @@ Resolve conversation answers now reject outcome claims unsupported by the availa
 ### Local full-stack conversation verification — 2026-10-03
 
 The real Resolve-backed package query initially failed strict presentation DTO validation because Resolve-only usage/offer metadata leaked into the chatbot adapter. The adapter now projects only declared presentation fields; a real facade/disposable PostgreSQL regression passes. Live structured browser/API paths exercised A/B/C/D/E/F, package selection, action status and receipts. The model capability was unavailable because no live model key was configured; free-text fallback requested structured complaint entry. Real-model semantic, native-language and physical Voice qualifications remain open. See root `context.md` for aggregate checks.
+
+### Direct balance enquiry recovery — 2026-10-04
+
+Two real Voice turns with “Can I know my account balance?” were transcribed correctly, but `EXTRACTION/TIMEOUT` at about six seconds sent them to the generic category prompt. The shared conversation service on `voice_test` now recognizes only clear account-balance read requests when extraction fails and invokes its existing customer-scoped `_account` path. It does not classify balance complaints or how-to questions as account reads, and guest access still requires sign-in. Regression tests cover timeout, complaint/how-to exclusion and guest denial; the full Resolve default suite passed **446/446** with 40 opt-in PostgreSQL skips. A live synthetic browser call returned the current scoped balance and verified PCM speech. Tevin's broader model and native-language intent qualification remains open.
+
+Implementation commit **7c5ebd9** is remotely confirmed on `hutch_resolve/voice_test`.
+
+### Model-failure routing follow-up — 2026-10-04
+
+The shared conversation service now recovers a narrow set of direct balance questions and complete English complaint starters after failed intent extraction, without bypassing the Resolve facade or consent gates. The local ignored demo setting was switched to `gemini-3.5-flash-lite` after a successful structured extraction. Full default Resolve suite: **449 passed, 40 opt-in PostgreSQL skipped**; two live API/PostgreSQL chat turns returned the expected scoped balance and investigated reload case, with `EXTRACTION/OK` telemetry. Physical Voice and native-language intent review remain open. Verified backend implementation commit **d5d1214** is on `voice_test`.
+
+
+### Voice confirmation and interruption repair - 2026-10-04
+
+- [x] Initial offers, alternatives and pending-offer follow-ups in Voice direct callers to the on-screen **Yes, go ahead / No, leave it** buttons. Security requires a button decision; spoken yes/no never authorizes an action. Text behavior and canonical pending-offer ownership remain unchanged. New English Voice strings are explicitly unreviewed for Sinhala/Tamil.
+- [x] Browser VAD requires three consecutive 100 ms speech frames and 700 ms quiet; it rejects playback echo more strongly until local playback actually drains, freezes room-noise learning during playback, and keeps the speaking indicator stable between PCM chunks. Normal sensitivity resumes immediately after drain.
+- [x] External Voice v3 uses browser activity boundaries as its sole VAD. Bounded 300 ms preroll preserves initial speech; mute discards it. V2 retains provider VAD. Live verification caught and fixed invalid automatic silence settings when provider detection is disabled.
+- [x] Verification: Resolve default suite **452 passed, 40 disposable-PostgreSQL checks skipped**; Voice **71 passed**; frontend TypeScript and final mock browser suite **30/30 passed**. Earlier failures exposed quiet-caller thresholds and an undersized test audio budget; corrected and rerun. One chat browser journey failed in an earlier run and passed in the final suite. A real Gemini connection produced **16 and 24 PCM frames across two synthetic turns**, with two accepted playback acknowledgements and exactly two Resolve-stub calls. This checks provider/manual-VAD runtime interoperability, not signed Resolve integration or physical acoustics.
+- [ ] H-08/J-03/J-04 remain open for physical microphone/speaker echo and repeated interruption, native-language review, and full signed browser/model qualification of this revision. Historical logs cannot identify the exact acoustic source of the reported loop.
+
+Changes belong to `hutch_resolve/voice_test` and `hutch_zeptazvoice/voice_test2`. Shared conversation changes are restricted to Voice wording/channel propagation. Commit and local service restart evidence follows after verification.
+
+### Voice + CRM release candidate - 2026-10-04
+
+- [x] Integrated `main` + `tevin/crm-integration` + Harry's `voice_test` on `integration/voice-crm` (Voice repo: `voice_test2`). Resolved the five `conversation/service.py` conflicts by keeping chatbot locale/paragraph/rewrite handling and Harry's Voice channel prompts. CB-006 pins `confirm_prompt_voice` to English.
+- [x] Verification: Resolve **523 passed, 49 skipped**; PostgreSQL opt-in **14/14 files**; Voice **71**; frontend typecheck/build; mock Playwright 32/32 (CE-013 test route fix); live chat → review ticket → dashboard; signed two-turn Voice probe through real Gemini Live. Details in root `context.md`.
+- [x] CB-007 `extract-v7`: VAS remove/what-are questions in Sinhala/Tamil route correctly; eval 67/71 → 71/71.
+- [x] CE-014 Voice fixes (Sinhala hints, late-tool stall, ConcurrencyError): 9/9 live turns, first audio 0.6 s after Resolve.
+- [ ] Physical microphone call; Harry's unpushed v4/decision-readback code; Harry review of CB-004..006.

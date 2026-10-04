@@ -1,7 +1,7 @@
 """Manual check of live Gemini extraction (no database, no Resolve calls).
 
     GEMINI_API_KEY=... GEMINI_TEXT_MODEL=... python -m resolve.conversation.try_extract ["message" ...]
-    GEMINI_API_KEY=... GEMINI_TEXT_MODEL=... python -m resolve.conversation.try_extract --eval [--rpm 5] [--only singlish,sinhala_script]
+    GEMINI_API_KEY=... GEMINI_TEXT_MODEL=... python -m resolve.conversation.try_extract --eval [--rpm 5] [--only singlish,sinhala_script] [--ids vas-,pkg-]
 
 With messages it prints each extraction. With no messages it runs a small
 multilingual sample. `--eval` scores eval/extraction_cases.jsonl per language
@@ -113,7 +113,7 @@ def score(case: dict, extraction) -> list[str]:
     return wrong
 
 
-async def run_eval(rpm: float, varieties: set[str] | None = None) -> int:
+async def run_eval(rpm: float, varieties: set[str] | None = None, id_prefixes: tuple[str, ...] = ()) -> int:
     """`rpm` paces requests under the project's quota (free tier: 5/min for some models).
     A repair attempt counts as a second request, so pacing is per case with headroom."""
     client = GeminiModelClient.from_env()
@@ -128,6 +128,8 @@ async def run_eval(rpm: float, varieties: set[str] | None = None) -> int:
     cases = load_cases()
     if varieties:
         cases = [c for c in cases if c["variety"] in varieties]
+    if id_prefixes:
+        cases = [c for c in cases if c["id"].startswith(id_prefixes)]
     print(f"{len(cases)} cases at <= {rpm:g} requests/min (about {len(cases) * interval / 60:.0f} min)", flush=True)
     for index, case in enumerate(cases):
         if index and interval:
@@ -161,5 +163,6 @@ if __name__ == "__main__":
     if args[:1] == ["--eval"]:
         rpm = float(args[args.index("--rpm") + 1]) if "--rpm" in args else float(os.environ.get("GEMINI_RPM", "5"))
         varieties = set(args[args.index("--only") + 1].split(",")) if "--only" in args else None
-        raise SystemExit(asyncio.run(run_eval(rpm, varieties)))
+        ids = tuple(args[args.index("--ids") + 1].split(",")) if "--ids" in args else ()
+        raise SystemExit(asyncio.run(run_eval(rpm, varieties, ids)))
     raise SystemExit(asyncio.run(main(args or SAMPLES)))

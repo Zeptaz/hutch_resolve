@@ -279,3 +279,41 @@ def test_seeded_faults_as_in_harrys_app_are_reported_safely() -> None:
     finally:
         app_engine.dispose()
         sandbox_engine.dispose()
+
+
+@pytest.mark.skipif(not (DB_URL and SANDBOX_URL), reason="needs an isolated migrated Resolve database")
+def test_reconciled_answer_does_not_push_a_review_but_a_pending_payment_does(harry_real) -> None:
+    """B: every number reconciles, so no unprompted review. E: the payment is captured but not
+    credited, so the review is still offered."""
+    ctx, conv, repo, service, _ = journey(harry_real, UUID("20000000-0000-0000-0000-000000000002"))
+    data = send(service, repo, ctx, conv, details("DATA_DEPLETION"))
+    assert not [card for card in data.cards if card.type == "confirmation"]
+
+    ctx_e, conv_e, repo_e, service_e, _ = journey(harry_real, UUID("20000000-0000-0000-0000-000000000005"))
+    pending = send(service_e, repo_e, ctx_e, conv_e, details())
+    assert [card.data.action_type for card in pending.cards if card.type == "confirmation"] == ["CREATE_REVIEW_TICKET"]
+
+
+@pytest.mark.skipif(not (DB_URL and SANDBOX_URL), reason="needs an isolated migrated Resolve database")
+def test_customer_review_request_reaches_real_facade_with_reason(harry_real) -> None:
+    """"I want a person" after a case: the chat's command key is not a UUID, and Resolve must
+    still return a review proposal that keeps the customer's reason (CB-005)."""
+    from sqlalchemy import text
+
+    from resolve.conversation.dto import ActionType, EscalationRequest
+    from resolve.conversation.identity import command_key
+
+    ctx, conv, repo, service, adapter = journey(harry_real, ACCOUNT_D)
+    result = send(service, repo, ctx, conv, details())
+    case = asyncio.run(adapter.get_case(ctx, result.case_id))
+    reason = "Customer asked for a person to review this case."
+    proposal = asyncio.run(adapter.prepare_escalation(
+        ctx, case.id,
+        EscalationRequest(expected_version=case.version, investigation_id=case.investigation.id, reason=reason),
+        command_key(conv, uuid4(), "escalate", case.id)))
+    assert proposal.action_type is ActionType.CREATE_REVIEW_TICKET
+    facade, _ = harry_real
+    with facade._engine.connect() as connection:
+        stored = connection.execute(text("SELECT escalation_reason FROM resolve.action_proposals WHERE id=:id"),
+                                    {"id": proposal.id}).scalar_one()
+    assert stored == reason

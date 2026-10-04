@@ -96,3 +96,211 @@ Chatbot-only changes are in [chatbot-changes.md](chatbot-changes.md).
 - Verification: not started.
 - Commit: none.
 
+
+---
+
+## CRM integration — branch `tevin/crm-integration` (2026-10-03)
+
+Branch `tevin/crm-integration` = `origin/tevin/chatbot-fixes` `4b305ff` + merge of `origin/main` `d7dc9da`
+(Jayith's dashboard fixes, merge `3281d02`) + the HubSpot CRM work ported from `tevin/hubspot-crm`
+`61d8506` (fork point `46d41ed`). The CRM branch was ported change by change, not merged, so newer main
+code was kept wherever main had already fixed the same defect. Nothing was pushed; nothing touches `main`.
+
+### CE-005 — HubSpot CRM adapter for review tickets and review sync
+
+- Date / status: 2026-10-03 — DONE on branch, verified; **needs Harry's review before merge**
+- Owner: Harry (adapter area and merge reviewer); prototype by Tevin
+- Risk: **BIG** — changes the action-execution path for `CREATE_REVIEW_TICKET` and review sync: the worker
+  makes external HTTP calls (up to ~5 per review sync, 3 s connect / 5 s read each) and stores non-UUID
+  ticket IDs. Mitigation: off by default (`CRM_PROVIDER=mock` keeps today's behaviour), idempotency records,
+  fault profiles, retries and delivery states unchanged and still in Resolve.
+- Files: `backend/resolve/providers/crm.py` (new port), `backend/resolve/providers/hubspot.py` (new),
+  `backend/resolve/services/operations.py`, `backend/resolve/app/config.py`, `backend/resolve/app/main.py`,
+  `.env.example`, `docs/contracts.md` (CRM section, marked proposed), `README.md`, `docs/plans/hubspot-crm.md`.
+- What / why: accepted human-review handoffs create a HubSpot ticket (unique `resolve_operation_id`, a retry
+  after a lost response finds the same ticket); agent review updates add one tagged note per review event and
+  move the pipeline stage. Mock path unchanged. Conflict resolved against main's retired-run fence
+  (`a4223df`/`07823b2`): the fence is checked **before** the HubSpot call too; if the run is retired after
+  HubSpot already created the ticket, the ticket is recorded instead of claiming "no change was made".
+- Requested by: HubSpot CRM plan (not a CB entry).
+- Verification:
+  - Unit: `tests/test_hubspot_crm.py` 24 passed (fake HubSpot via `httpx.MockTransport`).
+  - PostgreSQL (disposable, `sh scripts/run_db_tests.sh`, own container on 55435): all 14 opt-in files pass,
+    0 skips, incl. `test_hubspot_writer_postgres_integration.py` 6 passed (fake HubSpot + real sandbox role).
+  - Browser, mock CRM, local stack on a disposable DB: D balance complaint → review offered → accepted → seeded
+    one-shot CRM outage showed UNKNOWN then SUCCEEDED with a mock ticket → dashboard Delivered, start review
+    → "Synced to ticket".
+  - Live, real HubSpot (team account, synthetic data): A complaint → customer asked for a person → accepted →
+    HubSpot ticket `338730627792` created; dashboard shows "HubSpot ticket ID" + working "Open in HubSpot"
+    link; start review → Synced; API read-back: stage IN_REVIEW, tagged review note present, case/queue/
+    evidence properties correct.
+  - Live, second run (2026-10-04): Singlish D complaint answered in Singlish → review accepted → HubSpot ticket
+    `338552685274` → agent note synced → review closed as NEEDS_OPERATOR_FOLLOWUP → synced; both sync jobs
+    SYNCED on attempt 1; API read-back: stage CLOSED, review version 6, both tagged notes present.
+  - Not verified here: multi-worker lease overrun (known limit), HubSpot outage on the live account.
+- Commit: `54a4b58`.
+
+### CE-006 — Review sync in progress shown as PENDING instead of a 500
+
+- Date / status: 2026-10-03 — DONE (Jayith's `eff54ce` from `tevin/hubspot-crm`, cherry-picked as `b4c0dc3`)
+- Owner: Jayith (author); file owner Harry (`services/review.py`)
+- Risk: **SMALL** — maps the job-table status RUNNING to the API's PENDING; no schema or rule change.
+- Files: `backend/resolve/services/review.py`, `tests/test_review_models.py`.
+- What / why: HubSpot calls take 1–2 s and overlap the dashboard's 5 s refresh; RUNNING failed response
+  validation (500). Additive conflict with main's `REVIEW_STATUS_TEXT` resolved by keeping both.
+- Verification: unit 3 passed; browser live HubSpot run showed "Sync pending" then "Synced to ticket" with
+  no 500 while the sync was in flight.
+- Commit: `b4c0dc3`.
+
+### CE-007 — `facade.propose_escalation` breaks a chat review request (defect, engine unchanged)
+
+- Date / status: 2026-10-03 — PROPOSED (worked around in the chatbot by CB-005; engine not changed)
+- Owner: Harry
+- Risk of the proposed fix: **MEDIUM** — facade signature/behaviour of the escalation route.
+- Files: `backend/resolve/services/facade.py` `propose_escalation` (from `7bcc769`).
+- What / why: it calls `UUID(request_key)` and writes the conversation's dialogue state itself. That suits the
+  case-panel route (`POST /cases/{id}/escalations`, UUID `Idempotency-Key`), but the chat passes its
+  deterministic non-UUID command key and owns the dialogue state during a turn. On `main`, "I want a real
+  person" after a case returns **500** (`ValueError: badly formed hexadecimal UUID string`); reproduced in the
+  browser on this branch before CB-005. Proposal: keep the dialogue-state write on the HTTP route only (or
+  accept non-UUID keys and skip the write when called by the conversation).
+- Verification: real-facade PostgreSQL regression `test_customer_review_request_reaches_real_facade_with_reason`
+  fails against main's adapter and passes with CB-005.
+- Commit: none (engine).
+
+### CE-008 — Agent dashboard "Open in HubSpot" link and CRM labels
+
+- Date / status: 2026-10-03 — DONE on branch; **for Jayith's review**
+- Owner: Jayith
+- Risk: **SMALL** — display only; optional `VITE_CRM_NAME` / `VITE_CRM_TICKET_URL` (HTTPS template with
+  `{id}`); without them the card is unchanged.
+- Files: `frontend/src/routes/agent/CaseTabs.tsx`, `frontend/src/vite-env.d.ts`, `frontend/.env.example`.
+- Verification: `npm run typecheck` pass; lint exit 0 with the 4 existing warnings; browser: link text
+  "Open in HubSpot", hubspot.com host, URL ends with the ticket ID; mock run shows the unchanged "Ticket ID".
+- Commit: `54a4b58`.
+
+### CE-009 — Chat input race and 24 Sinhala/Tamil labels
+
+- Date / status: 2026-10-03 — DONE on branch; **for Jayith's review**
+- Owner: Jayith
+- Risk: **SMALL** — the message box is disabled until the conversation exists; labels are additive
+  machine drafts marked for fluent review (no duplicate keys with main's sign-in string).
+- Files: `frontend/src/routes/customer/ChatShell.tsx`, `frontend/src/i18n/messages.ts`.
+- Verification: typecheck pass; key-count check 208/208/208, no duplicates; browser chat used normally.
+  Mock Playwright suite not rerun on this branch.
+- Commit: `2d0c8ce`.
+
+### CE-010 — Local database and HubSpot tooling scripts
+
+- Date / status: 2026-10-03 — DONE on branch
+- Owner: Harry (ops scripts); Tevin wrote them
+- Risk: **SMALL** — developer scripts only; no runtime code.
+- Files: `scripts/dev_db.sh`, `scripts/run_db_tests.sh`, `scripts/demo_faults.py`, `scripts/hubspot_setup.py`.
+- What / why: disposable PostgreSQL per test file (own container/port, never the shared 55432 DB or the app's
+  DB), fault control for demos, HubSpot setup/spike. Fixed for main: every `database/*.sh` init script is made
+  executable in the temporary copy and readiness waits for main's `99-ready.sh` marker (the old script
+  failed on main with "bad interpreter"); `run_db_tests.sh` now also runs `TURN_RECOVERY_DATABASE_URL` tests.
+- Verification: `run_db_tests.sh` runs all 14 opt-in files, each on a fresh database (results in CE-005); `dev_db.sh reset` reaches
+  `0011_turn_recovery (head)`.
+- Commit: `54a4b58`.
+
+### CE-011 — CRM-branch engine changes NOT ported (Harry to decide)
+
+- Date / status: 2026-10-03 — PROPOSED (not on this branch)
+- Owner: Harry
+- Risk: **BIG** — business policy and fixture data.
+- What: from `tevin/hubspot-crm` 3120d4e/61d8506, kept main's version instead:
+  - Scenario A offers `DEACTIVATE_VAS` before the review on a SUFFICIENT balance ledger with a VAS charge, and
+    a stable sort puts the VAS stop first (facade). Not needed for the CRM path; changes eligibility.
+  - Fixture opening snapshots moved from 2 Oct 08:00 to 1 Oct 00:00 (`database/seed.sql`). In this run the
+    default 00:00–12:00 window for A still reported the starting balance as not available, consistent with
+    the CRM branch finding (A's armed late/duplicate-posting faults were also active, so not isolated).
+  - Voice binding check comparing conversation IDs by string value (facade). Main's disposable-DB Voice tests
+    pass without it.
+  - Main already fixed differently (kept main's): proposal `KeyError: 'price_minor'`, provisional-ledger
+    SUFFICIENT upgrade, `propose_escalation` investigation filter, `turn_claims` mapping, confirmation
+    `simulation` flag, `escalation_reason` column, and a default reason for Resolve-offered reviews.
+- Verification: n/a. Commit: none.
+
+### CE-012 — Link each HubSpot review ticket to a synthetic customer contact
+
+- Date / status: 2026-10-04 — DONE on branch; verified unit, PostgreSQL and **live** (contact scopes added by
+  Tevin; setup run; see the live line below)
+- Owner: Harry (adapter area, contract approval); built by Tevin
+- Risk: **MEDIUM** — changes which fields leave Resolve (contract updated first) and adds HubSpot calls to the
+  handoff. No schema, permission or business-rule change; mock CRM unaffected; contact problems never fail a
+  ticket.
+- Files: `docs/contracts.md` (CRM section, configuration table), `backend/resolve/providers/crm.py`
+  (`CrmCustomer`), `backend/resolve/providers/hubspot.py` (contact find/create, ticket link,
+  `verify_contacts`), `backend/resolve/services/operations.py` (reads the customer from `sandbox.customers`),
+  `backend/resolve/app/main.py` (separate startup warning), `scripts/hubspot_setup.py` (contact properties,
+  contact readiness in `check`), `README.md`, tests below.
+- What / why: in a CRM a ticket belongs to a customer. Before creating a ticket Resolve finds or creates the
+  customer's HubSpot contact and links the ticket to it (HubSpot-defined type 16), so an agent sees who the
+  problem is about and every ticket for that customer.
+  - Fields sent: first/last name split from the synthetic `display_name`, `resolve_line_alias` (unique lookup
+    key), `resolve_customer_id`, `resolve_region`, `resolve_preferred_language`, `resolve_data_source=
+    SYNTHETIC_DEMO`. Never phone, e-mail, balance or transcripts.
+  - Keyed on the line alias, not the customer UUID: every fixture reset issues new customer UUIDs, so a UUID
+    key would duplicate "Ruwan" after each reset. A real deployment would link to the operator CRM's existing
+    customer by its own ID and send no personal fields.
+  - Failure rules: HubSpot refusing contacts (missing scopes or properties) → ticket created unlinked plus a
+    warning with the error code; provider-unavailable in the contact step → handoff retried (no ticket exists
+    yet); link failure after the ticket exists → warning only, handoff stays delivered.
+- Verification:
+  - Unit (fake HubSpot): `tests/test_hubspot_crm.py` 33 passed (9 new: allowed fields only, one contact per
+    customer across tickets, retry re-uses contact and ticket, duplicate-create resolves to the existing
+    contact, missing scopes still deliver the ticket, contact outage creates no ticket, link failure keeps the
+    handoff delivered, no customer → no contact calls, readiness check codes). Full default suite 514 passed,
+    49 skipped.
+  - PostgreSQL (disposable, `run_db_tests.sh`): all 14 files pass, 0 skips; new writer test checks the runner
+    sends exactly the seeded customer's synthetic fields and links the ticket. The revoked-key test now models
+    a key refused on every call (it previously failed only the first call, which is now the contact lookup).
+  - Live HubSpot: the current Service Key returns **403 for contacts** (tickets fine). Startup logs
+    `CONTACT_CRM_AUTH_REJECTED`; a live probe still created ticket `338549094118` unlinked (archived right
+    after).
+  - Live, after Tevin added the contact scopes: `hubspot_setup.py check` → contacts "access OK, properties
+    missing"; `properties` created the five contact properties (`resolve_line_alias` unique); `check` →
+    "ready"; restart showed no contact warning. Browser chat as customer A → review accepted → ticket
+    `338633592538` linked (type 16) to new contact `563434818271` Nimali Perera, SIM-LK-0001, WEST, `si`,
+    `SYNTHETIC_DEMO`, e-mail and phone empty. Second ticket for the same customer reusing the contact is
+    unit-tested, not yet seen live.
+- To finish (whoever has HubSpot admin access): add `crm.objects.contacts.read`, `crm.objects.contacts.write`,
+  `crm.schemas.contacts.read`, `crm.schemas.contacts.write` to the Service Key (or create a new key with them
+  and replace `HUBSPOT_ACCESS_TOKEN`); run `python scripts/hubspot_setup.py check` (expects "Customer
+  contacts: ready" after the next step) and `python scripts/hubspot_setup.py properties`; restart the backend
+  (no contact warning at startup); run one chat handoff and confirm the ticket shows the contact in HubSpot.
+  Earlier tickets are not back-filled.
+- Commit: `4074776`.
+
+### CE-013 — Voice mock test opened the landing page instead of chat
+
+- Date / status: 2026-10-04 — DONE on `integration/voice-crm` (integration fix, needs owner ack)
+- Owner: Jayith (frontend tests) / Harry (Voice test author)
+- Risk: SMALL — one test navigation line; no app code.
+- Files: `frontend/e2e/chat.mock.spec.ts`
+- What / why: `voice_test` added "spoken yes keeps the call offer visible…" opening `/`; on `main` the
+  landing page now owns `/` and chat moved to `/chat`, so the test could not find the chat box after the
+  merge. It now opens `/chat` like the neighbouring chat tests.
+- Requested by: integration of `voice_test` into `main` (no CB)
+- Verification: mock Playwright **1 failed / 31 passed** before, **32/32 passed** after (`npm run test:e2e`,
+  local Chromium via `E2E_CHROMIUM_EXECUTABLE`).
+
+### CE-014 — Voice: Sinhala recognition hints and late-tool reply stall (hutch_zeptazvoice)
+
+- Date / status: 2026-10-04 — DONE on `hutch_zeptazvoice` `integration/voice-crm` `cf2c87b` (needs Harry's review)
+- Owner: Harry (external Voice runtime)
+- Risk: MEDIUM — changes when the Voice runtime starts streaming a reply after a late Gemini tool call, and
+  the provider receive loop after timeouts. No Resolve, consent or proposal path changed; button-only consent
+  is unchanged.
+- Files (Voice repo): `app.py`, `core/system/voice_runtime_config.py`, `tests/test_hutch_runtime.py`,
+  `tests/test_voice_runtime_config.py`, `.env.example`, `context.md`.
+- What / why: (1) Gemini Live input transcription had no language hint, so short Sinhala turns came back as
+  Japanese/Spanish; it now hints `si-LK,en-US,ta-IN` (`GEMINI_LIVE_INPUT_LANGUAGES`) plus telecom vocabulary.
+  (2) A late tool call made Voice throw away Gemini's grounded continuation and re-request speech only after
+  it finished (8.6–26 s of silence, reported as "buffering"); the continuation now streams. (3) Timeout paths
+  started a second concurrent provider `receive()` → `ConcurrencyError` and a dead call; they now keep the
+  pending read. Harry's unpushed v4 notes mention a fix for (3); reconcile when it lands.
+- Requested by: CB-007 live Sinhala call testing
+- Verification: Voice suite 75/75 (new tests fail on the old code); live signed probe 3 calls × 3 turns, 9/9
+  spoken, 0 errors, late-tool first PCM 0.58–0.67 s after the Resolve result (was 9.4 s / 26 s / failure).

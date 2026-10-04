@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from conftest import ACCOUNT_A, ACCOUNT_D, Harness, customer, details, text
+from conftest import ACCOUNT_A, ACCOUNT_D, ACCOUNT_F, Harness, customer, details, text
 from fakes import FakeModel, example, extraction
 from resolve.conversation.dto import Channel, KnowledgeCard, ReceiptReference, VoiceConsentEvidence
 from resolve.conversation.errors import ResolveError
@@ -56,12 +56,44 @@ def test_clear_spoken_no_is_recorded_as_decline(hm: Harness) -> None:
     assert hm.facade.operations == {}
 
 
-def test_spoken_yes_without_presentation_evidence_asks_again(hm: Harness) -> None:
+def test_spoken_yes_without_presentation_evidence_directs_to_buttons(hm: Harness) -> None:
     hm.model.on("yes", YES)
     ctx, conv, _ = voice_call(hm)
     result = hm.send(ctx, spoken(hm, conv, "yes"))
-    assert result.pending_question.code == "CONFIRM_ACTION" and "say clearly" in result.reply_text
+    assert result.pending_question.code == "CONFIRM_ACTION"
+    assert "tap 'Yes, go ahead' or 'No, leave it'" in result.reply_text
+    assert "Nothing has changed yet" in result.reply_text
     assert hm.facade.calls["confirm_action"] == 0
+    assert hm.state(conv).pending_proposal is not None
+
+
+def test_initial_voice_offer_does_not_invite_spoken_confirmation(hm: Harness) -> None:
+    ctx = customer(ACCOUNT_A, Channel.VOICE)
+    conv = hm.open(ctx)
+    result = hm.send(ctx, hm.turn(conv, details(), channel=Channel.VOICE))
+    assert "Shall I go ahead" not in result.reply_text
+    assert "press 'Yes, go ahead' or 'No, leave it'" in result.reply_text
+    assert "Nothing will change until you press" in result.reply_text
+
+
+def test_voice_follow_up_reminds_customer_to_use_buttons(hm: Harness) -> None:
+    hm.model.on("Is it still open?", extraction(intent="FOLLOW_UP"))
+    ctx, conv, proposal = voice_call(hm)
+    result = hm.send(ctx, spoken(hm, conv, "Is it still open?"))
+    assert "on-screen 'Yes, go ahead' or 'No, leave it' buttons" in result.reply_text
+    assert hm.state(conv).pending_proposal.proposal_id == proposal.id
+
+
+def test_repeated_spoken_yes_never_claims_action_or_asks_for_more_spoken_yes(hm: Harness) -> None:
+    hm.model.on("yes go ahead", YES)
+    ctx, conv, proposal = voice_call(hm)
+    for _ in range(3):
+        result = hm.send(ctx, spoken(hm, conv, "yes go ahead"))
+        assert result.pending_question.code == "CONFIRM_ACTION"
+        assert "tap 'Yes, go ahead' or 'No, leave it'" in result.reply_text
+        assert hm.state(conv).pending_proposal.proposal_id == proposal.id
+    assert hm.facade.calls["confirm_action"] == 0
+    assert hm.facade.operations == {}
 
 
 def test_spoken_yes_for_a_different_presentation_asks_again(hm: Harness) -> None:
@@ -176,3 +208,47 @@ def test_conflicting_evidence_still_allows_human_review(hm: Harness) -> None:
     result = hm.send(ctx, hm.turn(conv, text("I want a person")))
     assert next(c for c in result.cards if c.type == "confirmation").data.action_type == "CREATE_REVIEW_TICKET"
     assert hm.facade.escalation_reasons == ["Customer asked for a person to review this case."]
+
+
+def test_follow_up_offer_invalidated_by_the_finished_first_action_is_offered_again(h: Harness) -> None:
+    """F lists VAS stop then review. The review is offered while the VAS stop is still running; when
+    that finishes, Resolve invalidates the review proposal. Accepting it must not dead-end."""
+    ctx = customer(ACCOUNT_F)
+    conv = h.open(ctx)
+    offered = h.send(ctx, h.turn(conv, details("VAS_DISPUTE")))
+    first = next(c for c in offered.cards if c.type == "confirmation").data
+    assert first.action_type == "DEACTIVATE_VAS"
+    accepted = h.send(ctx, h.turn(conv, {"type": "action_decision", "proposal_id": str(first.id),
+                                         "proposal_hash": first.proposal_hash, "decision": "ACCEPT"}))
+    follow_up = next(c for c in accepted.cards if c.type == "confirmation").data
+    assert follow_up.action_type == "CREATE_REVIEW_TICKET"
+
+    h.facade.fail_next["confirm_action"] = ResolveError("PROPOSAL_INVALIDATED")
+    refreshed = h.send(ctx, h.turn(conv, {"type": "action_decision", "proposal_id": str(follow_up.id),
+                                          "proposal_hash": follow_up.proposal_hash, "decision": "ACCEPT"}))
+    again = next(c for c in refreshed.cards if c.type == "confirmation").data
+    assert again.action_type == "CREATE_REVIEW_TICKET" and again.id != follow_up.id
+    assert refreshed.reply_text.startswith("Things changed since that offer was made")
+    assert refreshed.pending_question.code == "CONFIRM_ACTION"
+
+    done = h.send(ctx, h.turn(conv, {"type": "action_decision", "proposal_id": str(again.id),
+                                     "proposal_hash": again.proposal_hash, "decision": "ACCEPT"}))
+    assert done.operation_ids
+
+
+def test_declining_a_requested_review_does_not_offer_the_same_review_again(hm: Harness) -> None:
+    """F lists the VAS stop, then the review. If the customer asks for a person while the review is
+    still a listed option and then declines it, the same review must not come straight back."""
+    hm.model.on("I want a person", extraction(intent="HUMAN_REQUEST"))
+    ctx = customer(ACCOUNT_F)
+    conv = hm.open(ctx)
+    offered = hm.send(ctx, hm.turn(conv, details("VAS_DISPUTE")))
+    assert next(c for c in offered.cards if c.type == "confirmation").data.action_type == "DEACTIVATE_VAS"
+    assert [c.action_type for c in hm.state(conv).pending_choices] == ["CREATE_REVIEW_TICKET"]
+    asked = hm.send(ctx, hm.turn(conv, text("I want a person")))
+    review = next(c for c in asked.cards if c.type == "confirmation").data
+    assert review.action_type == "CREATE_REVIEW_TICKET"
+    declined = hm.send(ctx, hm.turn(conv, {"type": "action_decision", "proposal_id": str(review.id),
+                                           "proposal_hash": review.proposal_hash, "decision": "DECLINE"}))
+    assert not [c for c in declined.cards if c.type == "confirmation"]
+    assert declined.pending_question is None
