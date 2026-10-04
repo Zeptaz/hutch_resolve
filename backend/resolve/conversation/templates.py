@@ -69,6 +69,8 @@ _EN: dict[str, str] = {
     "account_incomplete": "Some account information may not be up to date.",
     # Each value is a posted ledger line quoted from Resolve's calculation, e.g. "-LKR 60.00".
     "vas_charge_lines": "Value-added service charges posted in these records: {amounts}.",
+    # Each line is quoted from Resolve's ledger calculation; nothing is summed here.
+    "ledger_lines": "Posted in these records: opening balance {opening}; {lines}; recorded balance {closing}.",
     "account_services": "Value-added services on your line: {services}.",
     "account_no_services": "You have no value-added services on your line right now.",
     "service_renews": "{name} ({status}, renews automatically)",
@@ -173,6 +175,7 @@ ENGLISH: dict[str, dict[str, str]] = {
 NOT_LOCALIZED = frozenset({
     "default_escalation_reason", "package_selection_unavailable", "PACKAGE_ACTIVATION",
     "offer_action_voice", "other_options_voice", "offer_still_open_voice", "confirm_prompt_voice",
+    "ledger_lines",  # English until the SI/TA drafts gain a reviewed wording
 })
 LOCALES_DIR = Path(__file__).with_name("locales")
 REVIEWED = "REVIEWED"
@@ -257,6 +260,18 @@ def format_lkr(amount_minor: int) -> str:
     sign = "-" if amount_minor < 0 else ""
     rupees, cents = divmod(abs(amount_minor), 100)
     return f"{sign}LKR {rupees:,}.{cents:02d}"
+
+
+# Plain words for Resolve's ledger term labels; unknown labels fall back to lower-case words.
+LEDGER_LABELS_EN = {
+    "RECHARGE": "recharge", "PACKAGE_RENEWAL": "package renewal", "PACKAGE_PURCHASE": "package purchase",
+    "VAS_CHARGE": "value-added service charge", "RATED_USAGE": "usage charges",
+}
+
+
+def ledger_line(label: str, amount_minor: int) -> str:
+    name = LEDGER_LABELS_EN.get(label, label.replace("_", " ").lower())
+    return f"{name} {'+' if amount_minor > 0 else ''}{format_lkr(amount_minor)}"
 
 
 def format_time(value: datetime) -> str:

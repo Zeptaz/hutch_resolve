@@ -1244,6 +1244,15 @@ def _investigation_draft(
                    for term in calc.terms if term.label == "VAS_CHARGE"]
         if charges:
             findings.insert(0, t.text("vas_charge_lines", lang, amounts=", ".join(charges)))
+    elif inv.complaint_type is ComplaintType.BALANCE_RECHARGE:
+        # "Where did my money go?": read Resolve's ledger lines out in order, so a Voice caller (who has no
+        # calculation card) hears every posted recharge and deduction. Values are quoted, never summed.
+        ledger = next((calc for calc in inv.calculations if calc.unit == "LKR_MINOR" and calc.terms
+                       and calc.observed is not None), None)
+        if ledger is not None:  # after Resolve's conclusion, before the other findings
+            findings.insert(1, t.text("ledger_lines", lang, opening=t.format_lkr(ledger.opening),
+                                      lines="; ".join(t.ledger_line(term.label, term.value) for term in ledger.terms),
+                                      closing=t.format_lkr(ledger.observed)))
     limits = []
     if inv.evidence_state is EvidenceState.PARTIAL:
         missing = ", ".join(dict.fromkeys(t.missing_label(code, lang) for code in inv.missing)) or t.missing_label("unknown", lang)

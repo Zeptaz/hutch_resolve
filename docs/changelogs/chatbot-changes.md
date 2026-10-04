@@ -251,3 +251,20 @@ Voice consent prompts.
   "what VAS charges are on my account" → services list; "stop this VAS service" (STT heard "Indus") →
   VAS investigation with stop offer. Fluent Sinhala speaker retest still needed.
 - Core dependency: none.
+
+### CB-008 — "Why is my balance 450 after a 1000 reload?" never said where the money went
+
+- Date / status: 2026-10-04 — DONE on `integration/voice-crm`, verified
+- Risk: **LOW** — adds one quoted sentence to balance/recharge investigation replies; no routing, consent or
+  Resolve call changed; every number is copied from Resolve's calculation, none is computed.
+- Files: `conversation/service.py` (`_investigation_draft`), `conversation/templates.py` (`ledger_lines`,
+  `ledger_line`, English ledger labels; `ledger_lines` English-only until SI/TA wording is reviewed),
+  `tests/conversation/test_account_enquiry.py`.
+- What changed / why: a BALANCE_RECHARGE reply only said "the observed closing balance matches opening plus
+  posted entries"; the amounts were only on the calculation card, which a Voice caller never sees. The reply
+  now reads Resolve's ledger lines in order after its conclusion: opening balance, each posted recharge and
+  deduction, recorded balance.
+- Verification: unit 528 passed (2 new); PostgreSQL conversation files 22 + 6 passed; live chat replay of the
+  reported Sinhala message on SIM-LK-0001 lists recharge +1,000, renewal −499, VAS −60, usage −21, two demo
+  package purchases −49/−299, recorded LKR 72.00.
+- Core dependency: none.
