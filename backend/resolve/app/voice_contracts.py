@@ -79,6 +79,15 @@ class VoiceTurnResponse(StrictModel):
     end_session: bool = False
 
 
+class VoiceDecisionReplyRequest(StrictModel):
+    """Voice asks for Resolve's reply to a decision the caller tapped on screen, so it can speak it."""
+
+    binding_id: str
+    voice_session_id: str
+    event_id: str
+    proposal_id: str
+
+
 class VoiceEventRequest(StrictModel):
     binding_id: str
     voice_session_id: str

@@ -163,6 +163,7 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
       const result = await customerApi.sendMessage(conversationId, body)
       setCaption({ user: decision === 'ACCEPT' ? 'Yes, go ahead' : 'No, leave it', reply: result.reply_text })
       textDecisionPending.current = false
+      call.announceDecision(current.data.id) // Voice speaks Resolve's reply, e.g. that a review was requested
       setOffer((latest) => latest ? { ...latest, sending: false, error: null, retry: null } : null)
       await syncOperations(result.operation_ids)
     } catch (error) {

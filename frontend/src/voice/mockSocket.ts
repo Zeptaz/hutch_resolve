@@ -7,6 +7,7 @@ import type { VoiceSocket } from './socket'
 class MockVoiceSocket implements VoiceSocket {
   binaryType: BinaryType = 'arraybuffer'
   readyState: number = WebSocket.CONNECTING
+  readonly protocol = 'zeptaz-hutch-v4'
   onopen: (() => void) | null = null
   onmessage: ((event: { data: string | ArrayBuffer }) => void) | null = null
   onclose: ((event: { code: number; reason: string }) => void) | null = null
@@ -37,6 +38,8 @@ class MockVoiceSocket implements VoiceSocket {
       const accepted = !!reply && reply.id === message.response_id && reply.complete && !reply.played
       if (accepted) reply!.played = true
       this.emit({ type: 'playback_ack', response_id: message.response_id ?? '', accepted })
+    } else if (message.type === 'decision_recorded') {
+      void this.speakLatestReply()
     } else if (message.type === 'proposal_presented') {
       // Streamed speech cannot prove every term was heard; the real Voice service
       // also requires the on-screen buttons for a proposal decision.
@@ -76,6 +79,24 @@ class MockVoiceSocket implements VoiceSocket {
     } catch {
       this.emit({ type: 'error', code: 'resolve_unavailable', message: 'Continue by text.' })
     }
+  }
+
+  /** Like the Voice service: read Resolve's reply to the tapped decision and speak it. */
+  private async speakLatestReply() {
+    const conversation = await customerApi.getConversation(this.conversationId)
+    const latest = conversation.messages.findLast((m) => m.speaker === 'ASSISTANT')
+    if (!latest || this.readyState !== WebSocket.OPEN) return
+    const id = newId()
+    this.reply = { id, proposal: null, complete: false, played: false }
+    this.emit({ type: 'resolve_result', response_id: id, case_id: latest.result?.case_id ?? null, reply_text: latest.body,
+      pending_question: null, proposal: null, operation_status: null, end_session: false })
+    this.emit({ type: 'audio_start', response_id: id })
+    this.onmessage?.({ data: tone(latest.body) })
+    this.later(20, () => {
+      if (this.reply?.id !== id) return
+      this.reply.complete = true
+      this.emit({ type: 'audio_end', response_id: id })
+    })
   }
 
   interrupt() {

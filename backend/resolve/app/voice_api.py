@@ -26,6 +26,7 @@ from .voice_contracts import (
     VoiceSessionRequest,
     VoiceTurnRequest,
     VoiceTurnResponse,
+    VoiceDecisionReplyRequest,
 )
 from .voice_security import body_digest, canonical_json, verify_headers
 from backend.resolve.services.voice_consent import VoiceConsentEvidence
@@ -330,6 +331,26 @@ def _presentation_response(engine, *, conversation_id: UUID, binding_id: UUID,
     return str(result.get("response_id")) if result.get("response_id") else None
 
 
+# A tapped decision is spoken only while it is fresh; an older reply is left on screen.
+DECISION_REPLY_WINDOW = timedelta(minutes=10)
+
+
+def _decision_reply(engine, *, conversation_id: UUID, proposal_id: UUID, now: datetime) -> dict[str, Any] | None:
+    """Resolve's recorded reply to the customer's on-screen decision on this proposal, if recent."""
+    with engine.connect() as connection:
+        row = connection.execute(text("""
+            SELECT result FROM resolve.turn_claims
+            WHERE conversation_id=:conversation AND completed_at IS NOT NULL AND completed_at>=:since
+              AND input_payload->'input'->>'type'='action_decision'
+              AND input_payload->'input'->>'proposal_id'=:proposal
+            ORDER BY completed_at DESC,client_turn_id DESC LIMIT 1
+        """), {"conversation": conversation_id, "proposal": str(proposal_id),
+              "since": now - DECISION_REPLY_WINDOW}).scalar_one_or_none()
+    if row is None:
+        return None
+    return json.loads(row) if isinstance(row, str) else row
+
+
 def _scoped_conversation_version(engine, *, conversation_id: UUID, context: AuthContext) -> int | None:
     with engine.connect() as connection:
         return connection.execute(text("""
@@ -585,6 +606,27 @@ def build_voice_router() -> APIRouter:
             await asyncio.to_thread(_revoke_binding, engine, binding_id)
             logger.warning("Voice session provisioning failed (%s)", type(exc).__name__)
             raise ResolveError(503, "VOICE_GRANT_OUTCOME_UNKNOWN", "Voice setup outcome is unknown; start a new call", True) from exc
+
+    @router.post("/integrations/voice/decision-replies", response_model=VoiceTurnResponse, tags=["Voice integration"])
+    async def read_decision_reply(request: Request) -> dict[str, Any]:
+        """Read-only: the reply Resolve already gave to a decision tapped during this call, for Voice to speak.
+
+        It never records a decision or runs a turn; the browser's own action_decision did that. Only the
+        binding's own conversation is searched, and only for a decision completed in the last ten minutes.
+        """
+        body = await _signed_body(request)
+        event_id = _verify_signed_body(request, body)
+        payload = _parse_signed_model(VoiceDecisionReplyRequest, body, event_id)
+        engine = _engine(request)
+        binding_id = _parse_uuid(payload.binding_id, not_found=True)
+        proposal_id = _parse_uuid(payload.proposal_id)
+        _, conversation_id = await asyncio.to_thread(
+            _binding_context, engine, binding_id, payload.voice_session_id, getattr(request.state, "request_id", None))
+        result = await asyncio.to_thread(
+            _decision_reply, engine, conversation_id=conversation_id, proposal_id=proposal_id, now=datetime.now(UTC))
+        if result is None:
+            raise ResolveError(404, "NOT_FOUND", "No recent decision reply for this proposal")
+        return _voice_response(result)
 
     @router.post("/integrations/voice/turns", response_model=VoiceTurnResponse, tags=["Voice integration"])
     async def receive_voice_turn(request: Request) -> dict[str, Any]:
