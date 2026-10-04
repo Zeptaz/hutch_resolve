@@ -272,3 +272,16 @@ code was kept wherever main had already fixed the same defect. Nothing was pushe
   (no contact warning at startup); run one chat handoff and confirm the ticket shows the contact in HubSpot.
   Earlier tickets are not back-filled.
 - Commit: `4074776`.
+
+### CE-013 — Voice mock test opened the landing page instead of chat
+
+- Date / status: 2026-10-04 — DONE on `integration/voice-crm` (integration fix, needs owner ack)
+- Owner: Jayith (frontend tests) / Harry (Voice test author)
+- Risk: SMALL — one test navigation line; no app code.
+- Files: `frontend/e2e/chat.mock.spec.ts`
+- What / why: `voice_test` added "spoken yes keeps the call offer visible…" opening `/`; on `main` the
+  landing page now owns `/` and chat moved to `/chat`, so the test could not find the chat box after the
+  merge. It now opens `/chat` like the neighbouring chat tests.
+- Requested by: integration of `voice_test` into `main` (no CB)
+- Verification: mock Playwright **1 failed / 31 passed** before, **32/32 passed** after (`npm run test:e2e`,
+  local Chromium via `E2E_CHROMIUM_EXECUTABLE`).

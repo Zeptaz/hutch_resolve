@@ -41,7 +41,7 @@ test('a signed-in customer can open the call panel before any proposal', async (
 })
 
 test('spoken yes keeps the call offer visible until its button records the decision', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/chat')
   await expect(page.getByRole('textbox').last()).toBeEnabled()
   await page.waitForLoadState('networkidle')
   await mockControl(page, 'continueAsDemoLine')
