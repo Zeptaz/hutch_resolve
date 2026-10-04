@@ -23,3 +23,16 @@ def test_cookie_secure_false_is_allowed_for_localhost_development(monkeypatch: p
     _base_environment(monkeypatch, origins="http://localhost:5173", secure="false")
 
     assert Settings.from_environment().cookie_secure is False
+
+
+def test_seeded_faults_are_off_unless_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    _base_environment(monkeypatch, origins="http://localhost:5173", secure="false")
+    monkeypatch.delenv("SANDBOX_FAULTS_ENABLED", raising=False)
+    assert Settings.from_environment().sandbox_faults_enabled is False
+
+    monkeypatch.setenv("SANDBOX_FAULTS_ENABLED", "true")
+    assert Settings.from_environment().sandbox_faults_enabled is True
+
+    monkeypatch.setenv("SANDBOX_FAULTS_ENABLED", "sometimes")
+    with pytest.raises(RuntimeError, match="SANDBOX_FAULTS_ENABLED must be true or false"):
+        Settings.from_environment()

@@ -124,11 +124,12 @@ class BalanceProvider(Protocol):
 class PostgresSandboxProvider(AccountProvider, BalanceProvider):
     """One PostgreSQL adapter behind distinct in-process provider ports."""
 
-    def __init__(self, engine: Engine, fault_engine: Engine | None = None) -> None:
+    def __init__(self, engine: Engine, fault_engine: Engine | None = None, *, faults_enabled: bool = True) -> None:
         self._engine = engine
         # Fault profiles are operator/test controls. Consume them only through
-        # the explicitly configured sandbox writer; normal reads stay read-only.
-        self._fault_engine = fault_engine
+        # the explicitly configured sandbox writer, and only when faults are enabled;
+        # normal reads stay read-only.
+        self._fault_engine = fault_engine if faults_enabled else None
 
     def _take_fault(self, sandbox_id: UUID, account_id: UUID, provider: str,
                     operation: str) -> dict[str, Any] | None:

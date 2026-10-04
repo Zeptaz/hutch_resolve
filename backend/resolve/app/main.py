@@ -90,7 +90,8 @@ def create_app(
         sandbox_engine = sandbox_database.engine if sandbox_database is not None else None
         provider = account_provider
         if provider is None and hasattr(active_database, "engine"):
-            provider = PostgresSandboxProvider(active_database.engine, sandbox_engine)
+            provider = PostgresSandboxProvider(active_database.engine, sandbox_engine,
+                                               faults_enabled=active_settings.sandbox_faults_enabled)
         application.state.account_provider = provider
         application.state.resolve_facade = resolve_facade or (
             ResolveFacade(active_database.engine, provider, cursor_secret=active_settings.app_secret_key,
@@ -134,7 +135,8 @@ def create_app(
                                    "linked contact. Run: python scripts/hubspot_setup.py check",
                                    ", ".join(contact_problems))
             logger.info("CRM provider for review tickets: %s", "hubspot" if crm else "mock")
-            runner = OperationRunner(active_database.engine, sandbox_engine, crm)
+            runner = OperationRunner(active_database.engine, sandbox_engine, crm,
+                                     faults_enabled=active_settings.sandbox_faults_enabled)
             application.state.operation_runner = runner
             operation_task = asyncio.create_task(_operation_loop(runner))
         # An injected facade is used by tests and embedded integrations which own

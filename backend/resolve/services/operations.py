@@ -61,11 +61,14 @@ class MockSandboxWriter:
     sandbox.tickets. Idempotency records, fault profiles and recovery stay here unchanged.
     """
 
-    def __init__(self, engine: Engine, crm: RemoteTicketCrm | None = None) -> None:
+    def __init__(self, engine: Engine, crm: RemoteTicketCrm | None = None, *, faults_enabled: bool = True) -> None:
         self._engine = engine
         self._crm = crm
+        self._faults_enabled = faults_enabled
 
     def _fault(self, sandbox_id: UUID, provider: str, operation: str, account_id: UUID) -> str | None:
+        if not self._faults_enabled:
+            return None
         with self._engine.begin() as connection:
             line_alias = connection.execute(text("""
                 SELECT line_alias FROM sandbox.accounts WHERE sandbox_id=:sandbox AND id=:account
@@ -420,9 +423,9 @@ class MockSandboxWriter:
 
 class OperationRunner:
     def __init__(self, resolve_engine: Engine, sandbox_engine: Engine,
-                 crm: RemoteTicketCrm | None = None) -> None:
+                 crm: RemoteTicketCrm | None = None, *, faults_enabled: bool = True) -> None:
         self._resolve = resolve_engine
-        self._writer = MockSandboxWriter(sandbox_engine, crm)
+        self._writer = MockSandboxWriter(sandbox_engine, crm, faults_enabled=faults_enabled)
 
     def run_once(self) -> bool:
         if self._run_review_sync_once():
