@@ -268,7 +268,8 @@ export function ChatShell({ session, onDemoLogin }: {
   // thread until answered; a decided offer turns into a record without buttons.
   const latestReplyId = conversation?.messages.findLast((m) => m.speaker === 'ASSISTANT')?.id
   const keepsInline = (messageId: string, card: Card) =>
-    (card.type === 'confirmation' && ['open', 'submitting'].includes(proposalState(card.data).kind)) ||
+    (card.type === 'confirmation' && ['open', 'submitting'].includes(proposalState(card.data).kind) &&
+      Date.parse(card.data.expires_at) > Date.now()) || // an expired offer is a record too
     (card.type === 'package_catalogue' && messageId === latestReplyId)
   const recordsByMessage = new Map<string, ChatRecord[]>()
   for (const m of conversation?.messages ?? []) {
