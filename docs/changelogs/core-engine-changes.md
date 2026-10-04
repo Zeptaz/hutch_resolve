@@ -285,3 +285,22 @@ code was kept wherever main had already fixed the same defect. Nothing was pushe
 - Requested by: integration of `voice_test` into `main` (no CB)
 - Verification: mock Playwright **1 failed / 31 passed** before, **32/32 passed** after (`npm run test:e2e`,
   local Chromium via `E2E_CHROMIUM_EXECUTABLE`).
+
+### CE-014 — Voice: Sinhala recognition hints and late-tool reply stall (hutch_zeptazvoice)
+
+- Date / status: 2026-10-04 — DONE on `hutch_zeptazvoice` `integration/voice-crm` `cf2c87b` (needs Harry's review)
+- Owner: Harry (external Voice runtime)
+- Risk: MEDIUM — changes when the Voice runtime starts streaming a reply after a late Gemini tool call, and
+  the provider receive loop after timeouts. No Resolve, consent or proposal path changed; button-only consent
+  is unchanged.
+- Files (Voice repo): `app.py`, `core/system/voice_runtime_config.py`, `tests/test_hutch_runtime.py`,
+  `tests/test_voice_runtime_config.py`, `.env.example`, `context.md`.
+- What / why: (1) Gemini Live input transcription had no language hint, so short Sinhala turns came back as
+  Japanese/Spanish; it now hints `si-LK,en-US,ta-IN` (`GEMINI_LIVE_INPUT_LANGUAGES`) plus telecom vocabulary.
+  (2) A late tool call made Voice throw away Gemini's grounded continuation and re-request speech only after
+  it finished (8.6–26 s of silence, reported as "buffering"); the continuation now streams. (3) Timeout paths
+  started a second concurrent provider `receive()` → `ConcurrencyError` and a dead call; they now keep the
+  pending read. Harry's unpushed v4 notes mention a fix for (3); reconcile when it lands.
+- Requested by: CB-007 live Sinhala call testing
+- Verification: Voice suite 75/75 (new tests fail on the old code); live signed probe 3 calls × 3 turns, 9/9
+  spoken, 0 errors, late-tool first PCM 0.58–0.67 s after the Resolve result (was 9.4 s / 26 s / failure).

@@ -101,4 +101,5 @@ Changes belong to `hutch_resolve/voice_test` and `hutch_zeptazvoice/voice_test2`
 - [x] Integrated `main` + `tevin/crm-integration` + Harry's `voice_test` on `integration/voice-crm` (Voice repo: `voice_test2`). Resolved the five `conversation/service.py` conflicts by keeping chatbot locale/paragraph/rewrite handling and Harry's Voice channel prompts. CB-006 pins `confirm_prompt_voice` to English.
 - [x] Verification: Resolve **523 passed, 49 skipped**; PostgreSQL opt-in **14/14 files**; Voice **71**; frontend typecheck/build; mock Playwright 32/32 (CE-013 test route fix); live chat → review ticket → dashboard; signed two-turn Voice probe through real Gemini Live. Details in root `context.md`.
 - [x] CB-007 `extract-v7`: VAS remove/what-are questions in Sinhala/Tamil route correctly; eval 67/71 → 71/71.
+- [x] CE-014 Voice fixes (Sinhala hints, late-tool stall, ConcurrencyError): 9/9 live turns, first audio 0.6 s after Resolve.
 - [ ] Physical microphone call; Harry's unpushed v4/decision-readback code; Harry review of CB-004..006.
