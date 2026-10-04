@@ -67,12 +67,32 @@ export default function LandingPage() {
 
 /* ---------- navigation feel ---------- */
 
-/** Section links glide instead of jumping, only while this page is shown. */
+/**
+ * Section links glide instead of jumping, only while this page is shown. The page scrolls them itself:
+ * a plain #hash link adds a history entry, and the router's ScrollRestoration answers that popstate
+ * by restoring the top of the page, cancelling the jump.
+ */
 function useSmoothAnchors() {
   useEffect(() => {
     const html = document.documentElement
     html.classList.add('smooth-anchors')
-    return () => html.classList.remove('smooth-anchors')
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+      const link = (e.target as Element | null)?.closest?.('a[href^="#"]')
+      const hash = link?.getAttribute('href')
+      const target = hash && hash.length > 1 ? document.getElementById(hash.slice(1)) : null
+      if (!target) return
+      e.preventDefault()
+      if (hash === '#top') window.scrollTo({ top: 0 })
+      else target.scrollIntoView()
+      // Keep the router's entry so Back still leaves the page rather than stepping through sections.
+      history.replaceState(history.state, '', hash)
+    }
+    document.addEventListener('click', onClick)
+    return () => {
+      html.classList.remove('smooth-anchors')
+      document.removeEventListener('click', onClick)
+    }
   }, [])
 }
 
