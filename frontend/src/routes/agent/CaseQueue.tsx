@@ -4,10 +4,11 @@ import { NavLink, useMatch, useNavigate } from 'react-router'
 import { agentApi } from '@/api/endpoints'
 import type { CaseQueueRow, ComplaintType, DeliveryState, EvidenceState, QueueFilters, ReviewStatus } from '@/api/types'
 import { EmptyState, ErrorState, LoadingState } from '@/components/states'
-import { DeliveryBadge, EvidenceBadge, ReviewBadge } from '@/components/StatusBadge'
+import { DeliveryBadge, EvidenceBadge, ReviewBadge, StatusBadge } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { CLASSIFICATION_LABEL, classificationTone } from './OutcomeSummary'
 import { formatDateTime, formatTime, humanize } from '@/lib/format'
 import { COMPLAINT_LABEL } from '@/lib/labels'
 import { cn } from '@/lib/utils'
@@ -31,8 +32,10 @@ const DELIVERY: DeliveryState[] = ['PENDING', 'DELIVERED', 'FAILED', 'REVIEW_REQ
 /** Why a row deserves a second look. Strong colour is kept for these exceptions only. */
 function attention(row: CaseQueueRow): { tone: 'danger' | 'warning'; reason: string } | null {
   if (row.review_status === 'CLOSED') return null
+  if (row.classification === 'UNEXPLAINED') return { tone: 'danger', reason: 'Unexplained money' }
   if (row.evidence_state === 'CONFLICTING') return { tone: 'danger', reason: 'Evidence conflicts' }
   if (row.delivery_state === 'FAILED' || row.delivery_state === 'REVIEW_REQUIRED') return { tone: 'danger', reason: 'Ticket not delivered' }
+  if (row.classification === 'PARTIALLY_EXPLAINED') return { tone: 'warning', reason: 'Partly unexplained' }
   if (row.evidence_state === 'PARTIAL') return { tone: 'warning', reason: 'Evidence incomplete' }
   if (row.delivery_state === 'PENDING') return { tone: 'warning', reason: 'Ticket delivery pending' }
   return null
@@ -352,6 +355,7 @@ function QueueRow({ row, index, selected, onStep }: { row: CaseQueueRow; index: 
         </div>
         <div className="flex flex-wrap gap-1.5">
           <ReviewBadge status={row.review_status} />
+          {row.classification && <StatusBadge tone={classificationTone[row.classification]}>{CLASSIFICATION_LABEL[row.classification]}</StatusBadge>}
           <EvidenceBadge state={row.evidence_state} />
           <DeliveryBadge state={row.delivery_state} />
         </div>

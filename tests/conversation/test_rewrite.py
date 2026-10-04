@@ -102,7 +102,7 @@ def test_financial_case_rewrite_that_changes_an_amount_is_rejected() -> None:
     ctx = customer(ACCOUNT_A)
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela")))
-    assert "reconcile to LKR 420" in result.reply_text and "520" not in result.reply_text
+    assert "That leaves LKR 420.00, which matches your recorded balance" in result.reply_text and "520" not in result.reply_text
     assert len(model.sources) == 1  # the rewrite was attempted...
     assert [r.outcome for r in h.telemetry.records if r.purpose == "REPLY_REWRITE"] == ["FACT_CHECK"]  # ...and refused
     assert h.repo.source_texts == {}
@@ -152,7 +152,7 @@ def test_voice_case_reply_is_never_rewritten() -> None:
     ctx = customer(ACCOUNT_A, Channel.VOICE)
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela"), channel=Channel.VOICE))
-    assert "reconcile to LKR 420" in result.reply_text and model.sources == []
+    assert "That leaves LKR 420.00, which matches your recorded balance" in result.reply_text and model.sources == []
     assert "\n" not in result.reply_text  # spoken as one continuous reply
 
 
@@ -172,7 +172,7 @@ def test_rewriter_outage_keeps_english() -> None:
     ctx = customer(ACCOUNT_A)
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela")))
-    assert "reconcile to LKR 420" in result.reply_text
+    assert "That leaves LKR 420.00, which matches your recorded balance" in result.reply_text
 
 
 def test_english_messages_are_not_rewritten() -> None:
@@ -253,7 +253,7 @@ def test_voice_turn_skips_rewrite_when_the_deadline_is_near() -> None:
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, text("mage balance eka adu wela"), channel=Channel.VOICE))
     assert not result.reply_text.startswith("[si]") and model.sources == []
-    assert "reconcile to LKR 420" in result.reply_text
+    assert "That leaves LKR 420.00, which matches your recorded balance" in result.reply_text
 
 
 def test_extraction_is_cut_to_the_remaining_turn_budget() -> None:

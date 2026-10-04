@@ -643,6 +643,16 @@ export interface components {
              * @default null
              */
             description: string | null;
+            /**
+             * Claimed Loss Minor
+             * @default null
+             */
+            claimed_loss_minor: number | null;
+            /**
+             * Reported Balance Minor
+             * @default null
+             */
+            reported_balance_minor: number | null;
         };
         /** TextInput */
         TextInput: {
@@ -931,6 +941,11 @@ export interface components {
              * @constant
              */
             simulation: true;
+            /**
+             * @description Resolve's classification of how much of the complaint the records explain, with the itemised breakdown. Absent only on investigations recorded before contract 1.3.0.
+             * @default null
+             */
+            outcome: components["schemas"]["InvestigationOutcome"] | null;
         };
         /** Balance */
         Balance: {
@@ -1533,6 +1548,11 @@ export interface components {
             line_alias: string;
             complaint_type: components["schemas"]["ComplaintType"];
             evidence_state: components["schemas"]["EvidenceState"] | null;
+            /**
+             * @description Latest investigation's outcome classification; absent for cases investigated before contract 1.3.0.
+             * @default null
+             */
+            classification: components["schemas"]["InvestigationClassification"] | null;
             review_status: components["schemas"]["ReviewStatus"];
             delivery_state: components["schemas"]["DeliveryState"] | null;
             /** Format: date-time */
@@ -2144,6 +2164,193 @@ export interface components {
             state: "ABANDONED";
             case_ids: string[];
             operations: components["schemas"]["TurnReconciliationOperation"][];
+        };
+        /**
+         * InvestigationClassification
+         * @description How much of the complaint the records explain (Resolve's investigation outcome).
+         * @enum {string}
+         */
+        InvestigationClassification: "EXPLAINED" | "PARTIALLY_EXPLAINED" | "UNEXPLAINED" | "INSUFFICIENT_EVIDENCE";
+        /**
+         * OutcomeItem
+         * @description One ledger posting, or one itemised call/SMS/data session behind it.
+         */
+        OutcomeItem: {
+            /** Evidence Id */
+            evidence_id: string | null;
+            /** Kind */
+            kind: string;
+            /** Amount Minor */
+            amount_minor: number;
+            /** Posting Amount Minor */
+            posting_amount_minor: number;
+            /** Occurred At */
+            occurred_at: string | null;
+            /** Reference */
+            reference: string | null;
+            /**
+             * Event Kind
+             * @default null
+             */
+            event_kind: string | null;
+            /**
+             * Counterparty
+             * @default null
+             */
+            counterparty: string | null;
+            /**
+             * Duration Seconds
+             * @default null
+             */
+            duration_seconds: number | null;
+            /**
+             * Volume Bytes
+             * @default null
+             */
+            volume_bytes: number | null;
+            /**
+             * Rate Label
+             * @default null
+             */
+            rate_label: string | null;
+            /**
+             * Product Name
+             * @default null
+             */
+            product_name: string | null;
+            /**
+             * Product Kind
+             * @default null
+             */
+            product_kind: string | null;
+            /**
+             * Itemisation
+             * @default null
+             */
+            itemisation: "INCOMPLETE" | null;
+            /**
+             * Reverses Reference
+             * @default null
+             */
+            reverses_reference: string | null;
+            /**
+             * Reverses Kind
+             * @default null
+             */
+            reverses_kind: string | null;
+            /**
+             * Reversed
+             * @default null
+             */
+            reversed: boolean | null;
+        };
+        /** OutcomeLine */
+        OutcomeLine: {
+            /** Category */
+            category: string;
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "CREDIT" | "DEBIT";
+            /** Amount Minor */
+            amount_minor: number;
+            /** Count */
+            count: number;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /** Items */
+            items: components["schemas"]["OutcomeItem"][];
+        };
+        /** OutcomeAnomaly */
+        OutcomeAnomaly: {
+            /** Code */
+            code: string;
+            /** Amount Minor */
+            amount_minor: number | null;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /**
+             * Occurred At
+             * @default null
+             */
+            occurred_at: string | null;
+            /**
+             * Reference
+             * @default null
+             */
+            reference: string | null;
+            /**
+             * Direction
+             * @default null
+             */
+            direction: ("MISSING" | "EXTRA") | null;
+            /**
+             * Fulfilment Status
+             * @default null
+             */
+            fulfilment_status: string | null;
+            /**
+             * Product Name
+             * @default null
+             */
+            product_name: string | null;
+            /**
+             * Subscription Id
+             * @default null
+             */
+            subscription_id: string | null;
+        };
+        /** SupportHistoryItem */
+        SupportHistoryItem: {
+            /** Case Ref */
+            case_ref: string;
+            /** Category */
+            category: string;
+            /** Status */
+            status: string;
+            /** Resolution */
+            resolution: string | null;
+            /** Opened At */
+            opened_at: string | null;
+        };
+        /**
+         * InvestigationOutcome
+         * @description Opening + credits - deductions = expected balance, compared with the records and the customer's claim.
+         */
+        InvestigationOutcome: {
+            classification: components["schemas"]["InvestigationClassification"];
+            /**
+             * Escalation
+             * @enum {string}
+             */
+            escalation: "NOT_NEEDED" | "OFFER";
+            /** Currency */
+            currency: "LKR" | null;
+            /** Opening Minor */
+            opening_minor: number | null;
+            /** Credits Minor */
+            credits_minor: number | null;
+            /** Debits Minor */
+            debits_minor: number | null;
+            /** Expected Minor */
+            expected_minor: number | null;
+            /** Observed Minor */
+            observed_minor: number | null;
+            /** Claimed Minor */
+            claimed_minor: number | null;
+            /** Explained Minor */
+            explained_minor: number | null;
+            /** Unexplained Minor */
+            unexplained_minor: number | null;
+            /** Breakdown */
+            breakdown: components["schemas"]["OutcomeLine"][];
+            /** Anomalies */
+            anomalies: components["schemas"]["OutcomeAnomaly"][];
+            /** Notes */
+            notes: string[];
+            /** History */
+            history: components["schemas"]["SupportHistoryItem"][];
         };
     };
     responses: never;

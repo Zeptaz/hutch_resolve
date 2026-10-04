@@ -22,6 +22,8 @@ class CaseQueueRow(StrictModel):
     line_alias: str
     complaint_type: Literal["BALANCE_RECHARGE", "DATA_DEPLETION", "CONNECTIVITY", "VAS_DISPUTE", "PACKAGE_ACTIVATION"]
     evidence_state: Literal["SUFFICIENT", "PARTIAL", "CONFLICTING"] | None
+    # Latest investigation's outcome; absent for cases investigated before contract 1.3.0.
+    classification: Literal["EXPLAINED", "PARTIALLY_EXPLAINED", "UNEXPLAINED", "INSUFFICIENT_EVIDENCE"] | None = None
     review_status: Literal["NEW", "IN_REVIEW", "CLOSED"]
     delivery_state: Literal["PENDING", "DELIVERED", "FAILED", "REVIEW_REQUIRED"] | None
     updated_at: datetime

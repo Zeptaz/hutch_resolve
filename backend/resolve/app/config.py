@@ -38,6 +38,9 @@ class Settings:
     crm_provider: str = "mock"
     hubspot: HubSpotConfig | None = None
     package_activation_enabled: bool = False
+    # Seeded one-shot faults (missing snapshots, lost responses...) are test controls. They stay off
+    # unless explicitly enabled, so a demo or hosted run never degrades a customer's first answers.
+    sandbox_faults_enabled: bool = False
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -153,6 +156,9 @@ class Settings:
                 sandbox_id=sandbox_id,
                 account_id=account_id,
             )
+        faults_flag = os.getenv("SANDBOX_FAULTS_ENABLED", "false").strip().lower()
+        if faults_flag not in {"true", "false"}:
+            raise RuntimeError("SANDBOX_FAULTS_ENABLED must be true or false")
         crm_provider = os.getenv("CRM_PROVIDER", "mock").strip().lower() or "mock"
         if crm_provider not in {"mock", "hubspot"}:
             raise RuntimeError("CRM_PROVIDER must be mock or hubspot")
@@ -175,4 +181,5 @@ class Settings:
             crm_provider=crm_provider,
             hubspot=hubspot,
             package_activation_enabled=package_flag == "true",
+            sandbox_faults_enabled=faults_flag == "true",
         )

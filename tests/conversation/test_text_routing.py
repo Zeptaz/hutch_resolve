@@ -23,7 +23,7 @@ def test_singlish_complaint_without_time_checks_today_and_says_so(hm: Harness) -
     assert result.reply_text.startswith(
         "You didn't say when, so I looked at your balance or recharge records for 2 Oct, 00:00–12:00."
     )
-    assert "reconcile to LKR 420" in result.reply_text
+    assert "That leaves LKR 420.00, which matches your recorded balance" in result.reply_text
     case_id, request = hm.facade.investigation_requests[0]
     assert (request.window_start.isoformat(), request.window_end.isoformat()) == (
         "2026-10-01T18:30:00+00:00",
@@ -305,7 +305,7 @@ def test_follow_up_uses_saved_investigation(hm: Harness) -> None:
     conv = hm.open(ctx)
     hm.send(ctx, hm.turn(conv, details()))
     result = hm.send(ctx, hm.turn(conv, text("why?")))
-    assert "reconcile to LKR 420" in result.reply_text and "earlier offer is still open" in result.reply_text
+    assert "That leaves LKR 420.00, which matches your recorded balance" in result.reply_text and "earlier offer is still open" in result.reply_text
     assert hm.facade.calls["investigate"] == 1 and hm.facade.calls["propose_action"] == 1
     assert result.pending_question.code == "CONFIRM_ACTION"
 

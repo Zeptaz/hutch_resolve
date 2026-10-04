@@ -99,11 +99,12 @@ class AgentReviewService:
             params.update({"cursor_time": cursor_time, "cursor_id": cursor_id})
         with self._engine.connect() as connection:
             rows = connection.execute(text(f"""
-                SELECT c.id AS case_id,a.line_alias,c.complaint_type,latest.evidence_state,c.review_status,
+                SELECT c.id AS case_id,a.line_alias,c.complaint_type,latest.evidence_state,
+                       latest.outcome->>'classification' AS classification,c.review_status,
                        delivery.delivery_state,c.updated_at,c.version
                 FROM resolve.cases c
                 JOIN sandbox.accounts a ON (a.sandbox_id,a.id)=(c.sandbox_id,c.account_id)
-                LEFT JOIN LATERAL (SELECT evidence_state FROM resolve.investigations WHERE case_id=c.id ORDER BY revision DESC LIMIT 1) latest ON true
+                LEFT JOIN LATERAL (SELECT evidence_state,outcome FROM resolve.investigations WHERE case_id=c.id ORDER BY revision DESC LIMIT 1) latest ON true
                 LEFT JOIN LATERAL (SELECT delivery_state FROM resolve.escalation_deliveries WHERE case_id=c.id ORDER BY updated_at DESC,id LIMIT 1) delivery ON true
                 WHERE {' AND '.join(clauses)}
                 ORDER BY c.updated_at DESC,c.id DESC LIMIT :limit
@@ -311,7 +312,7 @@ class AgentReviewService:
             "findings": row["finding"], "calculations": row["calculations"], "evidence": row["evidence"],
             "source_status": row["source_status"], "missing": row["missing"], "conflicts": row["conflicts"],
             "eligible_actions": row["eligible_actions"], "review_reasons": row["review_reasons"],
-            "created_at": row["created_at"], "simulation": True}
+            "created_at": row["created_at"], "outcome": row.get("outcome"), "simulation": True}
 
     @staticmethod
     def _proposal_view(row: Any) -> dict[str, Any]:

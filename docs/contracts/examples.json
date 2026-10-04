@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.1.0",
+  "contract_version": "1.3.0",
   "notice": "Synthetic proposed contract examples; not runtime responses. Tokens/hashes are placeholders except the computed receipt digest. Repeated IDs illustrate replay, not separate executable seed records.",
   "examples": {
     "customer_session": {
@@ -227,7 +227,145 @@
           "A past-charge dispute is separate from future renewal."
         ],
         "created_at": "2026-10-02T06:30:00Z",
-        "simulation": true
+        "simulation": true,
+        "outcome": {
+          "classification": "EXPLAINED",
+          "escalation": "NOT_NEEDED",
+          "currency": "LKR",
+          "opening_minor": 0,
+          "credits_minor": 100000,
+          "debits_minor": 58000,
+          "expected_minor": 42000,
+          "observed_minor": 42000,
+          "claimed_minor": 58000,
+          "explained_minor": 58000,
+          "unexplained_minor": 0,
+          "breakdown": [
+            {
+              "category": "RECHARGES",
+              "direction": "CREDIT",
+              "amount_minor": 100000,
+              "count": 1,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000100"
+              ],
+              "items": [
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000100",
+                  "kind": "RECHARGE",
+                  "amount_minor": 100000,
+                  "posting_amount_minor": 100000,
+                  "occurred_at": "2026-10-02T06:30:00Z",
+                  "reference": null,
+                  "event_kind": null,
+                  "counterparty": null,
+                  "duration_seconds": null,
+                  "volume_bytes": null,
+                  "rate_label": null,
+                  "product_name": null,
+                  "product_kind": null,
+                  "itemisation": null,
+                  "reverses_reference": null,
+                  "reverses_kind": null,
+                  "reversed": null
+                }
+              ]
+            },
+            {
+              "category": "PACKAGES",
+              "direction": "DEBIT",
+              "amount_minor": 49900,
+              "count": 1,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000101"
+              ],
+              "items": [
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000101",
+                  "kind": "PACKAGE_RENEWAL",
+                  "amount_minor": -49900,
+                  "posting_amount_minor": -49900,
+                  "occurred_at": "2026-10-02T06:30:00Z",
+                  "reference": null,
+                  "event_kind": null,
+                  "counterparty": null,
+                  "duration_seconds": null,
+                  "volume_bytes": null,
+                  "rate_label": null,
+                  "product_name": "Synthetic 30-day data bundle",
+                  "product_kind": "PACKAGE",
+                  "itemisation": null,
+                  "reverses_reference": null,
+                  "reverses_kind": null,
+                  "reversed": null
+                }
+              ]
+            },
+            {
+              "category": "VAS",
+              "direction": "DEBIT",
+              "amount_minor": 6000,
+              "count": 1,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000102"
+              ],
+              "items": [
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000102",
+                  "kind": "VAS_CHARGE",
+                  "amount_minor": -6000,
+                  "posting_amount_minor": -6000,
+                  "occurred_at": "2026-10-02T06:30:00Z",
+                  "reference": null,
+                  "event_kind": null,
+                  "counterparty": null,
+                  "duration_seconds": null,
+                  "volume_bytes": null,
+                  "rate_label": null,
+                  "product_name": "Synthetic video alerts",
+                  "product_kind": "VAS",
+                  "itemisation": null,
+                  "reverses_reference": null,
+                  "reverses_kind": null,
+                  "reversed": null
+                }
+              ]
+            },
+            {
+              "category": "USAGE",
+              "direction": "DEBIT",
+              "amount_minor": 2100,
+              "count": 1,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000103"
+              ],
+              "items": [
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000103",
+                  "kind": "RATED_USAGE",
+                  "amount_minor": -2100,
+                  "posting_amount_minor": -2100,
+                  "occurred_at": "2026-10-02T06:30:00Z",
+                  "reference": null,
+                  "event_kind": null,
+                  "counterparty": null,
+                  "duration_seconds": null,
+                  "volume_bytes": null,
+                  "rate_label": null,
+                  "product_name": null,
+                  "product_kind": null,
+                  "itemisation": null,
+                  "reverses_reference": null,
+                  "reverses_kind": null,
+                  "reversed": null
+                }
+              ]
+            }
+          ],
+          "anomalies": [],
+          "notes": [],
+          "history": []
+        }
       }
     },
     "d_conflicting": {
@@ -379,7 +517,159 @@
           "A past-charge dispute is separate from future renewal."
         ],
         "created_at": "2026-10-02T06:30:00Z",
-        "simulation": true
+        "simulation": true,
+        "outcome": {
+          "classification": "PARTIALLY_EXPLAINED",
+          "escalation": "OFFER",
+          "currency": "LKR",
+          "opening_minor": 0,
+          "credits_minor": 100000,
+          "debits_minor": 58000,
+          "expected_minor": 42000,
+          "observed_minor": 35000,
+          "claimed_minor": 65000,
+          "explained_minor": 58000,
+          "unexplained_minor": 7000,
+          "breakdown": [
+            {
+              "category": "RECHARGES",
+              "direction": "CREDIT",
+              "amount_minor": 100000,
+              "count": 1,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000100"
+              ],
+              "items": [
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000100",
+                  "kind": "RECHARGE",
+                  "amount_minor": 100000,
+                  "posting_amount_minor": 100000,
+                  "occurred_at": "2026-10-02T06:30:00Z",
+                  "reference": null,
+                  "event_kind": null,
+                  "counterparty": null,
+                  "duration_seconds": null,
+                  "volume_bytes": null,
+                  "rate_label": null,
+                  "product_name": null,
+                  "product_kind": null,
+                  "itemisation": null,
+                  "reverses_reference": null,
+                  "reverses_kind": null,
+                  "reversed": null
+                }
+              ]
+            },
+            {
+              "category": "PACKAGES",
+              "direction": "DEBIT",
+              "amount_minor": 49900,
+              "count": 1,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000101"
+              ],
+              "items": [
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000101",
+                  "kind": "PACKAGE_RENEWAL",
+                  "amount_minor": -49900,
+                  "posting_amount_minor": -49900,
+                  "occurred_at": "2026-10-02T06:30:00Z",
+                  "reference": null,
+                  "event_kind": null,
+                  "counterparty": null,
+                  "duration_seconds": null,
+                  "volume_bytes": null,
+                  "rate_label": null,
+                  "product_name": "Synthetic 30-day data bundle",
+                  "product_kind": "PACKAGE",
+                  "itemisation": null,
+                  "reverses_reference": null,
+                  "reverses_kind": null,
+                  "reversed": null
+                }
+              ]
+            },
+            {
+              "category": "VAS",
+              "direction": "DEBIT",
+              "amount_minor": 6000,
+              "count": 1,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000102"
+              ],
+              "items": [
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000102",
+                  "kind": "VAS_CHARGE",
+                  "amount_minor": -6000,
+                  "posting_amount_minor": -6000,
+                  "occurred_at": "2026-10-02T06:30:00Z",
+                  "reference": null,
+                  "event_kind": null,
+                  "counterparty": null,
+                  "duration_seconds": null,
+                  "volume_bytes": null,
+                  "rate_label": null,
+                  "product_name": "Synthetic video alerts",
+                  "product_kind": "VAS",
+                  "itemisation": null,
+                  "reverses_reference": null,
+                  "reverses_kind": null,
+                  "reversed": null
+                }
+              ]
+            },
+            {
+              "category": "USAGE",
+              "direction": "DEBIT",
+              "amount_minor": 2100,
+              "count": 1,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000103"
+              ],
+              "items": [
+                {
+                  "evidence_id": "90000000-0000-4000-8000-000000000103",
+                  "kind": "RATED_USAGE",
+                  "amount_minor": -2100,
+                  "posting_amount_minor": -2100,
+                  "occurred_at": "2026-10-02T06:30:00Z",
+                  "reference": null,
+                  "event_kind": null,
+                  "counterparty": null,
+                  "duration_seconds": null,
+                  "volume_bytes": null,
+                  "rate_label": null,
+                  "product_name": null,
+                  "product_kind": null,
+                  "itemisation": null,
+                  "reverses_reference": null,
+                  "reverses_kind": null,
+                  "reversed": null
+                }
+              ]
+            }
+          ],
+          "anomalies": [
+            {
+              "code": "BALANCE_GAP",
+              "amount_minor": 7000,
+              "evidence_ids": [
+                "90000000-0000-4000-8000-000000000103"
+              ],
+              "occurred_at": null,
+              "reference": null,
+              "direction": "MISSING",
+              "fulfilment_status": null,
+              "product_name": null,
+              "subscription_id": null
+            }
+          ],
+          "notes": [],
+          "history": []
+        }
       }
     },
     "partial_evidence": {
@@ -485,7 +775,24 @@
           "A past-charge dispute is separate from future renewal."
         ],
         "created_at": "2026-10-02T06:30:00Z",
-        "simulation": true
+        "simulation": true,
+        "outcome": {
+          "classification": "INSUFFICIENT_EVIDENCE",
+          "escalation": "OFFER",
+          "currency": "LKR",
+          "opening_minor": null,
+          "credits_minor": 0,
+          "debits_minor": 0,
+          "expected_minor": null,
+          "observed_minor": null,
+          "claimed_minor": null,
+          "explained_minor": null,
+          "unexplained_minor": null,
+          "breakdown": [],
+          "anomalies": [],
+          "notes": [],
+          "history": []
+        }
       }
     },
     "account": {
@@ -688,7 +995,145 @@
             "A past-charge dispute is separate from future renewal."
           ],
           "created_at": "2026-10-02T06:30:00Z",
-          "simulation": true
+          "simulation": true,
+          "outcome": {
+            "classification": "EXPLAINED",
+            "escalation": "NOT_NEEDED",
+            "currency": "LKR",
+            "opening_minor": 0,
+            "credits_minor": 100000,
+            "debits_minor": 58000,
+            "expected_minor": 42000,
+            "observed_minor": 42000,
+            "claimed_minor": 58000,
+            "explained_minor": 58000,
+            "unexplained_minor": 0,
+            "breakdown": [
+              {
+                "category": "RECHARGES",
+                "direction": "CREDIT",
+                "amount_minor": 100000,
+                "count": 1,
+                "evidence_ids": [
+                  "90000000-0000-4000-8000-000000000100"
+                ],
+                "items": [
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000100",
+                    "kind": "RECHARGE",
+                    "amount_minor": 100000,
+                    "posting_amount_minor": 100000,
+                    "occurred_at": "2026-10-02T06:30:00Z",
+                    "reference": null,
+                    "event_kind": null,
+                    "counterparty": null,
+                    "duration_seconds": null,
+                    "volume_bytes": null,
+                    "rate_label": null,
+                    "product_name": null,
+                    "product_kind": null,
+                    "itemisation": null,
+                    "reverses_reference": null,
+                    "reverses_kind": null,
+                    "reversed": null
+                  }
+                ]
+              },
+              {
+                "category": "PACKAGES",
+                "direction": "DEBIT",
+                "amount_minor": 49900,
+                "count": 1,
+                "evidence_ids": [
+                  "90000000-0000-4000-8000-000000000101"
+                ],
+                "items": [
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000101",
+                    "kind": "PACKAGE_RENEWAL",
+                    "amount_minor": -49900,
+                    "posting_amount_minor": -49900,
+                    "occurred_at": "2026-10-02T06:30:00Z",
+                    "reference": null,
+                    "event_kind": null,
+                    "counterparty": null,
+                    "duration_seconds": null,
+                    "volume_bytes": null,
+                    "rate_label": null,
+                    "product_name": "Synthetic 30-day data bundle",
+                    "product_kind": "PACKAGE",
+                    "itemisation": null,
+                    "reverses_reference": null,
+                    "reverses_kind": null,
+                    "reversed": null
+                  }
+                ]
+              },
+              {
+                "category": "VAS",
+                "direction": "DEBIT",
+                "amount_minor": 6000,
+                "count": 1,
+                "evidence_ids": [
+                  "90000000-0000-4000-8000-000000000102"
+                ],
+                "items": [
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000102",
+                    "kind": "VAS_CHARGE",
+                    "amount_minor": -6000,
+                    "posting_amount_minor": -6000,
+                    "occurred_at": "2026-10-02T06:30:00Z",
+                    "reference": null,
+                    "event_kind": null,
+                    "counterparty": null,
+                    "duration_seconds": null,
+                    "volume_bytes": null,
+                    "rate_label": null,
+                    "product_name": "Synthetic video alerts",
+                    "product_kind": "VAS",
+                    "itemisation": null,
+                    "reverses_reference": null,
+                    "reverses_kind": null,
+                    "reversed": null
+                  }
+                ]
+              },
+              {
+                "category": "USAGE",
+                "direction": "DEBIT",
+                "amount_minor": 2100,
+                "count": 1,
+                "evidence_ids": [
+                  "90000000-0000-4000-8000-000000000103"
+                ],
+                "items": [
+                  {
+                    "evidence_id": "90000000-0000-4000-8000-000000000103",
+                    "kind": "RATED_USAGE",
+                    "amount_minor": -2100,
+                    "posting_amount_minor": -2100,
+                    "occurred_at": "2026-10-02T06:30:00Z",
+                    "reference": null,
+                    "event_kind": null,
+                    "counterparty": null,
+                    "duration_seconds": null,
+                    "volume_bytes": null,
+                    "rate_label": null,
+                    "product_name": null,
+                    "product_kind": null,
+                    "itemisation": null,
+                    "reverses_reference": null,
+                    "reverses_kind": null,
+                    "reversed": null
+                  }
+                ]
+              }
+            ],
+            "anomalies": [],
+            "notes": [],
+            "history": []
+          }
         },
         "operation_ids": [],
         "receipt": null,
@@ -1188,7 +1633,8 @@
             "review_status": "NEW",
             "delivery_state": "PENDING",
             "updated_at": "2026-10-02T06:30:00Z",
-            "version": 2
+            "version": 2,
+            "classification": "PARTIALLY_EXPLAINED"
           }
         ],
         "next_cursor": null
@@ -1387,7 +1833,145 @@
               "A past-charge dispute is separate from future renewal."
             ],
             "created_at": "2026-10-02T06:30:00Z",
-            "simulation": true
+            "simulation": true,
+            "outcome": {
+              "classification": "EXPLAINED",
+              "escalation": "NOT_NEEDED",
+              "currency": "LKR",
+              "opening_minor": 0,
+              "credits_minor": 100000,
+              "debits_minor": 58000,
+              "expected_minor": 42000,
+              "observed_minor": 42000,
+              "claimed_minor": 58000,
+              "explained_minor": 58000,
+              "unexplained_minor": 0,
+              "breakdown": [
+                {
+                  "category": "RECHARGES",
+                  "direction": "CREDIT",
+                  "amount_minor": 100000,
+                  "count": 1,
+                  "evidence_ids": [
+                    "90000000-0000-4000-8000-000000000100"
+                  ],
+                  "items": [
+                    {
+                      "evidence_id": "90000000-0000-4000-8000-000000000100",
+                      "kind": "RECHARGE",
+                      "amount_minor": 100000,
+                      "posting_amount_minor": 100000,
+                      "occurred_at": "2026-10-02T06:30:00Z",
+                      "reference": null,
+                      "event_kind": null,
+                      "counterparty": null,
+                      "duration_seconds": null,
+                      "volume_bytes": null,
+                      "rate_label": null,
+                      "product_name": null,
+                      "product_kind": null,
+                      "itemisation": null,
+                      "reverses_reference": null,
+                      "reverses_kind": null,
+                      "reversed": null
+                    }
+                  ]
+                },
+                {
+                  "category": "PACKAGES",
+                  "direction": "DEBIT",
+                  "amount_minor": 49900,
+                  "count": 1,
+                  "evidence_ids": [
+                    "90000000-0000-4000-8000-000000000101"
+                  ],
+                  "items": [
+                    {
+                      "evidence_id": "90000000-0000-4000-8000-000000000101",
+                      "kind": "PACKAGE_RENEWAL",
+                      "amount_minor": -49900,
+                      "posting_amount_minor": -49900,
+                      "occurred_at": "2026-10-02T06:30:00Z",
+                      "reference": null,
+                      "event_kind": null,
+                      "counterparty": null,
+                      "duration_seconds": null,
+                      "volume_bytes": null,
+                      "rate_label": null,
+                      "product_name": "Synthetic 30-day data bundle",
+                      "product_kind": "PACKAGE",
+                      "itemisation": null,
+                      "reverses_reference": null,
+                      "reverses_kind": null,
+                      "reversed": null
+                    }
+                  ]
+                },
+                {
+                  "category": "VAS",
+                  "direction": "DEBIT",
+                  "amount_minor": 6000,
+                  "count": 1,
+                  "evidence_ids": [
+                    "90000000-0000-4000-8000-000000000102"
+                  ],
+                  "items": [
+                    {
+                      "evidence_id": "90000000-0000-4000-8000-000000000102",
+                      "kind": "VAS_CHARGE",
+                      "amount_minor": -6000,
+                      "posting_amount_minor": -6000,
+                      "occurred_at": "2026-10-02T06:30:00Z",
+                      "reference": null,
+                      "event_kind": null,
+                      "counterparty": null,
+                      "duration_seconds": null,
+                      "volume_bytes": null,
+                      "rate_label": null,
+                      "product_name": "Synthetic video alerts",
+                      "product_kind": "VAS",
+                      "itemisation": null,
+                      "reverses_reference": null,
+                      "reverses_kind": null,
+                      "reversed": null
+                    }
+                  ]
+                },
+                {
+                  "category": "USAGE",
+                  "direction": "DEBIT",
+                  "amount_minor": 2100,
+                  "count": 1,
+                  "evidence_ids": [
+                    "90000000-0000-4000-8000-000000000103"
+                  ],
+                  "items": [
+                    {
+                      "evidence_id": "90000000-0000-4000-8000-000000000103",
+                      "kind": "RATED_USAGE",
+                      "amount_minor": -2100,
+                      "posting_amount_minor": -2100,
+                      "occurred_at": "2026-10-02T06:30:00Z",
+                      "reference": null,
+                      "event_kind": null,
+                      "counterparty": null,
+                      "duration_seconds": null,
+                      "volume_bytes": null,
+                      "rate_label": null,
+                      "product_name": null,
+                      "product_kind": null,
+                      "itemisation": null,
+                      "reverses_reference": null,
+                      "reverses_kind": null,
+                      "reversed": null
+                    }
+                  ]
+                }
+              ],
+              "anomalies": [],
+              "notes": [],
+              "history": []
+            }
           },
           "operation_ids": [],
           "receipt": null,
@@ -1682,7 +2266,145 @@
               "A past-charge dispute is separate from future renewal."
             ],
             "created_at": "2026-10-02T06:30:00Z",
-            "simulation": true
+            "simulation": true,
+            "outcome": {
+              "classification": "EXPLAINED",
+              "escalation": "NOT_NEEDED",
+              "currency": "LKR",
+              "opening_minor": 0,
+              "credits_minor": 100000,
+              "debits_minor": 58000,
+              "expected_minor": 42000,
+              "observed_minor": 42000,
+              "claimed_minor": 58000,
+              "explained_minor": 58000,
+              "unexplained_minor": 0,
+              "breakdown": [
+                {
+                  "category": "RECHARGES",
+                  "direction": "CREDIT",
+                  "amount_minor": 100000,
+                  "count": 1,
+                  "evidence_ids": [
+                    "90000000-0000-4000-8000-000000000100"
+                  ],
+                  "items": [
+                    {
+                      "evidence_id": "90000000-0000-4000-8000-000000000100",
+                      "kind": "RECHARGE",
+                      "amount_minor": 100000,
+                      "posting_amount_minor": 100000,
+                      "occurred_at": "2026-10-02T06:30:00Z",
+                      "reference": null,
+                      "event_kind": null,
+                      "counterparty": null,
+                      "duration_seconds": null,
+                      "volume_bytes": null,
+                      "rate_label": null,
+                      "product_name": null,
+                      "product_kind": null,
+                      "itemisation": null,
+                      "reverses_reference": null,
+                      "reverses_kind": null,
+                      "reversed": null
+                    }
+                  ]
+                },
+                {
+                  "category": "PACKAGES",
+                  "direction": "DEBIT",
+                  "amount_minor": 49900,
+                  "count": 1,
+                  "evidence_ids": [
+                    "90000000-0000-4000-8000-000000000101"
+                  ],
+                  "items": [
+                    {
+                      "evidence_id": "90000000-0000-4000-8000-000000000101",
+                      "kind": "PACKAGE_RENEWAL",
+                      "amount_minor": -49900,
+                      "posting_amount_minor": -49900,
+                      "occurred_at": "2026-10-02T06:30:00Z",
+                      "reference": null,
+                      "event_kind": null,
+                      "counterparty": null,
+                      "duration_seconds": null,
+                      "volume_bytes": null,
+                      "rate_label": null,
+                      "product_name": "Synthetic 30-day data bundle",
+                      "product_kind": "PACKAGE",
+                      "itemisation": null,
+                      "reverses_reference": null,
+                      "reverses_kind": null,
+                      "reversed": null
+                    }
+                  ]
+                },
+                {
+                  "category": "VAS",
+                  "direction": "DEBIT",
+                  "amount_minor": 6000,
+                  "count": 1,
+                  "evidence_ids": [
+                    "90000000-0000-4000-8000-000000000102"
+                  ],
+                  "items": [
+                    {
+                      "evidence_id": "90000000-0000-4000-8000-000000000102",
+                      "kind": "VAS_CHARGE",
+                      "amount_minor": -6000,
+                      "posting_amount_minor": -6000,
+                      "occurred_at": "2026-10-02T06:30:00Z",
+                      "reference": null,
+                      "event_kind": null,
+                      "counterparty": null,
+                      "duration_seconds": null,
+                      "volume_bytes": null,
+                      "rate_label": null,
+                      "product_name": "Synthetic video alerts",
+                      "product_kind": "VAS",
+                      "itemisation": null,
+                      "reverses_reference": null,
+                      "reverses_kind": null,
+                      "reversed": null
+                    }
+                  ]
+                },
+                {
+                  "category": "USAGE",
+                  "direction": "DEBIT",
+                  "amount_minor": 2100,
+                  "count": 1,
+                  "evidence_ids": [
+                    "90000000-0000-4000-8000-000000000103"
+                  ],
+                  "items": [
+                    {
+                      "evidence_id": "90000000-0000-4000-8000-000000000103",
+                      "kind": "RATED_USAGE",
+                      "amount_minor": -2100,
+                      "posting_amount_minor": -2100,
+                      "occurred_at": "2026-10-02T06:30:00Z",
+                      "reference": null,
+                      "event_kind": null,
+                      "counterparty": null,
+                      "duration_seconds": null,
+                      "volume_bytes": null,
+                      "rate_label": null,
+                      "product_name": null,
+                      "product_kind": null,
+                      "itemisation": null,
+                      "reverses_reference": null,
+                      "reverses_kind": null,
+                      "reversed": null
+                    }
+                  ]
+                }
+              ],
+              "anomalies": [],
+              "notes": [],
+              "history": []
+            }
           }
         ],
         "proposals": [
@@ -1955,11 +2677,16 @@
     },
     "package_query_input": {
       "schema": "PackageQueryInput",
-      "value": {"type": "package_query"}
+      "value": {
+        "type": "package_query"
+      }
     },
     "package_selection_input": {
       "schema": "PackageSelectionInput",
-      "value": {"type": "package_selection", "offer_id": "30000000-0000-0000-0000-000000000005"}
+      "value": {
+        "type": "package_selection",
+        "offer_id": "30000000-0000-0000-0000-000000000005"
+      }
     },
     "package_terms": {
       "schema": "PackageTerms",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, create_engine, text
 
-EXPECTED_SCHEMA_REVISION = "0011_turn_recovery"
+EXPECTED_SCHEMA_REVISION = "0012_investigation_outcome"
 
 
 class Database:

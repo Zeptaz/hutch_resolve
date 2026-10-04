@@ -34,8 +34,18 @@ def test_each_scenario_offers_only_what_resolve_made_eligible(h: Harness, accoun
     result = h.send(ctx, h.turn(conv, details(complaint)))
     assert offered(result) == expected_offer
     assert (result.pending_question.code if result.pending_question else None) == question
-    for finding in h.facade.cases[result.case_id].investigation.findings:
-        assert finding.text in result.reply_text  # Resolve's wording, unchanged
+    investigation = h.facade.cases[result.case_id].investigation
+    shown = {c.data.text for c in result.cards if c.type == "finding"}
+    for finding in investigation.findings:
+        assert finding.text in shown  # Resolve's wording, unchanged, in its finding card
+        if investigation.outcome is None or complaint not in {"BALANCE_RECHARGE", "VAS_DISPUTE"}:
+            assert finding.text in result.reply_text
+    if investigation.outcome is not None and complaint == "BALANCE_RECHARGE":
+        # The reply explains Resolve's reconstruction instead: every amount quoted from the outcome.
+        outcome = investigation.outcome
+        assert f"LKR {outcome.observed_minor // 100:,}.00" in result.reply_text
+        if outcome.unexplained_minor:
+            assert f"remaining LKR {outcome.unexplained_minor // 100:,}.00" in result.reply_text
 
 
 def test_b_quota_and_out_of_bundle_charge_are_reported_separately(h: Harness) -> None:
