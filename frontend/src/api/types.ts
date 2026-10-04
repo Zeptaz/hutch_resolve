@@ -27,6 +27,7 @@ export type Card = Schemas['Card']
 export type CardOf<T extends Card['type']> = Extract<Card, { type: T }>
 
 export type InvestigationResult = Schemas['InvestigationResult']
+export type InvestigationOutcome = Schemas['InvestigationOutcome']
 export type Calculation = Schemas['Calculation']
 export type Finding = Schemas['Finding']
 export type ProposalView = Schemas['ProposalView']

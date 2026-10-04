@@ -21,14 +21,17 @@ test('case packet answers first: why it is here and the key numbers', async ({ p
   await queueRow(page, MOCK.D.line).click()
   await expect(page).toHaveURL(new RegExp(`/agent/cases/${MOCK.D.id}$`))
   const why = page.getByRole('region', { name: 'Why this case is here' })
-  await expect(why).toContainText('Records disagree')
-  await expect(why).toContainText('Expected')
+  // Resolve's reconstruction: what the records explain, and the amount with no record behind it.
+  await expect(why).toContainText('Records explain part of the money')
+  await expect(why).toContainText('Unexplained')
+  await expect(why).toContainText('LKR 70.00')
+  await expect(why).toContainText('Expected from records')
   await expect(why).toContainText('LKR 420.00')
   await expect(why).toContainText('LKR 350.00')
-  await expect(why).toContainText('−LKR 70.00')
   // Separate state families, each under its own label.
   await expect(page.getByRole('definition').filter({ hasText: 'Needs human review' })).toBeVisible()
   await expect(page.getByRole('definition').filter({ hasText: 'Conflicting' })).toBeVisible()
+  await expect(page.getByRole('definition').filter({ hasText: 'Partly explained' })).toBeVisible()
 })
 
 test('tabs show actions and ticket, receipts and history', async ({ page }) => {

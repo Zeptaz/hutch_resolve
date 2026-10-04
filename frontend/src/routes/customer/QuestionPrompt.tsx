@@ -92,7 +92,10 @@ function DetailsForm({
     const end = new Date(to)
     if (!(start < end)) return setError(t('q.err.order'))
     if (end.getTime() - start.getTime() > MAX_WINDOW_DAYS * 86400 * 1000) return setError(t('q.err.window', { days: MAX_WINDOW_DAYS }))
-    const facts: ReportedFacts = { amount_minor: null, recharge_reference: null, subscription_id: null, description: null }
+    const facts: ReportedFacts = {
+      amount_minor: null, recharge_reference: null, subscription_id: null, description: null,
+      claimed_loss_minor: null, reported_balance_minor: null,
+    }
     if (amount.trim()) {
       const lkr = Number(amount)
       if (!Number.isFinite(lkr) || lkr <= 0) return setError(t('q.err.amount'))

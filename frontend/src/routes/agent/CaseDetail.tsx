@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import { CaseTabs } from './CaseTabs'
 import { CopyId } from './CopyId'
 import { caseStatusLabel, reasonLabel } from './labels'
+import { CLASSIFICATION_HEADLINE, CLASSIFICATION_LABEL, classificationTone, OutcomeSummary } from './OutcomeSummary'
 import { ReviewPanel } from './ReviewPanel'
 
 const POLL_MS = 5000
@@ -161,6 +162,13 @@ function CaseHeader({
             <StatusBadge tone="neutral">Not checked</StatusBadge>
           )}
         </State>
+        {c.investigation?.outcome && (
+          <State label="Finding">
+            <StatusBadge tone={classificationTone[c.investigation.outcome.classification]}>
+              {CLASSIFICATION_LABEL[c.investigation.outcome.classification]}
+            </StatusBadge>
+          </State>
+        )}
         <State label="Ticket">
           {handoff ? <StatusBadge key={handoff.delivery_state} className="animate-pop" tone={deliveryTone[handoff.delivery_state]}>{humanize(handoff.delivery_state)}</StatusBadge> : <StatusBadge tone="neutral">No ticket</StatusBadge>}
         </State>
@@ -196,6 +204,7 @@ function WhyHere({ detail }: { detail: AgentCaseDetail }) {
   const reviewOffers = new Set(detail.proposals.filter((p) => p.action_type === 'CREATE_REVIEW_TICKET').map((p) => p.id))
   const acceptedReview = detail.confirmations.some((c) => c.decision === 'ACCEPT' && reviewOffers.has(c.proposal_id))
   const calc = inv?.calculations[0]
+  const outcome = inv?.outcome ?? null
 
   return (
     <CardFrame
@@ -205,7 +214,7 @@ function WhyHere({ detail }: { detail: AgentCaseDetail }) {
     >
       <div className="flex flex-col gap-4">
         <p className="text-base leading-snug text-balance">
-          {state ? HEADLINE[state] : 'Resolve has not investigated this case yet.'}
+          {outcome ? CLASSIFICATION_HEADLINE[outcome.classification] : state ? HEADLINE[state] : 'Resolve has not investigated this case yet.'}
           {acceptedReview && ' The customer accepted a human review.'}
         </p>
         {reasons.length > 0 && (
@@ -221,7 +230,7 @@ function WhyHere({ detail }: { detail: AgentCaseDetail }) {
             ))}
           </ul>
         )}
-        {calc && <KeyNumbers calc={calc} />}
+        {outcome ? <OutcomeSummary outcome={outcome} /> : calc && <KeyNumbers calc={calc} />}
       </div>
     </CardFrame>
   )

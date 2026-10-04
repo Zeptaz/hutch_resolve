@@ -56,6 +56,7 @@ function queueRows(): CaseQueueRow[] {
     line_alias: currentA.account.line_alias,
     complaint_type: currentA.case.complaint_type,
     evidence_state: currentA.case.investigation?.evidence_state ?? null,
+    classification: currentA.case.investigation?.outcome?.classification ?? null,
     review_status: currentA.case.review_status,
     delivery_state: currentA.handoff?.delivery_state ?? null,
     updated_at: currentA.case.updated_at,
