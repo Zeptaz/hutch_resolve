@@ -95,3 +95,9 @@ The shared conversation service now recovers a narrow set of direct balance ques
 - [ ] H-08/J-03/J-04 remain open for physical microphone/speaker echo and repeated interruption, native-language review, and full signed browser/model qualification of this revision. Historical logs cannot identify the exact acoustic source of the reported loop.
 
 Changes belong to `hutch_resolve/voice_test` and `hutch_zeptazvoice/voice_test2`. Shared conversation changes are restricted to Voice wording/channel propagation. Commit and local service restart evidence follows after verification.
+
+### Voice + CRM release candidate - 2026-10-04
+
+- [x] Integrated `main` + `tevin/crm-integration` + Harry's `voice_test` on `integration/voice-crm` (Voice repo: `voice_test2`). Resolved the five `conversation/service.py` conflicts by keeping chatbot locale/paragraph/rewrite handling and Harry's Voice channel prompts. CB-006 pins `confirm_prompt_voice` to English.
+- [x] Verification: Resolve **523 passed, 49 skipped**; PostgreSQL opt-in **14/14 files**; Voice **71**; frontend typecheck/build; live chat → review ticket → dashboard; signed two-turn Voice probe through real Gemini Live. Details in root `context.md`.
+- [ ] Physical microphone call; Harry's unpushed v4/decision-readback code; Harry review of CB-004..006.
