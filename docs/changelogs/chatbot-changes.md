@@ -208,3 +208,24 @@ Engine/frontend/tooling parts of the same work are CE-005..CE-011 in [core-engin
   decline → "Actually I want a real person…" → review offered with "Reason: Customer asked for a person to
   review this case." → accepted → HubSpot ticket created and synced.
 - Core dependency: CE-007 (proper engine fix).
+
+## Voice + CRM integration — branch `integration/voice-crm` (2026-10-04)
+
+`main` + `tevin/crm-integration` + Harry's `voice_test`, merged for a team release candidate. The
+`service.py` merge kept both sides: chatbot locale/paragraph/rewrite handling and Harry's channel-aware
+Voice consent prompts.
+
+### CB-006 — Sinhala/Tamil drafts still told Voice callers to say "yes or no"
+
+- Date / status: 2026-10-04 — DONE on `integration/voice-crm`, verified
+- Risk: **LOW** — one template key pinned to English; no routing or consent logic changed.
+- Files: `backend/resolve/conversation/templates.py`, `locales/{si,ta,si-Latn}.json`,
+  `tests/conversation/test_locales.py`.
+- What changed / why: `voice_test` made Voice consent button-only and kept its new Voice prompts English
+  (`NOT_LOCALIZED`), but `confirm_prompt_voice` stayed localized and the SI/TA/Singlish drafts still said
+  "say clearly: yes or no". Drafts are unreviewed so English is served today; once a draft was marked
+  REVIEWED the caller would be invited to give a spoken yes that Resolve ignores. The key is now
+  `NOT_LOCALIZED` like the other Voice prompts and removed from the drafts.
+- Verification: unit — conversation suite 395 passed, 19 skipped; new test fails if any reviewed locale
+  overrides the Voice confirm prompt.
+- Core dependency: none.

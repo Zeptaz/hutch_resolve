@@ -172,7 +172,7 @@ ENGLISH: dict[str, dict[str, str]] = {
 # Internal terms and voice prompts without reviewed translations remain English.
 NOT_LOCALIZED = frozenset({
     "default_escalation_reason", "package_selection_unavailable", "PACKAGE_ACTIVATION",
-    "offer_action_voice", "other_options_voice", "offer_still_open_voice",
+    "offer_action_voice", "other_options_voice", "offer_still_open_voice", "confirm_prompt_voice",
 })
 LOCALES_DIR = Path(__file__).with_name("locales")
 REVIEWED = "REVIEWED"

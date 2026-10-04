@@ -19,7 +19,6 @@
       "offer_action": "Mata {target} walata {action} puluwan. {consequences} Mama issarahata yannada?",
       "other_options": "Oyata ona nam, mata {options} puluwan. Kiyanna, nathnam mulinma me offer ekata uththara denna, ita passe mama eka yojana karannam.",
       "confirm_prompt": "Karunakarala uda thiyena offer eke buttons walin uththara denna.",
-      "confirm_prompt_voice": "Mama issarahata yanna ona da kiyala pahadiliwa kiyanna: ow da nadda.",
       "declined": "Hari, mama e wenasa karanne na. Oyage account eke kisima deyak wenas une na.",
       "accepted": "Oyage illeema record kala. {status}",
       "proposal_mismatch": "Mama dan balaporoththu wena illeema eka nemei. Karunakarala aluthma pennapu option eka use karanna.",

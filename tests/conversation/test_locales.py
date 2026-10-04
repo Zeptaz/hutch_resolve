@@ -128,3 +128,11 @@ def test_reviewed_template_reply_is_not_machine_rewritten_again(monkeypatch: pyt
     conv = h.open(ctx)
     result = h.send(ctx, h.turn(conv, {"type": "text", "text": "mata help ekak ona"}))
     assert result.reply_text == strings["choose_complaint"] and rewriter_model.sources == []
+
+
+@pytest.mark.parametrize("language", LOCALES)
+def test_voice_confirm_prompt_stays_button_only_in_every_locale(monkeypatch: pytest.MonkeyPatch, language) -> None:
+    """A reviewed draft must not bring back the retired 'say yes or no' Voice prompt."""
+    locale = t.load_locale(language)
+    monkeypatch.setattr(t, "load_locale", lambda _language: {**locale, "status": t.REVIEWED})
+    assert t.text("confirm_prompt_voice", language) == t.ENGLISH["strings"]["confirm_prompt_voice"]
