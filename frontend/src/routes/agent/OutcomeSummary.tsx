@@ -55,7 +55,36 @@ function itemText(item: Item) {
   return parts.join(' · ')
 }
 
-/** Resolve's reconstruction as it computed it: claim vs records, anomalies, then every line. Nothing is summed here. */
+type Group = { key: string; items: Item[] }
+
+/** Runs of the same thing (e.g. 10 SMS to one number) read as one row; Resolve's items are kept, only listed together. */
+function grouped(items: Item[]): Group[] {
+  const groups: Group[] = []
+  for (const item of items) {
+    const key = [item.event_kind, item.counterparty, item.product_name, item.kind, item.reverses_reference, item.reversed].join('|')
+    const last = groups.at(-1)
+    if (last && last.key === key && item.event_kind) last.items.push(item)
+    else groups.push({ key, items: [item] })
+  }
+  return groups
+}
+
+function groupText(group: Group) {
+  const [first] = group.items
+  if (group.items.length === 1) return itemText(first)
+  const noun = first.event_kind === 'SMS' ? 'SMS' : first.event_kind === 'VOICE_CALL' ? 'calls' : 'items'
+  return `${group.items.length} ${noun}${first.counterparty ? ` to ${first.counterparty}` : ''}`
+}
+
+function groupTime(group: Group) {
+  const times = group.items.map((i) => i.occurred_at).filter((t): t is string => !!t)
+  if (!times.length) return null
+  const first = formatTime(times[0])
+  const last = formatTime(times[times.length - 1])
+  return first === last ? first : `${first}–${last}`
+}
+
+/** Resolve's reconstruction as it computed it: claim vs records, anomalies, then every line. Totals come from Resolve; only a run of identical items (e.g. 10 SMS to one number) is added up for its display row. */
 export function OutcomeSummary({ outcome }: { outcome: InvestigationOutcome }) {
   const unexplained = outcome.unexplained_minor ?? 0
   return (
@@ -121,13 +150,15 @@ function LineRows({ line }: { line: Line }) {
         </td>
       </tr>
       {line.items.length > 1 || line.items[0]?.event_kind || line.items[0]?.product_name
-        ? line.items.map((item, i) => (
-            <tr key={`${item.evidence_id ?? item.reference}-${i}`} className="text-xs text-muted-foreground">
+        ? grouped(line.items).map((group, i) => (
+            <tr key={`${group.key}-${i}`} className="text-xs text-muted-foreground">
               <td className="py-0.5 pr-3 pl-6">
-                {itemText(item)}
-                {item.occurred_at && <> · {formatTime(item.occurred_at)}</>}
+                {groupText(group)}
+                {groupTime(group) && <> · {groupTime(group)}</>}
               </td>
-              <td className="px-3 py-0.5 text-right font-mono">{formatLkr(Math.abs(item.amount_minor))}</td>
+              <td className="px-3 py-0.5 text-right font-mono">
+                {formatLkr(group.items.reduce((total, item) => total + Math.abs(item.amount_minor), 0))}
+              </td>
             </tr>
           ))
         : null}

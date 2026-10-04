@@ -916,6 +916,9 @@ class ConversationService:
                          target_id=a.target_id, target_label=a.target_label)
             for a in investigation.eligible_actions
         ]
+        if investigation.outcome is not None:
+            # A concrete fix (e.g. stop an unwanted VAS) comes before handing the case to a person.
+            choices.sort(key=lambda c: c.action_type is ActionType.CREATE_REVIEW_TICKET)
         kept: list[ActionChoice] = []
         explained = investigation.outcome is not None and investigation.outcome.escalation == "NOT_NEEDED"
         if explained or (investigation.outcome is None and investigation.evidence_state is EvidenceState.SUFFICIENT
