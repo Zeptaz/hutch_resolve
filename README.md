@@ -1,74 +1,279 @@
 # HUTCH Resolve
 
-This repository contains the synthetic telecom sandbox, Resolve backend, conversation controller and combined customer/agent frontend for the HUTCH Resolve hackathon entry. The environment is synthetic; live browser Voice/model and release qualification are still pending.
+**Evidence-backed AI resolution for telecom customer complaints.**
 
-## Team implementation plan
+| | |
+| --- | --- |
+| Product | HUTCH Resolve |
+| Team | Zeptaz |
+| University / batch | IIT · 23SEP |
+| Event / track | IgnitX 2026 · Track A: Resolve & Support |
+| Release | `v1.0.1` in both repositories (tagged 4 October 2026) |
+| Live demo | https://resolve.zeptaz.com (customer chat `/chat`, agent dashboard `/agent`) |
+| Repositories | [`Zeptaz/hutch_resolve`](https://github.com/Zeptaz/hutch_resolve) (this repo) · [`Zeptaz/hutch_zeptazvoice`](https://github.com/Zeptaz/hutch_zeptazvoice) (Voice service) |
 
-Start with [context.md](context.md), the agent-maintained source of truth, and the owner plans for [Harry](docs/plans/harry.md), [Jayith](docs/plans/jayith.md), and [Tevin](docs/plans/tevin.md). [Shared contracts](docs/contracts.md) distinguish implemented APIs from planned or externally dependent behavior.
+**Team Zeptaz**
 
-## Start and inspect
+| Member | Role |
+| --- | --- |
+| Naveen Harry | Backend and integration: Resolve APIs, business services, database and migrations, security, Voice adapter integration |
+| Tevin Silverster | Conversation and AI: Gemini extraction, reply rewrite, knowledge-card answers, dialogue flow, CRM adapter |
+| Jayith Wijethunge | Frontend: customer chat and voice call interface, agent dashboard, landing page, hosting |
+| Ojith Adithya | Documentation and presentation: technical document, README and pitch deck |
 
-1. Copy `.env.example` to `.env` and change the local development passwords if desired.
-2. Run `powershell -ExecutionPolicy Bypass -File scripts/start.ps1`.
-3. On a fresh Docker volume, PostgreSQL 18 applies both SQL migrations and loads the initial run automatically.
-4. Adopt the existing SQL baseline and application migrations with `python -m alembic upgrade head` (the migration connection uses `MIGRATION_DATABASE_URL`). Connect with any PostgreSQL client at `localhost:55432`, database `hutch_resolve`, user `hutch_admin`. The sandbox account is `hutch_sandbox`; the application account is `hutch_resolve_app`.
-5. After migrations are current, run `powershell -ExecutionPolicy Bypass -File scripts/reset.ps1` to create a new active fixture run. The reset atomically retires earlier runs and revokes existing sessions/Voice bindings while retaining historical rows. `scripts/stop.ps1` stops the database without removing its Docker volume.
+> All data in this repository is **synthetic**. No HUTCH system, API, credential or real customer record is used or connected.
 
-## Start the backend foundation
+---
 
-The backend exposes process liveness/readiness, anonymous/demo session lifecycle, customer-scoped account and case reads, persisted A/D ledger, B DATA_DEPLETION, C CONNECTIVITY, E captured-payment and F VAS dispute investigations, action proposal/confirmation, operation polling, Trust Receipts, agent review APIs and text conversations. The in-process conversation controller also handles authenticated Voice callbacks through the Resolve-owned bridge. The B fixture keeps byte depletion and the out-of-bundle LKR debit in separate calculations. E distinguishes payment capture, fulfilment and ledger credit and does not advise a second payment. F does not infer consent from a missing activation record; a future VAS renewal stop remains separate from past-charge review. The C investigation requires fresh matching checks/incidents and does not infer healthy service or an unsupplied ETA. Accepted actions and agent review-ticket sync run through an in-process leased worker and a separate mock sandbox-write connection. Without `SANDBOX_DATABASE_URL`, confirmed actions and ticket sync remain pending, with no success claim. Demo logins are disabled until `DEMO_IDENTITIES_JSON` is configured with credential hashes and fixed synthetic run/account IDs. Provider results are synthetic and never indicate a real HUTCH system change. Set Resolve's `VOICE_HMAC_SECRET` to the same value as Voice's `HUTCH_RESOLVE_HMAC_SECRET`, set `VOICE_BASE_URL`, and allow the configured browser origin in Voice. Replace the `.env.example` application secret before starting the server; use `APP_COOKIE_SECURE=true` under HTTPS.
+## Problem statement
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-dev.txt
-python -m uvicorn backend.resolve.app.main:app --host 127.0.0.1 --port 8080
+Customers can see their balance, package and usage figures, but not **why** they changed. A typical complaint is *"I reloaded Rs. 1,000 this morning. Why is my balance only Rs. 420?"* Answering it means rebuilding several events (a recharge, a package renewal, a VAS charge and billable usage) in the right order. Self-care shows the figures, agents check several systems by hand, and a generic chatbot cannot prove anything about money.
+
+- **Primary users:** HUTCH prepaid customers with a balance, recharge, data, package, VAS or connectivity complaint.
+- **Secondary users:** customer-care agents who receive escalated cases.
+
+## Solution overview
+
+Resolve is a resolution layer behind HUTCH's customer channels. It turns a complaint in English, Sinhala or Tamil (text or voice) into a structured case, reads the relevant account records, and reconciles them with deterministic rules. It then shows the calculation and its source records, offers a safe allow-listed action that the customer must confirm, and issues a **Trust Receipt**. When evidence is partial or conflicting it does not guess: it creates a review ticket for a human agent with the investigation attached.
+
+**AI handles language only. Every number, decision and account change is made by code.**
+
+## Key features
+
+- **Four complaint types, six seeded cases (A–F):** balance/recharge deduction (A), data depletion (B), no internet with an active package (C), balance conflict (D), payment captured but not credited (E), VAS dispute without an activation record (F).
+- **Exact reconciliation** in integer cents (e.g. 1,000 − 499 − 60 − 21 = 420); quota and money kept in separate calculations.
+- **Evidence states:** SUFFICIENT, PARTIAL or CONFLICTING, decided by rules; conflicts block account changes.
+- **Three allowed actions**, each needing an explicit, case-bound confirmation with a 5-minute hash-bound proposal: `DEACTIVATE_VAS`, `SEND_SETTINGS_INSTRUCTIONS`, `CREATE_REVIEW_TICKET`.
+- **Live operation status:** PENDING until the worker records SUCCEEDED or FAILED; pending is never shown as success. Idempotency keys give exactly one account change on retries.
+- **Trust Receipt:** append-only, with a SHA-256 digest.
+- **Trilingual chat:** English, Sinhala and Tamil, including Singlish and Tanglish. An EN / Sinhala / Tamil interface toggle shows draft (unreviewed) Sinhala and Tamil strings.
+- **Voice and text on one engine:** final voice transcripts and typed messages use the same conversation service.
+- **Grounded how-to answers** from approved knowledge cards only.
+- **Package activation (feature-flagged, off in the demo):** a fourth action, `ACTIVATE_PACKAGE`, is in the code and contract v1.2.0 but stays disabled unless `RESOLVE_PACKAGE_ACTIVATION_ENABLED=true`.
+- **Optional HubSpot CRM:** with `CRM_PROVIDER=hubspot`, review tickets are created in HubSpot with the evidence summary, linked to a synthetic contact and kept in sync with the agent's notes and closure. The hosted demo uses the built-in mock CRM.
+- **Agent dashboard (`/agent`):** review queue, evidence, actions, conversation, receipt and history, internal notes and review status.
+
+## Technology stack
+
+| Layer | Technology (pinned versions) |
+| --- | --- |
+| Frontend | React 19, TypeScript 5.9, Vite 8, Tailwind CSS 4, shadcn/ui (Radix UI), React Router, Lucide, Sonner |
+| Backend | Python 3.12, FastAPI 0.115.12, Uvicorn 0.34, Pydantic 2.13, SQLAlchemy 2.0.41, Alembic 1.18.5, psycopg 3, httpx 0.28 |
+| Data | PostgreSQL 18 (Docker, `postgres:18-alpine`): `sandbox` schema (synthetic CRM, charging, recharge, VAS, usage, incidents) and `resolve` schema (cases, investigations, proposals, operations, receipts, audit) |
+| AI | Google Gemini via `google-genai` 2.19.0 |
+| Voice | Zeptaz Voice adapter (separate repo): Python, FastAPI, WebSocket PCM16 audio, HMAC-SHA256 to Resolve |
+| Testing | pytest 8.4, Playwright 1.63, oxlint |
+
+## Architecture overview
+
+```
+Browser (React)  ── customer chat /, voice panel, agent dashboard /agent
+   │  HTTP /api/v1 (session cookie + CSRF)        │ WebSocket audio
+   ▼                                              ▼
+Resolve backend (FastAPI, ONE process)       Zeptaz Voice service ── Gemini Live
+ ├─ API routes ◄──────── HMAC-signed final transcripts ─┘
+ ├─ Conversation service ── Google Gemini API (extract · rewrite · answer)
+ ├─ Resolve facade → Investigation engine (ledger, quota, service rules)
+ └─ Action worker (leased, idempotent) → receipts
+   │
+   ▼
+PostgreSQL 18:  resolve schema (app role)  ·  sandbox schema (synthetic; separate write role)
+   ┊ replaced by adapters in production
+Future HUTCH systems: NOT connected (identity, billing, VAS, usage, CRM)
 ```
 
-The application reads `DATABASE_URL` and `SANDBOX_DATABASE_URL` from `.env`; Resolve uses `hutch_resolve_app` for business state and the separate `hutch_sandbox` role for synthetic writes and configured one-shot fault controls. `GET /api/v1/healthz` checks process liveness. `GET /api/v1/readyz` checks PostgreSQL and schema revision `0011_turn_recovery`. Alembic uses the local admin `MIGRATION_DATABASE_URL`; revision 0001 validates/adopts schemas 001-003, and revisions 0002-0011 add lifecycle, investigation, proposal/confirmation, review sync, Voice consent fencing, conversation persistence and turn recovery. Opt-in PostgreSQL tests verify action recovery, review sync, text replay, guest upgrade and signed Voice confirmation.
-
-## Start the frontend
-
-From `frontend`, run `npm ci` and `npm run dev`. The Vite app serves customer chat/call at `/` and the agent dashboard at `/agent`; `/api` proxies to Resolve on port 8080. `VITE_API_MODE=live` is the default. Use `VITE_API_MODE=mock` only for visibly synthetic UI development. The browser Voice panel needs the separately running Zeptaz Voice service and its configured Resolve HMAC and browser Origin settings. See [frontend/README.md](frontend/README.md) for browser setup and known limits.
-
-Reset accepts an optional UUID: `scripts/reset.ps1 -RunId <uuid>`. Fixture IDs are deterministically derived under that run, so repeatable inputs produce repeatable records and different runs do not collide. A duplicate run UUID fails transactionally without retiring the current run or revoking its sessions.
-HTTP logs are compact JSON with request ID, route template, method, status, elapsed time and a stable error code. Request/response bodies, headers, query values and exception text are omitted.
-
-The database volume is Docker-managed, outside the OneDrive-synced repository. `docker compose down -v` permanently removes local database history.
-
-## Local demo database and tests (macOS/Linux)
-
-- `sh scripts/dev_db.sh reset --demo` recreates a disposable PostgreSQL on `127.0.0.1:55434` (container `hutch-dev-db`, never the shared compose database), migrates it to head, clears the seeded faults and arms one CRM outage. It prints the URLs for `.env`. Restart the backend afterwards.
-- A fresh fixture run arms 13 one-shot faults (late and duplicate postings, VAS write failures, a CRM outage), so the first journeys after a reset are deliberately imperfect. `python scripts/demo_faults.py list` shows them; `clear` gives a predictable happy path; `arm crm-outage` (or `crm-lost-response`, `vas-rejected`, ...) prepares exactly the failure to show.
-- `sh scripts/run_db_tests.sh` runs every opt-in PostgreSQL test file on its own freshly reset database (a separate `hutch-test-db` on port 55435, never the app's database) with the derived fixture runs the tests expect. The default `pytest` run skips all of them, so run this before calling the backend verified.
-- Demo phrasing: the fixture day is 2 October and its opening balance snapshots are at 08:00, so a free-text window that starts earlier (e.g. "this morning" from 00:00) can report the opening balance as missing. The CRM branch's fixture move to 1 October 00:00 was not ported (Harry's fixture; see `docs/plans/hubspot-crm.md`).
-- Languages: the interface is English, Sinhala and Tamil. In text chat, findings and offers are rewritten into the customer's style under a strict fact check (CB-001); outcomes, consent prompts and Voice stay deterministic, using `locales/si.json`/`ta.json` only after a fluent reviewer marks them `REVIEWED` (see `LANGUAGE_REVIEW.md`).
-
-## HubSpot CRM (optional)
-
-Review tickets can go to a real HubSpot account instead of the mock CRM. Only synthetic case references and summaries are sent; sync is one-way (Resolve to HubSpot).
-
-1. In HubSpot, create a Service Key (Settings, Integrations, Service Keys) with ticket read/write and ticket schema read/write. For customer contacts on each ticket also add `crm.objects.contacts.read`/`write` and `crm.schemas.contacts.read`/`write`; without them tickets are still created, just not linked to a contact. Put the key in `.env` as `HUBSPOT_ACCESS_TOKEN`; never commit or share it.
-2. `python scripts/hubspot_setup.py check --write-env` writes the Hub ID, web domain, pipeline and stage IDs to `.env` and reports whether contacts are ready; `properties` creates the `resolve_*` ticket and contact fields; `spike --pause` runs a live create/duplicate/note/stage test and archives its tickets.
-   Each review ticket is linked to a HubSpot contact for the synthetic customer (name, line, region, language, marked `SYNTHETIC_DEMO`; never phone or e-mail), found by its line so one demo customer keeps one contact across resets.
-3. Set `CRM_PROVIDER=hubspot` and restart. The backend checks the key, stages and properties at startup and logs a warning if anything is missing.
-4. Optional agent link: set `VITE_CRM_NAME=HubSpot` and `VITE_CRM_TICKET_URL=https://<web domain>/contacts/<hub id>/record/0-5/{id}` in `frontend/.env.local`.
-
-Fallback: `CRM_PROVIDER=mock` and a restart restore the built-in mock CRM. Details, limits and verification: [docs/plans/hubspot-crm.md](docs/plans/hubspot-crm.md).
+There is no separate chatbot service, message broker or Redis. The full diagram (Figure 1) and data flow are in the Solution & Technical Document.
 
 ## Repository map
 
-- `database/migrations/001_sandbox.sql`: synthetic CRM, charging, recharge, product/VAS, usage/quota and service-assurance records.
-- `database/migrations/002_resolve.sql` and `003_scope_constraints.sql`: initial Resolve persistence and cross-run ownership constraints.
-- `database/seed.sql`: fixture version 2 with six deterministic prepaid support cases and provider fault profiles.
-- `backend/resolve/app/`: FastAPI startup, health/readiness, error envelope, session lifecycle, auth context, and account endpoint.
-- `backend/resolve/providers/`: vendor-neutral PostgreSQL adapter and deterministic ledger reconciliation function; `crm.py` (external CRM port) and `hubspot.py` (optional HubSpot adapter).
-- `backend/resolve/migrations/`: Alembic environment, non-destructive baseline adoption, lifecycle schema and case-investigation persistence.
-- `scripts/`: start/stop/reset (PowerShell), fixture UUID generation, `dev_db.sh` and `run_db_tests.sh` (macOS/Linux), `demo_faults.py` (fault control) and `hubspot_setup.py` (HubSpot setup and spike).
-- `docs/mock-environment.md`: relationships, assumptions, failure modes and future provider contracts.
+| Path | Contents |
+| --- | --- |
+| `backend/resolve/app/` | FastAPI app, auth/sessions, account, case, action, review, conversation and voice routes |
+| `backend/resolve/conversation/` | Conversation module: extraction, routing, rewrite, grounded answers, telemetry |
+| `backend/resolve/providers/` | Sandbox adapters and deterministic reconciliation |
+| `backend/resolve/migrations/` | Alembic migrations |
+| `database/` | Bootstrap, SQL schemas, seed fixtures (six cases), knowledge cards |
+| `frontend/` | React app (customer `/` and agent `/agent`), Playwright tests in `frontend/e2e/` |
+| `docs/contracts/` | OpenAPI 3.1 contract (`openapi.json`) and examples |
+| `scripts/` | Start / stop / reset scripts and fixture generator |
+| `tests/` | Backend unit and opt-in PostgreSQL integration tests |
 
-## Boundaries and security
+## Setup and installation
 
-All customer names, line aliases, transactions, offers, usage and incidents are synthetic. No real telephone numbers, HUTCH credentials, production system access, or actual vendor-specific schema is represented. `.env` is ignored by Git. The published Compose port is local development infrastructure; do not expose it to a network.
+**Requirements:** Docker Desktop, Python 3.12, Node.js 20.19+ or 22.12+ with npm (required by Vite 8), and a Google Gemini API key (paid tier recommended; the free tier runs out of quota quickly).
 
-The reviewed master architecture is `HUTCH_Resolve_System_Architecture_Reviewed.pdf` in the competition workspace. HUTCH integration access is unavailable for the hackathon; provider contracts in the docs describe a future application implementation, not deployed services here.
+1. **Configure the environment**
+   ```sh
+   cp .env.example .env
+   ```
+   Edit `.env`: set local database passwords, replace `APP_SECRET_KEY`, and add:
+   ```
+   GEMINI_API_KEY=<your key>
+   GEMINI_TEXT_MODEL=gemini-3.5-flash-lite
+   ```
+   Demo sign-in stays disabled until `DEMO_IDENTITIES_JSON` holds credential hashes; the demo identities are shared separately with the judges.
+
+2. **Start PostgreSQL** (a fresh volume applies the SQL schemas and loads the first fixture run)
+   ```powershell
+   # Windows
+   powershell -ExecutionPolicy Bypass -File scripts/start.ps1
+   ```
+   ```sh
+   # macOS / Linux
+   docker compose --env-file .env up -d --wait
+   ```
+
+3. **Install the backend and apply migrations**
+   ```sh
+   python -m venv .venv
+   source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
+   python -m pip install -r requirements-dev.txt
+   python -m alembic upgrade head
+   ```
+
+4. **Create a fresh synthetic fixture run** (retires earlier runs and revokes old sessions)
+   ```powershell
+   # Windows
+   powershell -ExecutionPolicy Bypass -File scripts/reset.ps1
+   ```
+   ```sh
+   # macOS / Linux
+   python scripts/seed_run.py "$(uuidgen)" /tmp/hutch-seed.sql --retire-active
+   docker compose --env-file .env cp /tmp/hutch-seed.sql postgres:/tmp/hutch-seed-run.sql
+   docker compose --env-file .env exec -T postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/hutch-seed-run.sql'
+   ```
+
+5. **Install the frontend**
+   ```sh
+   cd frontend && npm ci
+   ```
+
+## How to run
+
+```sh
+# Terminal 1: Resolve backend on http://127.0.0.1:8080
+python -m uvicorn backend.resolve.app.main:app --host 127.0.0.1 --port 8080
+
+# Terminal 2: frontend on http://localhost:5173 (proxies /api to :8080)
+cd frontend && npm run dev
+```
+
+- Landing page: **http://localhost:5173/**
+- Customer chat: **http://localhost:5173/chat**
+- Agent dashboard: **http://localhost:5173/agent**
+- Health: `GET /api/v1/healthz` (process) · `GET /api/v1/readyz` (database and migrations)
+
+**Voice (optional):** run the Zeptaz Voice service from `Zeptaz/hutch_zeptazvoice` (tag `v1.0.1` on `main`) following its README. Set Resolve's `VOICE_BASE_URL` and `VOICE_HMAC_SECRET`; the secret must equal Voice's `HUTCH_RESOLVE_HMAC_SECRET`, and Voice must allow the browser origin. Text chat works without Voice.
+
+**Suggested demo:** case A (balance deduction → evidence → stop VAS → Trust Receipt), then case D (LKR 70 conflict → no account change → review ticket in `/agent`).
+
+## How to test
+
+```sh
+# Backend unit tests (fakes; no database needed). v1.0.1: 529 passed, 49 PostgreSQL-gated skipped
+python -m pytest -q
+
+# Conversation module only
+python -m pytest tests/conversation -q
+
+# Opt-in integration tests against a THROWAWAY PostgreSQL (never the shared one)
+sh tests/conversation/run_integration.sh
+
+# Frontend checks
+cd frontend
+npm run typecheck && npm run lint
+npx playwright install chromium
+npm run test:e2e          # mock-mode browser tests on an isolated Vite port
+```
+
+The live Playwright suite (`npm run test:e2e:live`) changes data and must only run against a disposable, freshly migrated database; see `frontend/e2e/README.md`.
+
+## API and external service requirements
+
+| Service | Required? | Notes |
+| --- | --- | --- |
+| Google Gemini API | Yes for free-text chat and voice | `GEMINI_API_KEY`, `GEMINI_TEXT_MODEL`. There is no automatic fallback model; on a timeout or HTTP 429 the chat shows structured buttons. Without a key, structured buttons still work and voice returns a safe "unavailable" response. |
+| Docker / PostgreSQL 18 | Yes | Local only, bound to `127.0.0.1:55432`; never expose it to a network. |
+| Zeptaz Voice service | Optional | Separate process; needed only for the voice call panel. |
+| HubSpot CRM API | Optional | Only with `CRM_PROVIDER=hubspot` and `HUBSPOT_ACCESS_TOKEN`; the default `mock` keeps tickets in the sandbox. Sends only case references, a synthetic summary and the synthetic contact. |
+| HUTCH systems | No | Not connected. All adapters read and write the synthetic sandbox. |
+
+The prototype's own API (all under `/api/v1`) is defined in `docs/contracts/openapi.json` (OpenAPI 3.1). These are prototype endpoints, not HUTCH endpoints.
+
+**Secrets** (`GEMINI_API_KEY`, `APP_SECRET_KEY`, `VOICE_HMAC_SECRET`, voice grant keys, database passwords, `DEMO_IDENTITIES_JSON`) live only in `.env`, which Git ignores. Never commit them.
+
+## Known limitations
+
+- **No HUTCH integration:** synthetic sandbox only; production would replace the adapters.
+- **Demo identity:** pre-set demo sign-in; no OTP or real customer verification.
+- **Voice:** tested with a fake model and a live probe using real Gemini Live and synthesized speech (9/9 turns spoken); a physical microphone call has not been verified. Calls are capped at 120 s.
+- **AI quota:** the Gemini free tier ran out during testing; a paid key is needed for a reliable demo. There is no automatic fallback model; quota errors fall back to structured buttons.
+- **Languages:** Sinhala and Tamil test cases, UI strings and machine-rewritten replies have not been reviewed by a fluent speaker; the interface toggle shows the draft strings.
+- **AI accuracy:** extraction scored 71/71 on a 71-case team-written set (`extract-v7`); an earlier 57-case run had 2 timeouts. Critical values are confirmed before any action.
+- **CRM:** the HubSpot adapter is verified with one worker; a lease overrun with several workers is a known open issue.
+- **Package activation:** implemented behind a flag that is off by default; not part of the demo.
+- **Knowledge:** 12 seeded cards (all from public HUTCH pages); 7 further drafts from public HUTCH pages are unreviewed and excluded.
+- **Scale:** designed for one Resolve worker and one Voice worker; multi-worker soak testing is open.
+- **Setup scripts** are PowerShell; macOS/Linux commands are given above.
+- **Status updates** use polling, not push.
+
+## Third-party components
+
+| Component | Use | Licence |
+| --- | --- | --- |
+| FastAPI, Uvicorn, Pydantic, SQLAlchemy, Alembic, psycopg, httpx, python-dotenv, cryptography | Backend | Open source (see each package) |
+| google-genai | Gemini SDK | Apache 2.0 |
+| PostgreSQL 18 (Docker image) | Database | PostgreSQL Licence |
+| React, Vite, TypeScript, Tailwind CSS, shadcn/ui, Radix UI, React Router, Lucide, Sonner | Frontend | Open source (see each package) |
+| Noto Sans Sinhala / Tamil, Plus Jakarta Sans | Fonts | SIL Open Font Licence |
+| pytest, Playwright, oxlint | Testing | Open source |
+| Google Gemini API | Hosted AI service | Google terms of service |
+| HubSpot CRM API (optional) | Review tickets in a real CRM | HubSpot terms of service |
+| **Zeptaz Voice service** | Voice layer | **Pre-existing team IP**, disclosed; kept in a separate repository. The Resolve adapter and integration are part of this submission. |
+
+Exact versions are pinned in `requirements*.txt` and `frontend/package-lock.json`.
+
+## AI tools and models used
+
+**In the product**
+
+| Purpose | Model |
+| --- | --- |
+| Complaint extraction, reply rewrite, how-to answers | `gemini-3.5-flash-lite` (prompts `extract-v7`, `rewrite-v3`, `answer-v3`) |
+| Voice (speech in/out) | `gemini-3.1-flash-live-preview` (Gemini Live) |
+
+Prompts are versioned, outputs forced to a JSON schema at temperature 0, and every model output is checked by code before use. Retrieval is lightweight: top-3 matching knowledge cards, no vector database or fine-tuning. Arithmetic, evidence state, eligibility, confirmation, actions and receipts are never delegated to the model.
+
+**Token usage (measured):** 25 logged extraction calls on 3 October 2026 averaged 1,788 input / 127 output / 1,915 total tokens (median latency 1.6 s). At Google's Standard-tier price for `gemini-3.5-flash-lite` (US$0.30 / US$2.50 per 1M input / output tokens, pricing page updated 1 October 2026), a text journey costs about US$0.0017 in English and US$0.0037 in Singlish. That is about US$2.72 per 1,000 journeys, assuming 2 or 5 calls per journey (see Section 9 of the Solution & Technical Document; Section 17 has the 16-week implementation plan and Gantt chart).
+
+**In development**
+
+AI coding assistants used: Naveen Harry: OpenAI Codex; Tevin Silverster: Claude (Anthropic); Jayith Wijethunge: Claude Code (Anthropic); Ojith Adithya: Claude (Anthropic). AI-generated code was used, and all of it was reviewed and tested by the team, which is responsible for its correctness, security and originality.
+
+## Hosted demo
+
+The live demo at https://resolve.zeptaz.com follows `main`:
+
+- **Vercel** serves the React app; `frontend/vercel.json` sends `/api/*` to Resolve.
+- **Railway** runs Resolve (`railway.json` runs `scripts/hosted_db_setup.py`, then Uvicorn), the Voice service and PostgreSQL 18.
+- The hosted demo uses the built-in mock CRM and synthetic data only. Demo sign-in details are shared separately with the judges and are never committed.
+
+## Project documents
+
+| Document | Contents |
+| --- | --- |
+| [`context.md`](context.md) | Team source of truth: status, verification results and open items |
+| [`docs/contracts.md`](docs/contracts.md) | Canonical API, authorization and data contracts |
+| [`docs/contracts/openapi.json`](docs/contracts/openapi.json) | OpenAPI 3.1 contract for all `/api/v1` routes |
+| [`docs/plans/`](docs/plans) | Owner plans for backend, conversation, frontend and the HubSpot CRM work |
+| [`docs/changelogs/`](docs/changelogs) | Chatbot and core-engine change logs |
+
+## Submission materials
+
+| Item | Where |
+| --- | --- |
+| Solution & Technical Document (PDF) | Provided with the IgnitX 2026 submission |
+| Presentation deck | Provided with the IgnitX 2026 submission |
+| Demo video | To be added |
+| Live demo | https://resolve.zeptaz.com |
+| Demo credentials | Shared separately with the judges |
