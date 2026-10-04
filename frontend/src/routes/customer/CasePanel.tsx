@@ -12,6 +12,7 @@ import { hasMessage, useI18n, type Translate } from '@/i18n/context'
 import { humanize } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { ReceiptDownloadButton } from './cards/ChatCards'
+import { RecordsSection, type ChatRecord, type RecordFocus } from './Records'
 
 const CASE_TONE: Record<string, Tone> = {
   OPEN: 'info',
@@ -27,6 +28,9 @@ function caseStatus(t: Translate, status: string) {
 }
 
 export type CasePanelProps = {
+  /** The chat's records (checks, findings, decisions, progress, receipts), newest first. */
+  records: ChatRecord[]
+  recordFocus: RecordFocus | null
   conversation: ConversationView | null
   refreshKey: number
   disabled: boolean
@@ -38,14 +42,14 @@ export type CasePanelProps = {
 /** Desktop: case context beside the chat. */
 export function CasePanel(props: CasePanelProps) {
   return (
-    <aside aria-label="Your cases" className="relative hidden w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-sidebar p-4 lg:flex">
+    <aside aria-label="Records and cases" className="relative hidden w-96 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-sidebar p-4 lg:flex">
       <CasePanelBody {...props} />
     </aside>
   )
 }
 
 /** Case list, current case, receipt and human review. Every status shown here comes from Resolve. */
-export function CasePanelBody({ conversation, refreshKey, disabled, onSelectCase, onReviewRequested }: CasePanelProps) {
+export function CasePanelBody({ records, recordFocus, conversation, refreshKey, disabled, onSelectCase, onReviewRequested }: CasePanelProps) {
   const { t } = useI18n()
   const activeId = conversation?.active_case_id ?? null
   const [active, setActive] = useState<CaseView | null>(null)
@@ -69,7 +73,8 @@ export function CasePanelBody({ conversation, refreshKey, disabled, onSelectCase
 
   return (
     <>
-      <h2 className="text-sm font-semibold">{t('panel.yourCases')}</h2>
+      <RecordsSection records={records} focus={recordFocus} />
+      <h2 className="border-t pt-4 text-sm font-semibold">{t('panel.yourCases')}</h2>
       {!conversation || conversation.cases.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {t('panel.empty')}

@@ -4,7 +4,7 @@ import { CallAudio, MicError, type MicErrorKind } from './audio'
 import { openVoiceSocket, VOICE_PROTOCOL, type VoiceSocket } from './socket'
 
 /** Voice caps a call at 120 s (HUTCH_VOICE_MAX_SESSION_SECONDS). */
-export const CALL_LIMIT_MS = 120_000
+export const CALL_LIMIT_MS = 600_000 // matches HUTCH_VOICE_MAX_SESSION_SECONDS=600 on the Voice service
 
 /** The server permanently records an expired grant key, so a later user retry must rotate it. */
 export function shouldRotateGrantKey(error: unknown): boolean {

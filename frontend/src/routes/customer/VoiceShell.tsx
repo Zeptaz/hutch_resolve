@@ -10,7 +10,7 @@ import { operationTone } from '@/components/tones'
 import { Button } from '@/components/ui/button'
 import { hasMessage, useI18n } from '@/i18n/context'
 import { formatTime, humanize } from '@/lib/format'
-import { VoiceCall, type CallState } from '@/voice/call'
+import { CALL_LIMIT_MS, VoiceCall, type CallState } from '@/voice/call'
 import type { VoiceResolveResult } from '@/voice/contracts'
 import { offerAfterVoiceResult, reconcileVoiceOffer, type OfferState } from '@/voice/offerState'
 import { ReceiptDownloadButton } from './cards/ChatCards'
@@ -25,7 +25,11 @@ function sameIds(left: string[], right: string[]) {
   return left.length === right.length && left.every((id, index) => id === right[index])
 }
 
-/** Customer call panel mounted by ChatShell; it shares the chat's session and conversation. */
+/**
+ * Customer call panel mounted by ChatShell; it shares the chat's session and conversation.
+ * A call that ends (caller, time limit or Voice) stays on this screen with its results; only
+ * "Back to chat" leaves it. `onCallEnd` lets the chat refresh its cases in the background.
+ */
 export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   session: SessionView
   conversationId: string
@@ -214,7 +218,7 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         <p className="text-xs text-muted-foreground" aria-live="polite">
           {state.phase === 'requesting' ? 'Requesting a secure call…' : state.phase === 'connecting' ? 'Connecting…' :
             active ? state.activity === 'listening' ? 'Listening' : state.activity === 'speaking' ? 'Speaking' : 'Thinking' :
-            state.phase === 'ended' ? 'Call ended. Continue by text or call again.' : 'Press the microphone to start.'}
+            state.phase === 'ended' ? endedText(state.endReason) : 'Press the microphone to start.'}
         </p>
         {active && <p className="text-xs text-muted-foreground" aria-live="polite">
           {state.micActive ? 'Microphone is picking up your voice.' : state.activity === 'thinking' ?
@@ -313,6 +317,11 @@ function CallOperationCard({ operation }: { operation: OperationView }) {
       </div>}
     </CardFrame>
   )
+}
+
+function endedText(reason: string | null) {
+  if (reason === 'session_limit') return `The call reached its ${CALL_LIMIT_MS / 60_000}-minute limit. Your results are below; call again or continue by text.`
+  return 'Call ended. Your results are below; call again or continue by text.'
 }
 
 function MockTurnButtons() {

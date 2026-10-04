@@ -96,3 +96,49 @@ test('a review confirmed during a call keeps the call open and shows the review 
   await expect(page.getByText('Review receipt')).toBeVisible()
   await expect(page.getByText(/^Ticket number SIM-TKT-/)).toBeVisible()
 })
+
+test('checks and decided offers are kept as records beside the chat, without buttons', async ({ page }) => {
+  await page.goto('/chat')
+  await expect(page.getByRole('textbox').last()).toBeEnabled()
+  await page.waitForLoadState('networkidle')
+  await mockControl(page, 'continueAsDemoLine')
+  await page.reload()
+  await expect(page.getByText("What's going on?")).toBeVisible()
+
+  const box = page.getByRole('textbox').last()
+  await box.fill('I recharged LKR 1000 but my balance is LKR 420')
+  await box.press('Enter')
+  const thread = page.getByRole('main')
+  const records = page.getByRole('region', { name: 'Records' }).first()
+
+  // Only the offer waiting for an answer stays in the thread; the checks are records.
+  await expect(thread.getByRole('button', { name: 'Yes, go ahead' })).toBeVisible({ timeout: 15_000 })
+  await expect(thread.getByText('Saved to records:').first()).toBeVisible()
+  await expect(records.getByRole('button', { name: /Balance check/ })).toBeVisible()
+
+  await thread.getByRole('button', { name: 'Yes, go ahead' }).click()
+  await expect(thread.getByRole('button', { name: 'Yes, go ahead' })).toHaveCount(0)
+  await thread.getByRole('button', { name: 'Your decision' }).click()
+  const decision = records.getByRole('region', { name: 'Your decision' })
+  await expect(decision.getByText('You accepted')).toBeVisible()
+  await expect(decision.getByRole('button')).toHaveCount(0)
+})
+
+test('an ended call stays on the call screen with its results until the caller goes back', async ({ page }) => {
+  await page.goto('/chat')
+  await expect(page.getByRole('textbox').last()).toBeEnabled()
+  await page.waitForLoadState('networkidle')
+  await mockControl(page, 'continueAsDemoLine')
+  await page.reload()
+
+  await page.getByRole('button', { name: 'Call', exact: true }).click()
+  await page.getByRole('button', { name: 'Start voice call' }).click()
+  await page.getByRole('button', { name: 'Try a balance issue' }).click()
+  await expect(page.getByRole('heading', { name: 'Confirm an action' })).toBeVisible()
+  await page.getByRole('button', { name: 'End call' }).click()
+
+  await expect(page.getByText('Call ended. Your results are below; call again or continue by text.')).toBeVisible()
+  await expect(page.getByText('Talk to Resolve')).toBeVisible()
+  await page.getByRole('button', { name: 'Back to chat' }).click()
+  await expect(page.getByText('Talk to Resolve')).toHaveCount(0)
+})

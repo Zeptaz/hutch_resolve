@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router'
 import { newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
-import type { ComplaintType, ConversationView, Decision, Language, LoginRequest, OperationView, ProposalView, SessionView, TurnInput } from '@/api/types'
+import type { Card, ComplaintType, ConversationView, Decision, Language, LoginRequest, OperationView, ProposalView, SessionView, TurnInput } from '@/api/types'
 import { BrandMark } from '@/components/BrandMark'
 import { ErrorState, LoadingState } from '@/components/states'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -20,6 +20,7 @@ import { ChatCard, CitationList } from './cards/ChatCards'
 import { ConfirmationCard, type ProposalState } from './cards/ConfirmationCard'
 import { OperationTracker } from './cards/OperationTracker'
 import { QuestionPrompt } from './QuestionPrompt'
+import { SavedRecordLinks, type ChatRecord, type RecordFocus } from './Records'
 import { VoiceShell } from './VoiceShell'
 
 // Each language is named in its own script so it is recognisable whatever the current UI language.
@@ -64,6 +65,7 @@ export function ChatShell({ session, onDemoLogin }: {
   const [decisions, setDecisions] = useState<Record<string, ProposalState>>({})
   const [caseRefresh, setCaseRefresh] = useState(0)
   const [casesOpen, setCasesOpen] = useState(false)
+  const [recordFocus, setRecordFocus] = useState<RecordFocus | null>(null)
   const [voiceOpen, setVoiceOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [loginIdentity, setLoginIdentity] = useState('')
@@ -261,7 +263,43 @@ export function ChatShell({ session, onDemoLogin }: {
     <ConfirmationCard key={p.id} proposal={p} state={proposalState(p)} disabled={turnOutcomeUncertain} onDecide={(d) => void decide(p, d)} />
   )
 
+  // Receipts: every card that no longer needs an answer, and each action's progress, become dated records
+  // beside the chat (in the Cases sheet on a phone). An open offer and the latest package list stay in the
+  // thread until answered; a decided offer turns into a record without buttons.
+  const latestReplyId = conversation?.messages.findLast((m) => m.speaker === 'ASSISTANT')?.id
+  const keepsInline = (messageId: string, card: Card) =>
+    (card.type === 'confirmation' && ['open', 'submitting'].includes(proposalState(card.data).kind) &&
+      Date.parse(card.data.expires_at) > Date.now()) || // an expired offer is a record too
+    (card.type === 'package_catalogue' && messageId === latestReplyId)
+  const recordsByMessage = new Map<string, ChatRecord[]>()
+  for (const m of conversation?.messages ?? []) {
+    const result = m.speaker === 'ASSISTANT' ? m.result : null
+    if (!result) continue
+    const saved: ChatRecord[] = result.cards.flatMap((card, i) => keepsInline(m.id, card) ? [] : [{
+      key: `${m.id}-${i}`, time: m.created_at, title: recordTitle(t, card),
+      node: <ChatCard card={card} renderConfirmation={(c) => renderProposal(c.data)} onPackageSelect={selectPackage}
+                      packageSelectionDisabled />,
+    }])
+    for (const id of result.operation_ids) {
+      saved.push({
+        key: `op-${id}`, time: m.created_at, title: t('record.progress'),
+        node: <OperationTracker operationId={id} onUpdate={markAcceptedFromOperation} onSettled={() => {
+          setCaseRefresh((n) => n + 1)
+          if (conversation) void reload(conversation.id)
+        }} />,
+      })
+    }
+    if (saved.length) recordsByMessage.set(m.id, saved)
+  }
+  const records = [...recordsByMessage.values()].flat().reverse()
+  const openRecord = (key: string) => {
+    setRecordFocus((current) => ({ key, n: (current?.n ?? 0) + 1 }))
+    if (!window.matchMedia('(min-width: 1024px)').matches) setCasesOpen(true)
+  }
+
   const panelProps: CasePanelProps = {
+    records,
+    recordFocus,
     conversation,
     refreshKey: caseRefresh,
     disabled: sending || turnOutcomeUncertain,
@@ -291,7 +329,11 @@ export function ChatShell({ session, onDemoLogin }: {
       setCaseRefresh((n) => n + 1)
       void reload(conversation.id)
     }
-    return <VoiceShell session={session} conversationId={conversation.id} onClose={returnToChat} onCallEnd={returnToChat} />
+    const refreshAfterCall = () => {
+      setCaseRefresh((n) => n + 1)
+      void reload(conversation.id)
+    }
+    return <VoiceShell session={session} conversationId={conversation.id} onClose={returnToChat} onCallEnd={refreshAfterCall} />
   }
 
   return (
@@ -387,7 +429,9 @@ export function ChatShell({ session, onDemoLogin }: {
                     <Welcome />
                     {conversation.messages.map((m) => {
                       const result = m.speaker === 'ASSISTANT' ? m.result : null
-                      const hasExtras = !!result && (result.cards.length > 0 || result.citations.length > 0 || result.operation_ids.length > 0)
+                      const inline = result ? result.cards.filter((card) => keepsInline(m.id, card)) : []
+                      const saved = recordsByMessage.get(m.id) ?? []
+                      const hasExtras = inline.length > 0 || saved.length > 0 || (result?.citations.length ?? 0) > 0
                       // Replies animate in; the customer's own message already did while it was sending.
                       const animate = m.speaker === 'ASSISTANT' && !!openedWith && !openedWith.has(m.id)
                       const enter = (i: number) =>
@@ -399,8 +443,10 @@ export function ChatShell({ session, onDemoLogin }: {
                           </Bubble>
                           {result && hasExtras && (
                             <div className="flex max-w-xl flex-col gap-2 sm:ml-9">
-                              {result.cards.map((card, i) => (
-                                <div key={`${m.id}-${i}`} {...enter(i)}>
+                              <SavedRecordLinks records={saved} onOpen={openRecord} />
+                              {/* Only what still needs an answer stays here; everything else is in Records. */}
+                              {inline.map((card, i) => (
+                                <div key={`${m.id}-inline-${i}`} {...enter(i)}>
                                   <ChatCard
                                     card={card}
                                     renderConfirmation={(c) => renderProposal(c.data)}
@@ -408,17 +454,6 @@ export function ChatShell({ session, onDemoLogin }: {
                                     packageSelectionDisabled={sending || turnOutcomeUncertain}
                                   />
                                 </div>
-                              ))}
-                              {result.operation_ids.map((id) => (
-                                <OperationTracker
-                                  key={id}
-                                  operationId={id}
-                                  onUpdate={markAcceptedFromOperation}
-                                  onSettled={() => {
-                                    setCaseRefresh((n) => n + 1)
-                                    void reload(conversation.id)
-                                  }}
-                                />
                               ))}
                               <CitationList citations={result.citations} />
                             </div>
@@ -690,4 +725,28 @@ function LanguageToggle({ value, onChange, label }: { value: Language; onChange:
       })}
     </div>
   )
+}
+
+/** The record's name in the side list, from its card type (titles match the cards themselves). */
+function recordTitle(t: Translate, card: Card): string {
+  switch (card.type) {
+    case 'account':
+      return t('card.yourLine')
+    case 'timeline':
+      return t('card.whatHappened')
+    case 'calculation':
+      return card.data.unit === 'BYTES' ? t('card.dataCheck') : t('card.balanceCheck')
+    case 'finding':
+      return t('card.found')
+    case 'confirmation':
+      return t('confirm.decision')
+    case 'ticket':
+      return t('card.reviewRequest')
+    case 'receipt':
+      return t('card.receipt')
+    case 'package_catalogue':
+      return t('package.catalogue')
+    default:
+      return t('card.receipt')
+  }
 }

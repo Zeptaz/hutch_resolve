@@ -89,7 +89,7 @@ def test_a_period_with_no_charges_says_so() -> None:
     result = _ask(h, ctx, conv, "how much was charged for SMS yesterday?", account_topic="CHARGES",
                   charge_category="SMS", history_position="ALL", time={"kind": "YESTERDAY"})
     assert result.reply_text.endswith("there were no charges for SMS on your line.")
-    assert result.cards == []
+    assert [card.type for card in result.cards] == ["timeline"] and result.cards[0].data.items == []
 
 
 def test_no_reload_mentions_a_paid_top_up_that_was_not_credited() -> None:
