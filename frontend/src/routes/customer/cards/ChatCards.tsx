@@ -143,7 +143,8 @@ function TimelineCard({ data }: { data: CardOf<'timeline'>['data'] }) {
   const { t } = useI18n()
   return (
     <CardFrame icon={<ListOrdered />} title={t('card.whatHappened')}>
-      <ol className="relative flex flex-col gap-3 border-l pl-4">
+      {data.items.length === 0 && <p className="text-muted-foreground">{t('card.noneInPeriod')}</p>}
+      <ol className={cn('relative flex flex-col gap-3 border-l pl-4', data.items.length === 0 && 'hidden')}>
         {data.items.map((item) => {
           const recordedDiffers = item.recorded_at !== item.occurred_at
           return (

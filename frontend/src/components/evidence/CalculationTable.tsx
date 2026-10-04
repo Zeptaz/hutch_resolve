@@ -4,6 +4,9 @@ import { useI18n } from '@/i18n/context'
 import { formatCalcValue, humanize } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+// Ledger codes such as PACKAGE_RENEWAL read as words ("Package renewal"); other labels are shown as sent.
+const termLabel = (label: string) => (/^[A-Z0-9_]+$/.test(label) ? humanize(label) : label)
+
 /**
  * Renders a server calculation verbatim. Expected, observed and difference come from Resolve;
  * this component never adds terms up or decides whether they match.
@@ -28,7 +31,7 @@ export function CalculationTable({ calc, title = true }: { calc: Calculation; ti
           </TableRow>
           {calc.terms.map((t) => (
             <TableRow key={t.evidence_id}>
-              <TableCell>{t.label}</TableCell>
+              <TableCell>{termLabel(t.label)}</TableCell>
               <TableCell className="text-right font-mono">{fmt(t.value)}</TableCell>
             </TableRow>
           ))}

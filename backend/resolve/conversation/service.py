@@ -686,7 +686,8 @@ class ConversationService:
         parts = [result.text]
         if not activity.complete:
             parts.append(t.text("account_incomplete", _lang(state)))
-        cards = [TimelineCard(data=activity_timeline(result.entries))] if result.entries else []
+        # Every history answer carries its records card, an empty one when the period has none.
+        cards = [TimelineCard(data=activity_timeline(result.entries))]
         draft = TurnDraft(reply_text=" ".join(parts), case_id=state.active_case_id, cards=cards, rewrite_allowed=True,
                           keep_exact=tuple({e.product_name for e in result.entries if e.product_name}))
         return draft, state.evolve(pending_question=None, history_focus=result.focus)
