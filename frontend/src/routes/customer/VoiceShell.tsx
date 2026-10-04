@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { Activity, ArrowLeft, Mic, MicOff, PhoneOff, ShieldCheck, Volume2 } from 'lucide-react'
+import { Activity, ArrowLeft, FileText, Mic, MicOff, PhoneOff, ShieldCheck, Ticket, Volume2 } from 'lucide-react'
 import { API_MODE, newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
 import type { OperationView, SessionView } from '@/api/types'
 import { OperationBadge, StatusBadge } from '@/components/StatusBadge'
+import { CardFrame } from '@/components/CardFrame'
+import { operationTone } from '@/components/tones'
 import { Button } from '@/components/ui/button'
-import { useI18n } from '@/i18n/context'
+import { hasMessage, useI18n } from '@/i18n/context'
 import { formatTime, humanize } from '@/lib/format'
 import { VoiceCall, type CallState } from '@/voice/call'
 import type { VoiceResolveResult } from '@/voice/contracts'
 import { offerAfterVoiceResult, reconcileVoiceOffer, type OfferState } from '@/voice/offerState'
+import { ReceiptDownloadButton } from './cards/ChatCards'
 
 const OPERATION_POLL_MS = 1000
 const OPERATION_POLL_WINDOW_MS = 60_000
@@ -137,9 +140,11 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
     if (!offer || offer.sending || (state.phase === 'live' && caption.user !== null && caption.reply === null && !state.error) ||
         (offer.retry && offer.retry.decision !== decision)) return
     const current = offer
-    // A text decision and live Voice turn must not race to claim the same conversation.
+    // A tapped decision and a spoken turn must not race to claim the same conversation, so the
+    // microphone is held muted while the decision is sent. The call itself stays connected.
     textDecisionPending.current = true
-    if (state.phase === 'live' || state.phase === 'connecting' || state.phase === 'requesting') call.stop()
+    const holdMic = call.getState().phase === 'live' && !call.getState().muted
+    if (holdMic) call.setMuted(true)
     setOffer({ ...current, sending: true, error: null })
     let body = current.retry?.body
     try {
@@ -156,7 +161,6 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
       textDecisionPending.current = false
       setOffer((latest) => latest ? { ...latest, sending: false, error: null, retry: null } : null)
       await syncOperations(result.operation_ids)
-      onCallEnd()
     } catch (error) {
       // A timeout/network/5xx or busy claim can leave the outcome unknown. The next tap
       // resends exactly the same client_turn_id and body; a definite 4xx gets a fresh turn.
@@ -164,6 +168,8 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         error.retryable || error.code === 'CONVERSATION_BUSY' || error.code === 'TURN_IN_PROGRESS'
       setOffer({ ...current, sending: false, error, retry: uncertain && body ? { decision, body } : null })
       textDecisionPending.current = false
+    } finally {
+      if (holdMic && call.getState().phase === 'live') call.setMuted(false)
     }
   }
 
@@ -254,10 +260,7 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
       </div>}
 
       {watchIds.length > 0 && <div className="mx-auto w-full max-w-md space-y-2" aria-label="Action statuses">
-        {visibleOperations.map((item) => <div key={item.id} className="flex items-center gap-3 rounded-2xl border bg-card p-4">
-          <Activity className="size-5" aria-hidden /><span className="flex-1 text-sm">Action status</span>
-          <OperationBadge status={item.status} />
-        </div>)}
+        {visibleOperations.map((item) => <CallOperationCard key={item.id} operation={item} />)}
         {visibleOperations.length < watchIds.length && !operationTrackingExhausted &&
           <p role="status" className="rounded-2xl border bg-card p-4 text-sm">Checking action status…</p>}
         {operationTrackingExhausted && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card p-4 text-sm">
@@ -274,6 +277,41 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
       </p>}
       {API_MODE === 'mock' && active && <MockTurnButtons />}
     </section>
+  )
+}
+
+/** A tapped decision's result inside the call: its progress, then the review or Trust Receipt once Resolve settles it. */
+function CallOperationCard({ operation }: { operation: OperationView }) {
+  const { t } = useI18n()
+  const review = operation.action_type === 'CREATE_REVIEW_TICKET' || operation.status === 'REVIEW_REQUIRED'
+  const settled = TERMINAL_OPERATION_STATUSES.has(operation.status)
+  const title = operation.action_type === 'CREATE_REVIEW_TICKET'
+    ? settled && operation.status !== 'FAILED' ? 'Sent for review' : 'Sending for review'
+    : t(`op.${operation.action_type}`)
+  const status = operation.status === 'SUCCEEDED' && hasMessage(`op.done.${operation.action_type}`)
+    ? t(`op.done.${operation.action_type}`) : t(`op.${operation.status}`)
+  return (
+    <CardFrame icon={review ? <Ticket /> : <Activity />} title={title} tone={operationTone[operation.status]}
+      aside={<OperationBadge status={operation.status} />}>
+      <div className="space-y-1 text-sm" aria-live="polite">
+        <p>{status}</p>
+        {operation.next_step && <p className="text-muted-foreground">{operation.next_step}</p>}
+        {operation.outcome.provider_ticket_id && <p className="text-xs">
+          Ticket number <span className="font-mono">{operation.outcome.provider_ticket_id}</span>
+        </p>}
+      </div>
+      {settled && <div className="mt-3 space-y-2 border-t pt-3">
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <FileText className="size-4 text-muted-foreground" aria-hidden />{review ? 'Review receipt' : 'Trust Receipt'}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {review ? 'A record of what was checked and handed to the review team. A person will follow up on this case.'
+            : 'A record of what was checked and what changed on your line, with a tamper-evident digest.'}
+          {' '}It is also saved with this case in the chat.
+        </p>
+        <ReceiptDownloadButton caseId={operation.case_id} />
+      </div>}
+    </CardFrame>
   )
 }
 
