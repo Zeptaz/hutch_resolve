@@ -3,20 +3,14 @@ import { Activity, ArrowLeft, Mic, MicOff, PhoneOff, ShieldCheck, Volume2 } from
 import { API_MODE, newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
-import type { MessageRequest, OperationView, SessionView } from '@/api/types'
+import type { OperationView, SessionView } from '@/api/types'
 import { OperationBadge, StatusBadge } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/button'
 import { useI18n } from '@/i18n/context'
 import { formatTime, humanize } from '@/lib/format'
 import { VoiceCall, type CallState } from '@/voice/call'
-import type { VoiceProposal, VoiceResolveResult } from '@/voice/contracts'
-
-type Offer = {
-  data: VoiceProposal
-  sending: boolean
-  error: unknown
-  retry: { decision: 'ACCEPT' | 'DECLINE'; body: MessageRequest } | null
-}
+import type { VoiceResolveResult } from '@/voice/contracts'
+import { offerAfterVoiceResult, reconcileVoiceOffer, type OfferState } from '@/voice/offerState'
 
 const OPERATION_POLL_MS = 1000
 const OPERATION_POLL_WINDOW_MS = 60_000
@@ -39,15 +33,17 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   const call = useMemo(() => new VoiceCall(conversationId), [conversationId])
   const state = useSyncExternalStore(call.subscribe, call.getState, call.getState)
   const [caption, setCaption] = useState<{ user: string | null; reply: string | null }>({ user: null, reply: null })
-  const [offer, setOffer] = useState<Offer | null>(null)
+  const [offer, setOffer] = useState<OfferState | null>(null)
   const [operations, setOperations] = useState<OperationView[]>([])
   const [watchIds, setWatchIds] = useState<string[]>([])
   const [trackingRetry, setTrackingRetry] = useState(0)
   const [trackingExhaustedKey, setTrackingExhaustedKey] = useState<string | null>(null)
   const lastPhase = useRef<CallState['phase']>('idle')
   const textDecisionPending = useRef(false)
+  const canonicalRequestEpoch = useRef(0)
 
   const syncOperations = useCallback(async (additionalIds: string[] = []) => {
+    const requestEpoch = ++canonicalRequestEpoch.current
     setTrackingExhaustedKey(null)
     setTrackingRetry((attempt) => attempt + 1)
     if (additionalIds.length) {
@@ -62,6 +58,9 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         ...conversation.messages.flatMap((message) => message.result?.operation_ids ?? [])]
       const next = [...new Set([...canonicalIds, ...additionalIds])].slice(-MAX_WATCHED_OPERATIONS)
       setWatchIds((current) => sameIds(current, next) ? current : next)
+      if (requestEpoch === canonicalRequestEpoch.current && !textDecisionPending.current) {
+        setOffer((current) => reconcileVoiceOffer(current, conversation.pending_proposal))
+      }
     } catch {
       // Keep IDs already present in a successful Voice result and retry the canonical
       // refresh on the next Voice result without changing its external wire contract.
@@ -74,7 +73,7 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
       onTranscript: (text) => setCaption({ user: text, reply: null }),
       onResolveResult: (result: VoiceResolveResult) => {
         setCaption((previous) => ({ ...previous, reply: result.reply_text }))
-        setOffer(result.proposal ? { data: result.proposal, sending: false, error: null, retry: null } : null)
+        setOffer((current) => offerAfterVoiceResult(current, result.proposal))
         // operation_status is only a coarse Voice wire hint and does not contain IDs.
         // Resolve's scoped conversation is the source of truth, including older pending work.
         void syncOperations()
@@ -82,6 +81,8 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
     })
     return () => call.dispose()
   }, [call, syncOperations])
+
+  useEffect(() => { void syncOperations() }, [syncOperations])
 
   useEffect(() => {
     if (state.phase === 'ended' && lastPhase.current !== 'ended' && !textDecisionPending.current && !state.error) onCallEnd()
@@ -133,7 +134,8 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   }
 
   const answerByTap = async (decision: 'ACCEPT' | 'DECLINE') => {
-    if (!offer || offer.sending || (offer.retry && offer.retry.decision !== decision)) return
+    if (!offer || offer.sending || (state.phase === 'live' && caption.user !== null && caption.reply === null && !state.error) ||
+        (offer.retry && offer.retry.decision !== decision)) return
     const current = offer
     // A text decision and live Voice turn must not race to claim the same conversation.
     textDecisionPending.current = true
@@ -151,9 +153,9 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
       }
       const result = await customerApi.sendMessage(conversationId, body)
       setCaption({ user: decision === 'ACCEPT' ? 'Yes, go ahead' : 'No, leave it', reply: result.reply_text })
-      setOffer(null)
-      void syncOperations(result.operation_ids)
       textDecisionPending.current = false
+      setOffer((latest) => latest ? { ...latest, sending: false, error: null, retry: null } : null)
+      await syncOperations(result.operation_ids)
       onCallEnd()
     } catch (error) {
       // A timeout/network/5xx or busy claim can leave the outcome unknown. The next tap
@@ -167,6 +169,9 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
 
   const expired = offer ? Date.parse(offer.data.expires_at) <= Date.now() : false
   const active = state.phase === 'live'
+  // Playback can still report "thinking" after Resolve has returned. Only block
+  // a decision while the caller's finalized turn has no Resolve reply yet.
+  const voiceTurnPending = active && caption.user !== null && caption.reply === null && !state.error
   const visibleOperations = operations.filter((item) => watchIds.includes(item.id))
   const operationTrackingExhausted = trackingExhaustedKey === watchIds.join('|')
 
@@ -240,8 +245,8 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
           {expired ? 'This offer expired. Ask for a new one.' : 'Review the terms here and use the buttons to answer.'}
         </p>
         {!expired && <div className="mt-3 flex gap-2">
-          <Button disabled={offer.sending || offer.retry?.decision === 'DECLINE'} onClick={() => void answerByTap('ACCEPT')}>Yes, go ahead</Button>
-          <Button variant="outline" disabled={offer.sending || offer.retry?.decision === 'ACCEPT'} onClick={() => void answerByTap('DECLINE')}>No, leave it</Button>
+          <Button disabled={offer.sending || voiceTurnPending || offer.retry?.decision === 'DECLINE'} onClick={() => void answerByTap('ACCEPT')}>Yes, go ahead</Button>
+          <Button variant="outline" disabled={offer.sending || voiceTurnPending || offer.retry?.decision === 'ACCEPT'} onClick={() => void answerByTap('DECLINE')}>No, leave it</Button>
         </div>}
         {offer.error && <p role="alert" className="mt-2 text-sm text-destructive">
           {describeError(offer.error)} {offer.retry ? 'The outcome is uncertain. Retry the same answer to check it safely.' : 'Check the latest chat before trying again.'}

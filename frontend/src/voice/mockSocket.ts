@@ -14,7 +14,6 @@ class MockVoiceSocket implements VoiceSocket {
 
   private readonly conversationId: string
   private reply: { id: string; proposal: VoiceProposal | null; complete: boolean; played: boolean } | null = null
-  private presented: VoiceProposal | null = null
   private timers = new Set<number>()
 
   constructor(url: string) {
@@ -39,10 +38,9 @@ class MockVoiceSocket implements VoiceSocket {
       if (accepted) reply!.played = true
       this.emit({ type: 'playback_ack', response_id: message.response_id ?? '', accepted })
     } else if (message.type === 'proposal_presented') {
-      const accepted = !!reply && reply.id === message.response_id && reply.played &&
-        reply.proposal?.id === message.proposal_id && reply.proposal.proposal_hash === message.proposal_hash
-      if (accepted) this.presented = reply!.proposal
-      this.emit({ type: 'proposal_ack', response_id: message.response_id ?? '', accepted })
+      // Streamed speech cannot prove every term was heard; the real Voice service
+      // also requires the on-screen buttons for a proposal decision.
+      this.emit({ type: 'proposal_ack', response_id: message.response_id ?? '', accepted: false })
     }
   }
 
@@ -52,15 +50,9 @@ class MockVoiceSocket implements VoiceSocket {
     this.emit({ type: 'transcript', speaker: 'user', text, final: true })
     try {
       const conversation = await customerApi.getConversation(this.conversationId)
-      const presented = this.presented
-      this.presented = null
-      const answer = /^\s*(yes|yeah|sure|go ahead|no|nope|decline)\b/i.exec(text)
-      const input = presented && answer
-        ? { type: 'action_decision' as const, proposal_id: presented.id, proposal_hash: presented.proposal_hash,
-            decision: /^(no|nope|decline)/i.test(answer[1]) ? 'DECLINE' as const : 'ACCEPT' as const }
-        : { type: 'text' as const, text }
       const result = await customerApi.sendMessage(this.conversationId, {
-        client_turn_id: newId(), expected_version: conversation.version, language: conversation.language, input,
+        client_turn_id: newId(), expected_version: conversation.version, language: conversation.language,
+        input: { type: 'text', text },
       })
       const confirmation = result.cards.find((card) => card.type === 'confirmation')
       const p = confirmation?.type === 'confirmation' ? confirmation.data : null
@@ -89,7 +81,6 @@ class MockVoiceSocket implements VoiceSocket {
   interrupt() {
     const id = this.reply?.id ?? null
     this.reply = null
-    this.presented = null
     this.emit({ type: 'interrupted', response_id: id })
   }
 

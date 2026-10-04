@@ -1,5 +1,32 @@
 import { expect, test } from '@playwright/test'
 
+test('spoken confirmation keeps the offer until Resolve clears or replaces it', async ({ page }) => {
+  await page.goto('/')
+  const result = await page.evaluate(async () => {
+    const { offerAfterVoiceResult, reconcileVoiceOffer } = await import('/src/voice/offerState.ts')
+    const proposal = {
+      id: 'offer-1', proposal_hash: 'hash-1', action_type: 'CREATE_REVIEW_TICKET',
+      target_label: 'Review this charge', consequences: 'A person reviews the case.',
+      expires_at: '2030-01-01T00:00:00Z', package_terms: null,
+    }
+    const current = { data: proposal, sending: false, error: null, retry: null }
+    const afterSpokenYes = offerAfterVoiceResult(current, null)
+    const stillPending = reconcileVoiceOffer(afterSpokenYes, { ...proposal, case_id: 'case-1' })
+    const replaced = reconcileVoiceOffer(stillPending, { ...proposal, id: 'offer-2', proposal_hash: 'hash-2' })
+    const closed = reconcileVoiceOffer(stillPending, null)
+    return {
+      spokenYesKeepsOffer: afterSpokenYes === current,
+      canonicalPendingKeepsOffer: stillPending === current,
+      replacementId: replaced?.data.id,
+      canonicalClosureRemovesOffer: closed === null,
+    }
+  })
+  expect(result).toEqual({
+    spokenYesKeepsOffer: true, canonicalPendingKeepsOffer: true,
+    replacementId: 'offer-2', canonicalClosureRemovesOffer: true,
+  })
+})
+
 test('caller can interrupt a playing reply and keep sending microphone audio', async ({ page }) => {
   await page.goto('/')
   const result = await page.evaluate(async () => {

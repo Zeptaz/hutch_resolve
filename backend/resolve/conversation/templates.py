@@ -29,7 +29,7 @@ _EN: dict[str, str] = {
     "offer_action": "I can {action} for {target}. {consequences} Shall I go ahead?",
     "other_options": "If you'd rather, I can also {options}. Just tell me, or answer this offer first and I'll suggest that next.",
     "confirm_prompt": "Please answer using the buttons on the offer above.",
-    "confirm_prompt_voice": "Please say clearly whether you want me to go ahead: yes or no.",
+    "confirm_prompt_voice": "I can't take a spoken yes or no for this action. Please review the offer on your screen and tap 'Yes, go ahead' or 'No, leave it'. Nothing has changed yet.",
     "declined": "Okay, I won't make that change. Nothing on your account was changed.",
     "accepted": "Your request is recorded. {status}",
     "proposal_mismatch": "That request is no longer the one I'm waiting on. Please use the latest option shown.",
