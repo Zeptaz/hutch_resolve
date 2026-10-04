@@ -191,6 +191,10 @@ Q_DESCRIBE_COMPLAINT = "DESCRIBE_COMPLAINT"
 # After listing value-added services: "shall I check your charge records?" A yes only looks at records
 # (a VAS_DISPUTE investigation); it never changes the account, so it is not action consent.
 Q_OFFER_CHARGE_CHECK = "OFFER_CHARGE_CHECK"
+# Voice only: "Is there anything else I can help you with?" after a finished answer. A spoken "no" to it ends the call.
+Q_ANYTHING_ELSE = "ANYTHING_ELSE"
+# Voice only, on the result (never the dialogue state): the caller said goodbye, so the bridge ends the call.
+Q_CALL_ENDED = "CALL_ENDED"
 # Text only: a details form carries its own complaint type and could override the one being collected.
 Q_CLARIFY = {
     Ambiguity.TIME_WINDOW: ("CLARIFY_TIME_WINDOW", "clarify_time_window", ["text"]),
@@ -260,6 +264,7 @@ class ConversationService:
         turn_budgets: dict[Channel, float] | None = None,
         answerer: GroundedAnswerer | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         """`simulation_now` returns the scoped run's simulation clock (Harry); business
         windows use it, while auth and proposal expiry stay on real time in Resolve."""
@@ -268,6 +273,7 @@ class ConversationService:
         self._knowledge = knowledge
         self._extractor = extractor
         self._simulation_now = simulation_now
+        self._wall_clock = wall_clock  # proposal expiry, as Resolve checks it on confirm
         self._telemetry = telemetry or NullTelemetry()
         self._rewriter = rewriter  # replies in the customer's language/style (machine-written; see rewrite.py)
         self._budgets = {**TURN_BUDGET_SECONDS, **(turn_budgets or {})}
@@ -291,6 +297,8 @@ class ConversationService:
                 start = start.evolve(language=turn.language)
             draft, state = await self._route(ctx, turn, start)
             draft = await self._localize(ctx, turn, draft, state)
+            if turn.channel is Channel.VOICE and _is_customer(ctx):
+                draft, state = _ask_anything_else(draft, state)
         except Exception:
             # Same-id retry re-claims; deterministic command keys stop Resolve repeating work.
             await self._conversations.release_turn(ctx, claim)
@@ -331,6 +339,22 @@ class ConversationService:
     # --- free text ------------------------------------------------------------
 
     async def _on_text(self, ctx: AuthContext, turn: NormalizedTurn, inp: TextInput, state: DialogueState) -> Step:
+        if turn.channel is Channel.VOICE and _is_customer(ctx):
+            # A call does nothing else while an offer waits on screen: only its buttons can answer it.
+            pending = state.pending_proposal
+            evidence = turn.voice_evidence
+            # Signed presentation evidence for this exact offer still reaches the spoken-consent checks.
+            presented = (pending is not None and evidence is not None
+                         and evidence.presented_proposal_id == pending.proposal_id
+                         and evidence.presented_proposal_hash == pending.proposal_hash)
+            expired = pending is not None and pending.is_expired(self._wall_clock())
+            if pending is not None and not presented and not expired:
+                return _ask(state, Q_CONFIRM_ACTION, t.text("offer_locked_voice", _lang(state)),
+                            ["action_decision", "text"], rewrite=False)
+            if expired:
+                state = _without_expired_offer(state)
+            if _may_close_call(state) and _is_closing_reply(inp.text):
+                return _goodbye(state)
         now = await self._simulation_now(ctx)
         extraction = await self._extract(ctx, turn, inp.text, state, now)
         if extraction is None:
@@ -369,6 +393,9 @@ class ConversationService:
                             ["category_selection", "text"])
             return _ask(state, Q_OFFER_CHARGE_CHECK, state.pending_question.text, ["text"])
         if intent is Intent.ACTION_DECISION:
+            if (turn.channel is Channel.VOICE and _is_customer(ctx) and _may_close_call(state)
+                    and extraction.decision is SpokenDecision.DECLINE):
+                return _goodbye(state)
             if state.pending_proposal is None:
                 return TurnDraft(reply_text=t.text("no_pending_action", _lang(state)), case_id=state.active_case_id), state
             if turn.channel is Channel.VOICE and _is_customer(ctx):
@@ -1146,6 +1173,61 @@ def _ask(state: DialogueState, code: str, reply: str, allowed: list[InputType], 
 
 def _login_required(state: DialogueState) -> Step:
     return _ask(state, Q_LOGIN_REQUIRED, t.text("login_required", _lang(state)), ["text"])
+
+
+def _without_expired_offer(state: DialogueState) -> DialogueState:
+    """An offer that ran out can no longer be answered, so it no longer holds the call."""
+    question = state.pending_question
+    keep = question if question is not None and question.code != Q_CONFIRM_ACTION else None
+    return state.evolve(pending_proposal=None, pending_question=keep)
+
+
+def _ask_anything_else(draft: TurnDraft, state: DialogueState) -> Step:
+    """Voice: a finished answer (no question, no offer waiting) ends by asking whether anything else is needed."""
+    if (draft.pending_question is not None or state.pending_question is not None
+            or state.pending_proposal is not None or any(card.type == "confirmation" for card in draft.cards)):
+        return draft, state
+    text = t.text("anything_else_voice", _lang(state, Channel.VOICE))
+    question = PendingQuestion(code=Q_ANYTHING_ELSE, text=text, allowed_input_types=["category_selection", "text"])
+    return (replace(draft, reply_text=f"{draft.reply_text} {text}", pending_question=question),
+            state.evolve(pending_question=question))
+
+
+def _may_close_call(state: DialogueState) -> bool:
+    """Only "anything else?" can be answered with a goodbye: after a finished answer or a tapped decision."""
+    question = state.pending_question
+    return (state.pending_proposal is None and state.candidate is None
+            and (question is None or question.code == Q_ANYTHING_ELSE))
+
+
+# Politeness around the answer ("no, thank you", "okay bye"); removed before matching.
+_CLOSING_FILLERS = ("thank you very much", "thank you so much", "thank you", "thanks a lot", "thanks",
+                    "stuthiyi", "stuthi", "nandri", "ස්තූතියි", "ස්තුතියි", "நன்றி", "okay", "ok")
+_CLOSING_REPLIES = frozenset({
+    "no", "nope", "nah", "no no", "nothing", "nothing else", "no nothing", "no nothing else", "nothing more",
+    "no thats all", "thats all", "that is all", "thats it", "that is it", "no thats it", "im good", "i am good",
+    "im fine", "i am fine", "no im good", "no im fine", "all good", "bye", "goodbye", "good bye", "bye bye",
+    "no bye", "no goodbye", "no need", "not now",
+    # Sinhala (script and romanized) and Tamil (script and romanized)
+    "නැහැ", "නෑ", "එපා", "ඔච්චරයි", "නැහැ ඔච්චරයි", "naha", "nehe", "nae", "epa", "ochcharai", "ochcharay", "ne",
+    "இல்லை", "வேண்டாம்", "போதும்", "இல்ல", "illai", "illa", "venam", "vendam", "podhum", "pothum",
+})
+
+
+def _is_closing_reply(text: str) -> bool:
+    """A short, unambiguous "no / that's all / goodbye" to "anything else?"."""
+    # Strip only punctuation: Sinhala and Tamil vowel signs are not word characters to a regex.
+    plain = " ".join(re.sub(r"[.,!?;:\"()\-]+", " ", re.sub(r"['’]", "", text.casefold())).split())
+    for filler in _CLOSING_FILLERS:
+        plain = re.sub(rf"(?:^|\s){re.escape(filler)}(?=\s|$)", " ", plain)
+    return " ".join(plain.split()) in _CLOSING_REPLIES
+
+
+def _goodbye(state: DialogueState) -> Step:
+    text = t.text("call_goodbye_voice", _lang(state, Channel.VOICE))
+    ended = PendingQuestion(code=Q_CALL_ENDED, text=text, allowed_input_types=["text"])
+    return (TurnDraft(reply_text=text, case_id=state.active_case_id, pending_question=ended),
+            state.evolve(pending_question=None))
 
 
 def _confirm_prompt(state: DialogueState, channel: Channel = Channel.TEXT) -> Step:

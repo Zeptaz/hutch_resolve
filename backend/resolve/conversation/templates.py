@@ -56,6 +56,9 @@ _EN: dict[str, str] = {
     "rechecked": "I re-checked with the corrected details ({window}).",
     "offer_still_open": "My earlier offer is still open.",
     "offer_still_open_voice": "The earlier offer is still pending. Please use the on-screen 'Yes, go ahead' or 'No, leave it' buttons.",
+    "offer_locked_voice": "Before we move on, please answer the offer on your screen: tap 'Yes, go ahead' or 'No, leave it'. Nothing has changed yet.",
+    "anything_else_voice": "Is there anything else I can help you with?",
+    "call_goodbye_voice": "Thank you for calling HUTCH. Goodbye!",
     "no_pending_action": "There's nothing waiting for your confirmation right now.",
     "no_active_case": "There's no open request in this conversation yet. What would you like help with?",
     "case_status": "Your {complaint} request is {status}.",
@@ -179,6 +182,7 @@ ENGLISH: dict[str, dict[str, str]] = {
 NOT_LOCALIZED = frozenset({
     "default_escalation_reason", "package_selection_unavailable", "PACKAGE_ACTIVATION",
     "offer_action_voice", "other_options_voice", "offer_still_open_voice", "confirm_prompt_voice",
+    "offer_locked_voice", "anything_else_voice", "call_goodbye_voice",
     "ledger_lines", "faq_none_case",  # English until the SI/TA drafts gain a reviewed wording
 })
 LOCALES_DIR = Path(__file__).with_name("locales")

@@ -18,7 +18,7 @@ export type VoiceResolveResult = {
 }
 
 export type VoiceServerMessage =
-  | { type: 'ready'; session_id: string }
+  | { type: 'ready'; session_id: string; max_session_seconds?: number }
   | { type: 'greeting'; text: string }
   | { type: 'transcript'; speaker: 'user' | 'assistant'; text: string; final: boolean; response_id?: string }
   | VoiceResolveResult

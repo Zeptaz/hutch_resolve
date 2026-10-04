@@ -78,7 +78,8 @@ class Harness:
             return self.clock()
 
         self.telemetry = RecordingTelemetry()
-        self.service = ConversationService(self.facade, self.repo, self.knowledge, extractor, simulation_now, self.telemetry)
+        self.service = ConversationService(self.facade, self.repo, self.knowledge, extractor, simulation_now, self.telemetry,
+                                           wall_clock=self.clock)
 
     def open(self, ctx: AuthContext) -> UUID:
         return self.repo.create(ctx)

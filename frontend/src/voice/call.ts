@@ -3,8 +3,8 @@ import type { VoiceProposal, VoiceResolveResult, VoiceServerMessage, VoiceSessio
 import { CallAudio, MicError, type MicErrorKind } from './audio'
 import { DECISION_SPEECH_PROTOCOL, openVoiceSocket, VOICE_PROTOCOLS, type VoiceSocket } from './socket'
 
-/** Voice caps a call at 120 s (HUTCH_VOICE_MAX_SESSION_SECONDS). */
-export const CALL_LIMIT_MS = 600_000 // matches HUTCH_VOICE_MAX_SESSION_SECONDS=600 on the Voice service
+/** Default call limit; Voice reports its own (HUTCH_VOICE_MAX_SESSION_SECONDS, 600 s by default) in `ready`. */
+export const CALL_LIMIT_MS = 600_000
 
 /** The server permanently records an expired grant key, so a later user retry must rotate it. */
 export function shouldRotateGrantKey(error: unknown): boolean {
@@ -103,6 +103,8 @@ export type CallState = {
   micActive: boolean
   proposal: { data: VoiceProposal; responseId: string; status: ProposalStatus } | null
   liveAt: number | null
+  /** The call's time limit as Voice reported it. */
+  limitMs: number
   endReason: string | null
   error: CallError | null
 }
@@ -114,6 +116,7 @@ const INITIAL: CallState = {
   micActive: false,
   proposal: null,
   liveAt: null,
+  limitMs: CALL_LIMIT_MS,
   endReason: null,
   error: null,
 }
@@ -335,11 +338,13 @@ export class VoiceCall {
 
   private handle(msg: VoiceServerMessage) {
     switch (msg.type) {
-      case 'ready':
+      case 'ready': {
+        const limitMs = msg.max_session_seconds && msg.max_session_seconds > 0 ? msg.max_session_seconds * 1000 : CALL_LIMIT_MS
         window.clearTimeout(this.limitTimer)
-        this.limitTimer = window.setTimeout(() => this.stop(), CALL_LIMIT_MS + 5_000) // Voice should end it first
-        this.set({ phase: 'live', activity: 'listening', liveAt: Date.now() })
+        this.limitTimer = window.setTimeout(() => this.stop(), limitMs + 5_000) // Voice should end it first
+        this.set({ phase: 'live', activity: 'listening', liveAt: Date.now(), limitMs })
         break
+      }
       case 'greeting':
         this.handlers.onGreeting?.(msg.text)
         void this.playGreeting()
@@ -348,7 +353,8 @@ export class VoiceCall {
         // Only the caller's finalized turn is shown; assistant text comes from Resolve's reply_text.
         if (msg.speaker === 'user' && msg.final && msg.text.trim()) {
           this.handlers.onTranscript?.(msg.text.trim())
-          this.set({ activity: 'thinking' })
+          // A new turn supersedes a failed earlier one; the call itself is still working.
+          this.set({ activity: 'thinking', error: this.state.error?.kind === 'voice' ? null : this.state.error })
         }
         break
       case 'resolve_result': {
@@ -412,8 +418,8 @@ export class VoiceCall {
       }
       case 'error':
         if (msg.code === 'voice_session_ending' || msg.code.startsWith('invalid_')) break // informational
-        if (msg.code === 'speech_unavailable') this.set({ activity: 'listening' })
-        this.set({ error: { kind: 'voice', code: msg.code } })
+        // The call stays open after a failed turn: go back to listening instead of "thinking" forever.
+        this.set({ activity: 'listening', error: { kind: 'voice', code: msg.code } })
         break
       case 'ended':
         this.finish(msg.reason)

@@ -41,10 +41,15 @@ from backend.resolve.conversation.dto import (
 )
 from backend.resolve.conversation.errors import ResolveError as ConversationError
 from backend.resolve.conversation.service import ConversationService as RealConversationService
+from backend.resolve.conversation import templates
 
 logger = logging.getLogger("hutch_resolve.voice")
 VOICE_PROVIDER = "zeptaz_voice"
 MAX_SIGNED_BODY_BYTES = 16 * 1024
+# A binding must outlive the whole call (Voice caps calls at HUTCH_VOICE_MAX_SESSION_SECONDS, 600 s by
+# default); every turn and lifecycle event after it expires is rejected. Voice accepts up to 30 minutes.
+VOICE_BINDING_SECONDS = 15 * 60
+CALL_ENDED_QUESTION = "CALL_ENDED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,8 +168,10 @@ def _voice_response(result: Any) -> dict[str, Any]:
     if not isinstance(reply_text, str) or not reply_text:
         raise ResolveError(503, "DEPENDENCY_UNAVAILABLE", "Conversation service returned an invalid result", True)
     question = result.get("pending_question")
+    # The caller answered "anything else?" with a goodbye: Voice speaks it and then ends the call.
+    caller_said_goodbye = isinstance(question, dict) and question.get("code") == CALL_ENDED_QUESTION
     if isinstance(question, dict):
-        question = question.get("text")
+        question = None if caller_said_goodbye else question.get("text")
     proposal = result.get("proposal")
     if proposal is None:
         for card in result.get("cards", []):
@@ -192,7 +199,7 @@ def _voice_response(result: Any) -> dict[str, Any]:
         "pending_question": question,
         "proposal": proposal,
         "operation_status": result.get("operation_status"),
-        "end_session": bool(result.get("end_session", False)),
+        "end_session": bool(result.get("end_session", False)) or caller_said_goodbye,
     }
     try:
         return VoiceTurnResponse.model_validate(data).model_dump(mode="json")
@@ -413,7 +420,7 @@ async def _real_voice_turn(service: RealConversationService, engine, *, context:
 
 def _create_binding(engine, context: AuthContext, conversation_id: UUID, origin: str,
                     now: datetime) -> tuple[UUID, str, datetime]:
-    expires = now + timedelta(seconds=180)
+    expires = now + timedelta(seconds=VOICE_BINDING_SECONDS)
     with engine.begin() as connection:
         scoped = connection.execute(text("""
             SELECT c.id,c.sandbox_id,c.session_id,s.account_id,s.expires_at AS session_expires_at,
@@ -498,7 +505,7 @@ def _claim_voice_grant(engine, context: AuthContext, conversation_id: UUID, orig
                 or scoped["conversation_expires"] <= now or scoped["run_status"] != "ACTIVE"):
             raise ResolveError(404, "RESOURCE_NOT_FOUND", "Conversation is unavailable")
         binding_id, voice_session_id = uuid4(), uuid4()
-        expires = min(now + timedelta(seconds=180), scoped["session_expires"], scoped["conversation_expires"])
+        expires = min(now + timedelta(seconds=VOICE_BINDING_SECONDS), scoped["session_expires"], scoped["conversation_expires"])
         request_id, event_id = uuid4(), uuid4()
         payload = {"binding_id": str(binding_id), "conversation_id": str(conversation_id),
                    "voice_session_id": str(voice_session_id), "account_id": str(context.account_id),
@@ -626,7 +633,13 @@ def build_voice_router() -> APIRouter:
             _decision_reply, engine, conversation_id=conversation_id, proposal_id=proposal_id, now=datetime.now(UTC))
         if result is None:
             raise ResolveError(404, "NOT_FOUND", "No recent decision reply for this proposal")
-        return _voice_response(result)
+        response = _voice_response(result)
+        if response["proposal"] is None and response["pending_question"] is None:
+            # Nothing else waits on screen: the call asks whether the caller needs anything else, and a
+            # spoken "no" to that ends the call (see the conversation service's Voice goodbye).
+            response["reply_text"] = f'{response["reply_text"]} {templates.text("anything_else_voice", "en")}'
+            response["speech_text"] = response["reply_text"]
+        return response
 
     @router.post("/integrations/voice/turns", response_model=VoiceTurnResponse, tags=["Voice integration"])
     async def receive_voice_turn(request: Request) -> dict[str, Any]:

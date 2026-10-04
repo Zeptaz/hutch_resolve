@@ -80,8 +80,60 @@ def test_voice_follow_up_reminds_customer_to_use_buttons(hm: Harness) -> None:
     hm.model.on("Is it still open?", extraction(intent="FOLLOW_UP"))
     ctx, conv, proposal = voice_call(hm)
     result = hm.send(ctx, spoken(hm, conv, "Is it still open?"))
-    assert "on-screen 'Yes, go ahead' or 'No, leave it' buttons" in result.reply_text
+    assert "tap 'Yes, go ahead' or 'No, leave it'" in result.reply_text
+    assert result.pending_question.code == "CONFIRM_ACTION"
     assert hm.state(conv).pending_proposal.proposal_id == proposal.id
+
+
+def test_voice_call_cannot_switch_topic_while_an_offer_waits(hm: Harness) -> None:
+    hm.model.on("what is my balance", extraction(intent="ACCOUNT_ENQUIRY"))
+    ctx, conv, proposal = voice_call(hm)
+    calls_before = dict(hm.facade.calls)
+    result = hm.send(ctx, spoken(hm, conv, "what is my balance"))
+    assert result.reply_text.startswith("Before we move on, please answer the offer on your screen")
+    assert result.pending_question.code == "CONFIRM_ACTION" and result.cards == []
+    assert hm.state(conv).pending_proposal.proposal_id == proposal.id
+    assert dict(hm.facade.calls) == calls_before  # nothing else was looked up or changed
+
+
+def test_expired_offer_no_longer_holds_the_call(hm: Harness) -> None:
+    hm.model.on("what is my balance", extraction(intent="ACCOUNT_ENQUIRY"))
+    ctx, conv, _ = voice_call(hm)
+    hm.clock.advance(minutes=6)
+    result = hm.send(ctx, spoken(hm, conv, "what is my balance"))
+    assert "Before we move on" not in result.reply_text
+    assert hm.state(conv).pending_proposal is None
+
+
+def test_voice_answer_asks_anything_else_and_a_spoken_no_ends_the_call(hm: Harness) -> None:
+    hm.model.on("what is my balance", extraction(intent="ACCOUNT_ENQUIRY"))
+    ctx = customer(ACCOUNT_A, Channel.VOICE)
+    conv = hm.open(ctx)
+    answered = hm.send(ctx, hm.turn(conv, text("what is my balance"), channel=Channel.VOICE))
+    assert answered.reply_text.endswith("Is there anything else I can help you with?")
+    assert answered.pending_question.code == "ANYTHING_ELSE"
+    goodbye = hm.send(ctx, hm.turn(conv, text("No, thank you."), channel=Channel.VOICE))
+    assert goodbye.reply_text == "Thank you for calling HUTCH. Goodbye!"
+    assert goodbye.pending_question.code == "CALL_ENDED"
+    assert hm.state(conv).pending_question is None
+
+
+def test_spoken_no_while_an_offer_waits_never_ends_the_call(hm: Harness) -> None:
+    hm.model.on("no", NO)
+    ctx, conv, proposal = voice_call(hm)
+    result = hm.send(ctx, spoken(hm, conv, "no"))
+    assert result.pending_question.code == "CONFIRM_ACTION"
+    assert hm.state(conv).pending_proposal.proposal_id == proposal.id
+    assert hm.facade.calls["confirm_action"] == 0
+
+
+def test_text_chat_never_gets_the_voice_closing_question(hm: Harness) -> None:
+    hm.model.on("what is my balance", extraction(intent="ACCOUNT_ENQUIRY"))
+    ctx = customer(ACCOUNT_A)
+    conv = hm.open(ctx)
+    answered = hm.send(ctx, hm.turn(conv, text("what is my balance")))
+    assert "anything else" not in answered.reply_text
+    assert answered.pending_question is None or answered.pending_question.code != "ANYTHING_ELSE"
 
 
 def test_repeated_spoken_yes_never_claims_action_or_asks_for_more_spoken_yes(hm: Harness) -> None:

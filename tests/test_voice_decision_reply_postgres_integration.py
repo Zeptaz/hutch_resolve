@@ -113,7 +113,10 @@ def test_voice_reads_the_recent_reply_to_a_tapped_decision_and_nothing_else():
 
             found = ask(decided)
             assert found.status_code == 200, found.text
-            assert found.json()["reply_text"] == "Your case is queued for review."
+            # Nothing else waits on screen, so the call asks whether anything else is needed.
+            assert found.json()["reply_text"] == (
+                "Your case is queued for review. Is there anything else I can help you with?")
+            assert found.json()["end_session"] is False
             assert found.json()["response_id"] == reply["message_id"]
             assert ask(other).status_code == 404
             assert ask(decided, secret=b"x" * 40).status_code == 401

@@ -142,3 +142,36 @@ test('an ended call stays on the call screen with its results until the caller g
   await page.getByRole('button', { name: 'Back to chat' }).click()
   await expect(page.getByText('Talk to Resolve')).toHaveCount(0)
 })
+
+test('call receipts show under the call, the open offer holds the call, and an earlier topic moves to history', async ({ page }) => {
+  await page.goto('/chat')
+  await expect(page.getByRole('textbox').last()).toBeEnabled()
+  await page.waitForLoadState('networkidle')
+  await mockControl(page, 'continueAsDemoLine')
+  await page.reload()
+
+  await page.getByRole('button', { name: 'Call', exact: true }).click()
+  await page.getByRole('button', { name: 'Start voice call' }).click()
+  await page.getByRole('button', { name: 'Try a balance issue' }).click()
+
+  // Proof receipts for this topic appear under the call; the offer is pinned and holds the call.
+  const current = page.getByRole('region', { name: 'Receipts for this topic' })
+  await expect(current).toBeVisible({ timeout: 15_000 })
+  await expect(current.getByText('Balance check')).toBeVisible()
+  await expect(page.getByText('Your answer is needed before we continue.', { exact: false })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Back to chat' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'End call' })).toBeEnabled()
+
+  await page.getByRole('button', { name: 'Yes, go ahead' }).click()
+  await expect(page.getByRole('heading', { name: 'Confirm an action' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Back to chat' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'End call' })).toBeVisible()
+  await expect(current.getByText('Balance check')).toBeVisible()
+
+  // A new question moves the earlier topic's receipts to the history panel.
+  await page.getByRole('button', { name: 'Say no' }).click()
+  await expect(page.getByRole('region', { name: 'Receipts for this topic' })).toHaveCount(0, { timeout: 15_000 })
+  const history = page.getByRole('complementary', { name: 'Call history' })
+  await expect(history.getByRole('button', { name: /Balance check/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'End call' })).toBeVisible()
+})

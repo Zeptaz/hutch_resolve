@@ -1,19 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { Activity, ArrowLeft, FileText, Mic, MicOff, PhoneOff, ShieldCheck, Ticket, Volume2 } from 'lucide-react'
+import { Activity, ArrowLeft, FileText, History, Mic, MicOff, PhoneOff, ShieldCheck, Ticket, Volume2 } from 'lucide-react'
 import { API_MODE, newId } from '@/api/client'
 import { customerApi } from '@/api/endpoints'
 import { describeError, isApiError } from '@/api/errors'
-import type { OperationView, SessionView } from '@/api/types'
+import type { Card, ConversationView, OperationView, SessionView } from '@/api/types'
 import { OperationBadge, StatusBadge } from '@/components/StatusBadge'
 import { CardFrame } from '@/components/CardFrame'
 import { operationTone } from '@/components/tones'
 import { Button } from '@/components/ui/button'
-import { hasMessage, useI18n } from '@/i18n/context'
+import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { hasMessage, useI18n, type Translate } from '@/i18n/context'
 import { formatTime, humanize } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { CALL_LIMIT_MS, VoiceCall, type CallState } from '@/voice/call'
 import type { VoiceResolveResult } from '@/voice/contracts'
 import { offerAfterVoiceResult, reconcileVoiceOffer, type OfferState } from '@/voice/offerState'
-import { ReceiptDownloadButton } from './cards/ChatCards'
+import { ChatCard, ReceiptDownloadButton } from './cards/ChatCards'
+import { ConfirmationCard } from './cards/ConfirmationCard'
+import { RecordsSection, type ChatRecord } from './Records'
+import { recordTitle } from './recordTitle'
+import { splitCallReceipts, type CallReceipts } from './callReceipts'
 
 const OPERATION_POLL_MS = 1000
 const OPERATION_POLL_WINDOW_MS = 60_000
@@ -36,7 +42,7 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   onClose: () => void
   onCallEnd: () => void
 }) {
-  const { language } = useI18n()
+  const { language, t } = useI18n()
   const call = useMemo(() => new VoiceCall(conversationId), [conversationId])
   const state = useSyncExternalStore(call.subscribe, call.getState, call.getState)
   const [caption, setCaption] = useState<{ user: string | null; reply: string | null }>({ user: null, reply: null })
@@ -45,6 +51,11 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   const [watchIds, setWatchIds] = useState<string[]>([])
   const [trackingRetry, setTrackingRetry] = useState(0)
   const [trackingExhaustedKey, setTrackingExhaustedKey] = useState<string | null>(null)
+  const [conversation, setConversation] = useState<ConversationView | null>(null)
+  // Messages that existed when the call screen opened: their receipts start in history, not under the call.
+  const [presentBeforeCall, setPresentBeforeCall] = useState<ReadonlySet<string> | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const offerRef = useRef<HTMLDivElement>(null)
   const lastPhase = useRef<CallState['phase']>('idle')
   const textDecisionPending = useRef(false)
   const canonicalRequestEpoch = useRef(0)
@@ -65,6 +76,10 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         ...conversation.messages.flatMap((message) => message.result?.operation_ids ?? [])]
       const next = [...new Set([...canonicalIds, ...additionalIds])].slice(-MAX_WATCHED_OPERATIONS)
       setWatchIds((current) => sameIds(current, next) ? current : next)
+      if (requestEpoch === canonicalRequestEpoch.current) {
+        setConversation(conversation)
+        setPresentBeforeCall((current) => current ?? new Set(conversation.messages.map((message) => message.id)))
+      }
       if (requestEpoch === canonicalRequestEpoch.current && !textDecisionPending.current) {
         setOffer((current) => reconcileVoiceOffer(current, conversation.pending_proposal))
       }
@@ -178,13 +193,31 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
     }
   }
 
-  const expired = offer ? Date.parse(offer.data.expires_at) <= Date.now() : false
+  const now = useNow(offer !== null)
+  const expired = offer ? Date.parse(offer.data.expires_at) <= now : false
   const active = state.phase === 'live'
+  // An open offer holds the call: it stays pinned under the call until it is answered (or expires).
+  const offerOpen = offer !== null && !expired
   // Playback can still report "thinking" after Resolve has returned. Only block
   // a decision while the caller's finalized turn has no Resolve reply yet.
   const voiceTurnPending = active && caption.user !== null && caption.reply === null && !state.error
   const visibleOperations = operations.filter((item) => watchIds.includes(item.id))
   const operationTrackingExhausted = trackingExhaustedKey === watchIds.join('|')
+
+  const receipts = splitCallReceipts(conversation, presentBeforeCall, offerOpen ? offer.data.id : null)
+  const currentCases = new Set(receipts.current.flatMap((group) => group.caseId ? [group.caseId] : []))
+  if (offerOpen && conversation?.pending_proposal) currentCases.add(conversation.pending_proposal.case_id)
+  // Action progress belongs to the current topic while it runs or while its case is the one being discussed.
+  const currentOperations = visibleOperations.filter((item) =>
+    !TERMINAL_OPERATION_STATUSES.has(item.status) || currentCases.has(item.case_id))
+  const pastOperations = visibleOperations.filter((item) => !currentOperations.includes(item))
+  const history = callHistory(t, receipts, pastOperations)
+
+  // Bring a new offer into view: the call waits for it.
+  const offerId = offerOpen ? offer.data.id : null
+  useEffect(() => {
+    if (offerId) offerRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [offerId])
 
   if (session.role !== 'CUSTOMER') return (
     <section className="rounded-3xl bg-muted/70 p-6 text-center">
@@ -194,12 +227,31 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
   )
 
   return (
+    <div className="flex min-h-0 flex-1">
     <section className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-5" aria-label="Voice call">
-      <div className="mx-auto flex w-full max-w-xl items-center justify-between">
-        <Button variant="ghost" onClick={close}><ArrowLeft aria-hidden /> Back to chat</Button>
-        <StatusBadge tone={active ? 'success' : state.phase === 'ended' ? 'neutral' : 'info'}>
-          {active ? state.activity : state.phase}
-        </StatusBadge>
+      <div className="mx-auto flex w-full max-w-xl items-center justify-between gap-2">
+        <Button variant="ghost" onClick={close} disabled={active && offerOpen}
+                title={active && offerOpen ? 'Answer the offer first' : undefined}>
+          <ArrowLeft aria-hidden /> Back to chat
+        </Button>
+        <div className="flex items-center gap-2">
+          <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="lg:hidden">
+                <History aria-hidden /> History
+                {history.length > 0 && <span className="rounded-full bg-primary px-1.5 text-[11px] leading-4 text-primary-foreground">{history.length}</span>}
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-h-[85dvh] overflow-y-auto">
+              <DialogTitle>Call history</DialogTitle>
+              <DialogDescription>Receipts from earlier topics in this call and chat.</DialogDescription>
+              <RecordsSection records={history} focus={null} />
+            </DialogContent>
+          </Dialog>
+          <StatusBadge tone={active ? 'success' : state.phase === 'ended' ? 'neutral' : 'info'}>
+            {active ? state.activity : state.phase}
+          </StatusBadge>
+        </div>
       </div>
 
       <div className="mx-auto flex w-full max-w-md flex-col items-center gap-5 rounded-3xl bg-muted/70 p-6 text-center">
@@ -219,10 +271,11 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         <p className="text-xs text-muted-foreground" aria-live="polite">
           {state.phase === 'requesting' ? 'Requesting a secure call…' : state.phase === 'connecting' ? 'Connecting…' :
             active ? state.activity === 'listening' ? 'Listening' : state.activity === 'speaking' ? 'Speaking' : 'Thinking' :
-            state.phase === 'ended' ? endedText(state.endReason) : 'Press the microphone to start.'}
+            state.phase === 'ended' ? endedText(state.endReason, state.limitMs) : 'Press the microphone to start.'}
         </p>
         {active && <p className="text-xs text-muted-foreground" aria-live="polite">
-          {state.micActive ? 'Microphone is picking up your voice.' : state.activity === 'thinking' ?
+          {offerOpen ? 'Answer the offer below to continue.' :
+            state.micActive ? 'Microphone is picking up your voice.' : state.activity === 'thinking' ?
             'Waiting for Resolve to finish the spoken reply.' : 'Microphone is on. Speak, then pause for a reply.'}
         </p>}
         {(caption.user || caption.reply) && <div className="w-full space-y-3 text-left" aria-live="polite">
@@ -234,6 +287,9 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
             'Microphone unavailable. Check browser permission or continue by text.' :
             state.error.code === 'speech_unavailable' ?
               'Spoken reply is unavailable. Read the reply on screen or continue by text.' :
+            state.error.code === 'resolve_tool_failed' ?
+              'That request did not go through. Please say it again.' :
+            active ? 'Something went wrong with that turn. You can keep talking or continue by text.' :
             'Voice is unavailable. Continue by text.'}
         </p>}
         {active && <div className="flex gap-2">
@@ -244,7 +300,11 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         </div>}
       </div>
 
-      {offer && <div className="mx-auto w-full max-w-md rounded-2xl border bg-card p-5">
+      {offer && <div ref={offerRef} aria-label="Confirm an action"
+                     className={cn('mx-auto w-full max-w-md rounded-2xl border bg-card p-5', offerOpen && 'border-primary ring-2 ring-primary/40')}>
+        {offerOpen && <p role="alert" className="mb-3 rounded-xl bg-primary/10 px-3 py-2 text-sm font-medium text-primary">
+          Your answer is needed before we continue. Tap Yes, go ahead or No, leave it.
+        </p>}
         <h2 className="flex items-center gap-2 font-semibold"><ShieldCheck className="size-5" aria-hidden /> Confirm an action</h2>
         <dl className="mt-3 space-y-2 text-sm">
           <div><dt className="text-muted-foreground">Action</dt><dd>{humanize(offer.data.action_type)}</dd></div>
@@ -264,8 +324,17 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
         </p>}
       </div>}
 
-      {watchIds.length > 0 && <div className="mx-auto w-full max-w-md space-y-2" aria-label="Action statuses">
-        {visibleOperations.map((item) => <CallOperationCard key={item.id} operation={item} />)}
+      {receipts.current.length > 0 && <section className="mx-auto w-full max-w-md space-y-2" aria-label="Receipts for this topic">
+        {receipts.current.flatMap((group) => group.cards.map((card, index) => (
+          <div key={`${group.messageId}-${index}`} className="animate-bubble-in">
+            <ChatCard card={card} renderConfirmation={() => null} onPackageSelect={() => {}} packageSelectionDisabled />
+          </div>
+        )))}
+      </section>}
+
+      {(currentOperations.length > 0 || visibleOperations.length < watchIds.length || operationTrackingExhausted) &&
+        <div className="mx-auto w-full max-w-md space-y-2" aria-label="Action statuses">
+        {currentOperations.map((item) => <CallOperationCard key={item.id} operation={item} />)}
         {visibleOperations.length < watchIds.length && !operationTrackingExhausted &&
           <p role="status" className="rounded-2xl border bg-card p-4 text-sm">Checking action status…</p>}
         {operationTrackingExhausted && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card p-4 text-sm">
@@ -282,6 +351,10 @@ export function VoiceShell({ session, conversationId, onClose, onCallEnd }: {
       </p>}
       {API_MODE === 'mock' && active && <MockTurnButtons />}
     </section>
+    <aside className="hidden w-80 shrink-0 overflow-y-auto border-l px-4 py-5 lg:block" aria-label="Call history">
+      <RecordsSection records={history} focus={null} />
+    </aside>
+    </div>
   )
 }
 
@@ -320,9 +393,40 @@ function CallOperationCard({ operation }: { operation: OperationView }) {
   )
 }
 
-function endedText(reason: string | null) {
-  if (reason === 'session_limit') return `The call reached its ${CALL_LIMIT_MS / 60_000}-minute limit. Your results are below; call again or continue by text.`
+function endedText(reason: string | null, limitMs: number = CALL_LIMIT_MS) {
+  if (reason === 'session_limit') return `The call reached its ${Math.round(limitMs / 60_000)}-minute limit. Your results are below; call again or continue by text.`
+  if (reason === 'resolve_requested') return 'Thank you for calling. Your results are below; call again or continue by text.'
   return 'Call ended. Your results are below; call again or continue by text.'
+}
+
+/** Re-render every second while an offer is shown, so it unlocks the call the moment it expires. */
+function useNow(ticking: boolean) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!ticking) return
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [ticking])
+  return now
+}
+
+/** Earlier topics' receipts, answered offers and finished actions, newest first, for the History panel. */
+function callHistory(t: Translate, receipts: CallReceipts, pastOperations: OperationView[]): ChatRecord[] {
+  const records: ChatRecord[] = [
+    ...receipts.history.flatMap((group) => group.cards.map((card: Card, index) => ({
+      key: `${group.messageId}-${index}`, time: group.time, title: recordTitle(t, card),
+      node: <ChatCard card={card} renderConfirmation={() => null} onPackageSelect={() => {}} packageSelectionDisabled />,
+    }))),
+    ...receipts.pastOffers.map((offer) => ({
+      key: `${offer.messageId}-offer-${offer.card.data.id}`, time: offer.time, title: t('confirm.decision'),
+      node: <ConfirmationCard proposal={offer.card.data} state={{ kind: 'closed' }} disabled onDecide={() => {}} />,
+    })),
+    ...pastOperations.map((operation) => ({
+      key: `op-${operation.id}`, time: operation.updated_at, title: t('record.progress'),
+      node: <CallOperationCard operation={operation} />,
+    })),
+  ]
+  return records.sort((a, b) => Date.parse(b.time) - Date.parse(a.time))
 }
 
 function MockTurnButtons() {
