@@ -270,3 +270,9 @@ The signed local service path has since passed a two-turn synthetic speech probe
 ### External Voice latency qualification — 2026-10-04
 
 The no-tool Voice path waited for the full ungrounded Gemini turn before requesting speech. The external runtime now interrupts that turn as soon as Resolve returns, discards queued original audio through Gemini's boundary and streams only the grounded reply. The late-tool route reuses the saved result and stays pending through the boundary. Real synthetic Gemini 3.1 probes with a two-second Resolve stub measured first PCM 0.73 seconds after Resolve text without a tool and 0.72 seconds with a late tool; Voice suite **58/58 passed**. No shared Resolve backend/frontend code changed. Full signed browser call, physical audio and native-language review remain outstanding.
+
+### Voice spoken-decision repair — 2026-10-04
+
+The Resolve Voice confirmation prompt now states that spoken yes/no cannot authorize the proposed action and directs the caller to the visible **Yes, go ahead / No, leave it** buttons. Focused tests confirm repeated spoken yes leaves the same proposal pending and never invokes action confirmation. This is a narrow shared conversation-template change; action execution and permissions are unchanged. The project-venv backend suite passed **450 tests**, with **40 disposable-PostgreSQL checks skipped**. The customer call frontend and mock consent path were updated separately; frontend typecheck/lint passed and the complete mock browser suite passed **27/27**. H-08 still requires physical and multilingual qualification.
+
+Implementation commit: **4156679** on `hutch_resolve/voice_test`.

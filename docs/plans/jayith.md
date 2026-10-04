@@ -91,3 +91,9 @@ The customer call UI now sends `input_audio_end` after seven 100 ms quiet frames
 The current call UI offers `zeptaz-hutch-v3`, sends an increasing activity segment ID after two speech frames and ends it after seven quiet frames, keeps sending microphone PCM during replies, and flushes queued playback on new caller speech. `input_audio_end` now marks a mute/pause. A mock browser test exercises interruption while PCM keeps flowing; the complete mock browser suite **25/25**, typecheck and lint pass. Real browser microphone/speaker interruption and native-language checks remain open, so J-03/J-04 are not marked complete.
 
 The external Voice/Resolve signed service path later passed two synthetic spoken turns on one v3 WebSocket with real Gemini and two accepted playback acknowledgements. This probe did not use the browser audio capture/playback UI. Keep J-03/J-04 open until a human browser microphone/speaker interruption and native-language review pass.
+
+### Call offer persistence — 2026-10-04
+
+The call panel now retains a pending offer across subsequent Voice results that omit proposal cards. It refreshes the scoped conversation and treats its `pending_proposal` as authoritative for removal or replacement. The visible decision buttons wait until the current spoken turn has a Resolve reply, and the mock transport cannot present an offer for spoken consent. A mock browser journey verified spoken yes leaves the offer visible until the button decision; canonical reconciliation has a separate browser regression. Typecheck/lint and mock browser **27/27** passed. J-03/J-04 remain open for physical audio, interruption and native-language review.
+
+Implementation commit: **4156679** on `hutch_resolve/voice_test`.
