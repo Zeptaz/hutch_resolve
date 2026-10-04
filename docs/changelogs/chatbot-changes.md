@@ -268,3 +268,19 @@ Voice consent prompts.
   reported Sinhala message on SIM-LK-0001 lists recharge +1,000, renewal −499, VAS −60, usage −21, two demo
   package purchases −49/−299, recorded LKR 72.00.
 - Core dependency: none.
+
+### CB-009 — A vague question during an open case ended at "I don't have reviewed information"
+
+- Date / status: 2026-10-04 — DONE on `integration/voice-crm`, verified
+- Risk: **LOW** — only changes the no-knowledge-card FAQ reply for a signed-in customer with an active case;
+  guests and customers without a case keep the old reply. Uses the existing read-only status path.
+- Files: `conversation/service.py` (`_faq`), `conversation/templates.py` (`faq_none_case`, English-only until
+  reviewed), `tests/conversation/test_text_routing.py`.
+- What changed / why: in a Sinhala Voice call, right after accepting a review, "ආවාට පස්සේ කරන්න පුළුවන්
+  කියලා මට පැහැදිලි කරන්න පුළුවන්ද?" ("explain what can be done after it comes?" — the subject was likely
+  lost in transcription) was extracted as FAQ, matched no card and hit the dead end. With "review" in the
+  sentence the same model returns FOLLOW_UP. Now an unmatched FAQ during an open case answers with that case's
+  status (review state, delivery, ticket number, receipt) after "I'm not sure I caught that".
+- Verification: unit 529 passed (1 new; the guest dead-end test still passes); live API replay as SIM-LK-0001
+  (complaint → button accept → the same sentence) returns the case status with ticket and receipt.
+- Core dependency: none.

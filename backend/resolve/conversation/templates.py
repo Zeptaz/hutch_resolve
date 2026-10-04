@@ -63,6 +63,7 @@ _EN: dict[str, str] = {
     "human_needs_case": "I can pass this to a person with all the details. First, tell me what the problem is.",
     "default_escalation_reason": "Customer asked for a person to review this case.",
     "faq_none": "I don't have reviewed information on that yet. I can help with your balance, recharges, data, connection or service charges.",
+    "faq_none_case": "I'm not sure I caught that, so here is where your request stands.",
     "guest_help": "I can answer general questions. To check your own account, please sign in first.",
     "account_balance": "Your {wallet} balance is {amount} (as of {as_of}).",
     "account_no_balance": "I couldn't find a balance for your account right now.",
@@ -175,7 +176,7 @@ ENGLISH: dict[str, dict[str, str]] = {
 NOT_LOCALIZED = frozenset({
     "default_escalation_reason", "package_selection_unavailable", "PACKAGE_ACTIVATION",
     "offer_action_voice", "other_options_voice", "offer_still_open_voice", "confirm_prompt_voice",
-    "ledger_lines",  # English until the SI/TA drafts gain a reviewed wording
+    "ledger_lines", "faq_none_case",  # English until the SI/TA drafts gain a reviewed wording
 })
 LOCALES_DIR = Path(__file__).with_name("locales")
 REVIEWED = "REVIEWED"

@@ -696,6 +696,11 @@ class ConversationService:
         """Reviewed knowledge cards only; guests allowed; never account data."""
         lang = _lang(state)
         cards = await self._knowledge.search(ctx, ex.faq_query or text, state.language, limit=3)
+        if not cards and state.active_case_id is not None and _is_customer(ctx):
+            # A vague or misheard question during an open case (often Voice, e.g. "what happens after it
+            # comes?" after a review) is about that case: say where it stands instead of a dead end.
+            draft, new_state = await self._status(ctx, state)
+            return _prefixed(draft, t.text("faq_none_case", lang)), new_state
         if not cards:
             return TurnDraft(reply_text=t.text("faq_none", lang), case_id=state.active_case_id,
                              rewrite_allowed=not t.locale_active(lang)), state

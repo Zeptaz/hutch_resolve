@@ -413,3 +413,17 @@ def test_faq_answers_never_reveal_another_conversation(hm: Harness) -> None:
     assert "LKR" not in result.reply_text and "differs" not in result.reply_text
     assert result.case_id is None and result.cards == []
     assert secret.case_id not in {result.case_id}
+
+
+def test_unmatched_question_during_an_open_case_reports_the_case_instead_of_a_dead_end(hm: Harness) -> None:
+    """Voice heard "can you explain what can be done after it comes?" right after a review was accepted."""
+    vague = "ආවාට පස්සේ කරන්න පුළුවන් කියලා මට පැහැදිලි කරන්න පුළුවන්ද?"
+    hm.model.on("mage balance eka adu wela", BALANCE)
+    hm.model.on(vague, extraction(intent="FAQ", detected_language="si", faq_query="explain what can be done after"))
+    ctx = customer(ACCOUNT_A)
+    conv = hm.open(ctx)
+    hm.send(ctx, hm.turn(conv, text("mage balance eka adu wela"), language="si"))
+    result = hm.send(ctx, hm.turn(conv, text(vague), language="si"))
+    assert result.reply_text.startswith("I'm not sure I caught that, so here is where your request stands. Your ")
+    assert "don't have reviewed information" not in result.reply_text
+    assert result.case_id is not None
